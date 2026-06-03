@@ -54,6 +54,16 @@
       </p>
     </div>
 
+    <!-- Unteres Bedienfeld: führt Schritt für Schritt durch die
+         Grundstücksauswahl (erscheint erst, wenn eine Adresse gefunden ist). -->
+    <div id="gp-panel" class="panel" hidden>
+      <p id="gp-text" class="panel__text"></p>
+      <div class="panel__buttons">
+        <button id="gp-zurueck" class="btn btn--ghost" type="button" hidden></button>
+        <button id="gp-aktion" class="btn btn--primary" type="button"></button>
+      </div>
+    </div>
+
     <!-- Einstiegspunkt: Vite lädt von hier unseren JavaScript-Code. -->
     <script type="module" src="/src/main.js"></script>
   </body>

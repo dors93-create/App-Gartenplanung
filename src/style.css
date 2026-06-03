@@ -203,3 +203,103 @@ body {
   box-shadow: var(--shadow-lift);
   border: 3px solid #fff;
 }
+
+/* 7. Unteres Bedienfeld (Grundstücksauswahl) ----------------------------- */
+.panel {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: max(18px, env(safe-area-inset-bottom));
+  width: min(560px, calc(100% - 24px));
+  z-index: 10;
+
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+  padding: 14px 16px;
+
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.panel__text {
+  margin: 0;
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.panel__buttons {
+  flex: none;
+  display: flex;
+  gap: 8px;
+}
+
+/* Buttons: ein klarer Primär-Button (grün) + dezenter Zweit-Button */
+.btn {
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 10px 16px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.btn--primary {
+  background: var(--accent);
+  color: #fff;
+}
+.btn--primary:hover {
+  background: var(--accent-strong);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--text-muted);
+}
+.btn--ghost:hover {
+  background: var(--bg);
+}
+
+/* Auf schmalen Handys: Text oben, Buttons darunter in voller Breite */
+@media (max-width: 480px) {
+  .panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .panel__buttons {
+    justify-content: flex-end;
+  }
+}
+
+/* 8. Maß-Beschriftungen auf der Karte ------------------------------------ */
+/* Seitenlängen an den Kanten des Grundstücks */
+.masslabel {
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 6px;
+  box-shadow: var(--shadow-soft);
+  white-space: nowrap;
+  pointer-events: none; /* nicht klickbar – stört die Karte nicht */
+}
+
+/* Hervorgehobene Beschriftung in der Mitte: die Gesamtfläche */
+.masslabel--flaeche {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* Während der Auswahl: Fadenkreuz-Cursor signalisiert „jetzt tippen“ */
+.gp-auswahl-cursor .maplibregl-canvas {
+  cursor: crosshair;
+}

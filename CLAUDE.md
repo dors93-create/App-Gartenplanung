@@ -13,13 +13,23 @@ auch Nicht-Programmierer:innen dem Projekt folgen können.
 - Bildschirmfüllende, interaktive Karte (MapLibre GL JS).
 - Hintergrund: NRW-Luftbild (DOP) als WMS-Layer `nw_dop_rgb` vom Dienst
   `https://www.wms.nrw.de/geobasis/wms_nw_dop`.
-- Suchfeld mit Adresssuche (Geocoding) über die kostenlose Nominatim-API.
-  Die Karte fliegt sanft zur gefundenen Adresse.
+- Suchfeld mit Adresssuche (Geocoding) über die kostenlose Nominatim-API,
+  inkl. Vorschlägen während des Tippens. Die Karte fliegt sanft zur Adresse.
 - Oberfläche komplett auf Deutsch.
+
+**Schritt 2 ist umgesetzt – Grundstück auswählen:**
+
+- Über das untere Bedienfeld auf das eigene Grundstück tippen.
+- Das amtliche Flurstück wird aus dem NRW-Kataster (ALKIS) geholt:
+  WFS `wfs_nw_alkis_vereinfacht`, Objektart `ave:Flurstueck`.
+  Der Dienst erlaubt direkten Browser-Zugriff (CORS) und liefert GML (XML)
+  in EPSG:25832 (UTM, Meter).
+- Nach „OK" wird alles außerhalb des Grundstücks weiß ausgeblendet und das
+  Grundstück bemaßt (Seitenlängen in Metern + Fläche in m², direkt aus den
+  UTM-Koordinaten gerechnet – amtlich genau).
 
 **Geplant (jeweils als eigener, späterer Schritt):**
 
-- Grundstück zeichnen
 - Elemente platzieren (Beete, Bäume, Wege …)
 
 ## Technik
@@ -27,17 +37,26 @@ auch Nicht-Programmierer:innen dem Projekt folgen können.
 - **Build-Tool:** [Vite](https://vitejs.dev/) (schneller Dev-Server + Build).
 - **Karte:** [MapLibre GL JS](https://maplibre.org/) (freie Karten-Bibliothek).
 - **Geocoding:** [Nominatim](https://nominatim.org/) (OpenStreetMap, kostenlos).
+- **Kataster:** WFS `wfs_nw_alkis_vereinfacht` (Geobasis NRW) für Flurstücke.
+- **Umrechnung:** [proj4](https://github.com/proj4js/proj4js) (EPSG:25832 ↔ 4326).
 - **Schrift:** Geist (über `@fontsource-variable/geist` selbst gehostet).
 - Reines JavaScript (kein Framework), damit der Code leicht lesbar bleibt.
 
 ## Projektstruktur
 
 ```
-index.html        Grundgerüst der Seite (Karte + Suchleiste)
-src/main.js       Gesamte Logik: Karte, Luftbild-Layer, Adresssuche
-src/style.css     Gestaltung (Design-Tokens, Suchleiste, Marker)
-CLAUDE.md         Diese Übersicht
+index.html            Grundgerüst (Karte, Suchleiste, unteres Bedienfeld)
+src/main.js           Karte, Luftbild-Layer, Adresssuche/-vervollständigung
+src/grundstueck.js    Schritt 2: Flurstück abrufen, ausblenden, bemaßen
+src/style.css         Gestaltung (Design-Tokens, Suchleiste, Panel, Maße)
+CLAUDE.md             Diese Übersicht
 ```
+
+## Veröffentlichung
+
+Jeder Push auf den Branch wird per GitHub Actions automatisch gebaut und auf
+GitHub Pages veröffentlicht (`.github/workflows/deploy.yml`). Live-Adresse:
+`https://dors93-create.github.io/App-Gartenplanung/`.
 
 ## Lokal starten
 

@@ -21,6 +21,9 @@ import "@fontsource-variable/geist";
 // Unsere eigene Gestaltung.
 import "./style.css";
 
+// Logik für die Grundstücksauswahl (Schritt 2) in eigener Datei.
+import { initGrundstueck } from "./grundstueck.js";
+
 // -------------------------------------------------------------------------
 // 1. Konfiguration
 // -------------------------------------------------------------------------
@@ -90,6 +93,9 @@ map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-rig
 
 // Ein einzelner Marker, den wir bei jeder Suche wiederverwenden.
 let marker = null;
+
+// Steuerung der Grundstücksauswahl (Schritt 2) einrichten.
+const grundstueck = initGrundstueck(map);
 
 // -------------------------------------------------------------------------
 // 3. Verweise auf die HTML-Elemente der Suchleiste
@@ -223,7 +229,10 @@ function selectPlace(place) {
   if (laufendeSuche) laufendeSuche.abort();
   input.value = place.display_name.split(",")[0];
   clearResults();
-  showHint("Gefunden – du kannst die Karte jetzt frei erkunden.");
+  showHint("Gefunden. Wähle als Nächstes dein Grundstück aus.");
+
+  // Schritt 2 anbieten: das untere Bedienfeld erscheint.
+  grundstueck.zeigeStart();
 }
 
 // -------------------------------------------------------------------------
