@@ -4,10 +4,12 @@
 // Ablauf für die Nutzer:in:
 //   1. Adresse suchen (das passiert in main.js).
 //   2. "Grundstück auswählen" -> auf das eigene Grundstück tippen.
-//   3. Das amtliche Flurstück (NRW-Kataster, ALKIS) wird abgerufen und farbig
-//      hervorgehoben; Seitenlängen und Fläche werden angezeigt.
-//   4. "OK, übernehmen" -> alles außerhalb des Grundstücks wird weiß
-//      ausgeblendet; nur das Grundstück bleibt sichtbar – mit Bemaßung.
+//      Es können MEHRERE Flurstücke gewählt werden: erneutes Tippen auf ein
+//      bereits markiertes Flurstück hebt die Markierung wieder auf.
+//   3. Die gewählten Flurstücke (NRW-Kataster, ALKIS) werden farbig
+//      hervorgehoben.
+//   4. "OK, übernehmen" -> alles außerhalb der gewählten Flurstücke wird weiß
+//      ausgeblendet; jedes Flurstück wird bemaßt (Seitenlängen + Gesamtfläche).
 //
 // Technischer Hintergrund (siehe auch CLAUDE.md):
 //   - Daten vom WFS "wfs_nw_alkis_vereinfacht" (Objektart Flurstueck).
@@ -39,8 +41,8 @@ const nach25832 = (lng, lat) => proj4("EPSG:4326", "EPSG:25832", [lng, lat]);
 const nachLngLat = (e, n) => proj4("EPSG:25832", "EPSG:4326", [e, n]);
 
 // IDs der Karten-Quellen/-Ebenen, die wir anlegen.
-const SRC_FLUR = "gp-flurstueck"; // das gewählte Flurstück (Vieleck)
-const SRC_MASKE = "gp-maske"; // weiße Maske mit „Loch“ = Grundstück
+const SRC_FLUR = "gp-flurstueck"; // die gewählten Flurstücke (Vielecke)
+const SRC_MASKE = "gp-maske"; // weiße Maske mit „Löchern“ = Grundstück
 const LAYER_MASKE = "gp-maske-fill";
 const LAYER_FILL = "gp-flurstueck-fill";
 const LAYER_LINIE = "gp-flurstueck-linie";
@@ -68,10 +70,10 @@ export function initGrundstueck(map) {
   const btnAktion = document.getElementById("gp-aktion"); // grüner Hauptknopf
   const btnZurueck = document.getElementById("gp-zurueck"); // dezenter Knopf
 
-  // Zustand der Auswahl: "aus" | "bereit" | "auswaehlen" | "vorschau" | "fertig"
+  // Zustand der Auswahl: "aus" | "bereit" | "auswaehlen" | "fertig"
   let zustand = "aus";
-  // Das aktuell hervorgehobene Flurstück (Ergebnis eines Klicks).
-  let aktuell = null;
+  // Liste der aktuell gewählten Flurstücke (Mehrfachauswahl möglich).
+  let auswahl = [];
   // Liste der Maß-Beschriftungen (HTML-Marker), damit wir sie aufräumen können.
   let masseMarker = [];
 
@@ -122,7 +124,7 @@ export function initGrundstueck(map) {
 
   // -----------------------------------------------------------------------
   // GML (XML) des Dienstes auswerten -> Liste von Flurstücken.
-  // Jedes Flurstück: { ring25832: [[e,n],...], ringLngLat: [[lng,lat],...],
+  // Jedes Flurstück: { id, ring25832: [[e,n],...], ringLngLat: [[lng,lat],...],
   //                    info: "Gemarkung …, Flur …, Flurstück …" }
   // -----------------------------------------------------------------------
   function leseFlurstuecke(xmlText) {
@@ -158,6 +160,9 @@ export function initGrundstueck(map) {
       if (feld("flstnrzae")) teile.push("Flurstück " + feld("flstnrzae"));
 
       ergebnisse.push({
+        // Eindeutige Kennung (Flurstückskennzeichen) – damit wir beim erneuten
+        // Antippen erkennen, ob ein Flurstück schon gewählt ist.
+        id: feld("flstkennz") || feld("oid") || ring25832[0].join(","),
         ring25832,
         ringLngLat,
         info: teile.join(", "),
@@ -181,8 +186,8 @@ export function initGrundstueck(map) {
   }
 
   // -----------------------------------------------------------------------
-  // Maße berechnen: Seitenlängen (Meter) und Fläche (m²) – direkt in UTM,
-  // also amtlich genau, ohne Verzerrung durch Lat/Lon.
+  // Maße eines Flurstücks: Seitenlängen (Meter) und Fläche (m²) – direkt in
+  // UTM, also amtlich genau, ohne Verzerrung durch Lat/Lon.
   // -----------------------------------------------------------------------
   function berechneMasse(ring25832) {
     const seiten = [];
@@ -224,26 +229,32 @@ export function initGrundstueck(map) {
   }
 
   // -----------------------------------------------------------------------
-  // Anzeige: gewähltes Flurstück als Vorschau (grün) auf der Karte zeigen.
+  // Anzeige: alle gewählten Flurstücke als Vorschau (grün) auf der Karte.
   // -----------------------------------------------------------------------
-  function zeigeVorschau(flurstueck) {
+  function zeigeAuswahl() {
     ebenenSicherstellen();
-    const feature = {
-      type: "Feature",
-      geometry: { type: "Polygon", coordinates: [flurstueck.ringLngLat] },
+    const fc = {
+      type: "FeatureCollection",
+      features: auswahl.map((f) => ({
+        type: "Feature",
+        geometry: { type: "Polygon", coordinates: [f.ringLngLat] },
+      })),
     };
-    map.getSource(SRC_FLUR).setData(feature);
-    zeige(LAYER_FILL, true);
-    zeige(LAYER_LINIE, true);
+    map.getSource(SRC_FLUR).setData(fc);
+
+    const hatAuswahl = auswahl.length > 0;
+    zeige(LAYER_FILL, hatAuswahl);
+    zeige(LAYER_LINIE, hatAuswahl);
     zeige(LAYER_MASKE, false);
     masseLoeschen();
   }
 
   // -----------------------------------------------------------------------
-  // OK: Umgebung weiß ausblenden und das Grundstück bemaßen.
+  // OK: Umgebung weiß ausblenden und alle gewählten Flurstücke bemaßen.
+  // Gibt die Gesamtfläche (m²) zurück.
   // -----------------------------------------------------------------------
-  function uebernehmen(flurstueck) {
-    // Weiße Maske = ganze Welt mit einem „Loch“ in Form des Grundstücks.
+  function uebernehmen() {
+    // Weiße Maske = ganze Welt mit einem „Loch“ je gewähltem Flurstück.
     const welt = [
       [-180, -85],
       [180, -85],
@@ -251,36 +262,42 @@ export function initGrundstueck(map) {
       [-180, 85],
       [-180, -85],
     ];
+    const loecher = auswahl.map((f) => f.ringLngLat);
     const maske = {
       type: "Feature",
-      geometry: {
-        type: "Polygon",
-        coordinates: [welt, flurstueck.ringLngLat], // 2. Ring = Loch
-      },
+      geometry: { type: "Polygon", coordinates: [welt, ...loecher] },
     };
     map.getSource(SRC_MASKE).setData(maske);
 
     zeige(LAYER_MASKE, true); // Umgebung weiß
     zeige(LAYER_FILL, false); // grüne Füllung weg (freier Blick aufs Grundstück)
-    zeige(LAYER_LINIE, true); // Umriss bleibt
+    zeige(LAYER_LINIE, true); // Umrisse bleiben
 
-    // Bemaßung anlegen.
-    const { seiten, flaeche } = berechneMasse(flurstueck.ring25832);
+    // Bemaßung: je Flurstück die Seitenlängen, dazu eine Gesamtfläche.
     masseLoeschen();
-
-    // Seitenlängen: je ein Etikett in der Mitte jeder Kante.
-    const ring = flurstueck.ringLngLat;
-    seiten.forEach((seite, i) => {
-      const [lng1, lat1] = ring[i];
-      const [lng2, lat2] = ring[i + 1];
-      const mitte = [(lng1 + lng2) / 2, (lat1 + lat2) / 2];
-      masseMarker.push(etikett(mitte, meter(seite.laenge), "masslabel"));
+    let gesamtflaeche = 0;
+    auswahl.forEach((f) => {
+      const { seiten, flaeche } = berechneMasse(f.ring25832);
+      gesamtflaeche += flaeche;
+      const ring = f.ringLngLat;
+      seiten.forEach((seite, i) => {
+        const [lng1, lat1] = ring[i];
+        const [lng2, lat2] = ring[i + 1];
+        const mitte = [(lng1 + lng2) / 2, (lat1 + lat2) / 2];
+        masseMarker.push(etikett(mitte, meter(seite.laenge), "masslabel"));
+      });
     });
 
-    // Fläche: ein hervorgehobenes Etikett im Schwerpunkt.
+    // Gesamtfläche: ein hervorgehobenes Etikett im (flächengewichteten) Mittel.
     masseMarker.push(
-      etikett(schwerpunkt(ring), quadratmeter(flaeche), "masslabel masslabel--flaeche"),
+      etikett(
+        gesamtSchwerpunkt(auswahl),
+        quadratmeter(gesamtflaeche),
+        "masslabel masslabel--flaeche",
+      ),
     );
+
+    return gesamtflaeche;
   }
 
   // Ein HTML-Etikett als Karten-Marker an einer Lat/Lon-Position erzeugen.
@@ -291,7 +308,7 @@ export function initGrundstueck(map) {
     return new maplibregl.Marker({ element: el }).setLngLat(lngLat).addTo(map);
   }
 
-  // Einfacher Schwerpunkt (Mittel aller Eckpunkte) – genügt zum Beschriften.
+  // Einfacher Schwerpunkt eines Rings (Mittel aller Eckpunkte).
   function schwerpunkt(ring) {
     let lng = 0,
       lat = 0;
@@ -303,11 +320,27 @@ export function initGrundstueck(map) {
     return [lng / n, lat / n];
   }
 
+  // Gemeinsamer Schwerpunkt mehrerer Flurstücke (nach Fläche gewichtet),
+  // damit das Flächen-Etikett sinnvoll platziert ist.
+  function gesamtSchwerpunkt(flurstuecke) {
+    let lng = 0,
+      lat = 0,
+      gewicht = 0;
+    flurstuecke.forEach((f) => {
+      const [cx, cy] = schwerpunkt(f.ringLngLat);
+      const a = berechneMasse(f.ring25832).flaeche || 1;
+      lng += cx * a;
+      lat += cy * a;
+      gewicht += a;
+    });
+    return [lng / gewicht, lat / gewicht];
+  }
+
   // -----------------------------------------------------------------------
-  // Alles zurücksetzen (Grafik + Maße entfernen).
+  // Alles zurücksetzen (Auswahl + Grafik + Maße entfernen).
   // -----------------------------------------------------------------------
   function aufraeumen() {
-    aktuell = null;
+    auswahl = [];
     masseLoeschen();
     if (map.getSource(SRC_FLUR)) {
       const leer = { type: "FeatureCollection", features: [] };
@@ -320,9 +353,28 @@ export function initGrundstueck(map) {
   }
 
   // -----------------------------------------------------------------------
+  // Während des Auswählens: Text + Hauptknopf an die Anzahl anpassen.
+  // -----------------------------------------------------------------------
+  function aktualisiereAuswahlText() {
+    const n = auswahl.length;
+    if (n === 0) {
+      panelText.textContent = "Tippe auf dein Grundstück (mehrere möglich).";
+      btnAktion.hidden = true; // ohne Auswahl gibt es nichts zu übernehmen
+    } else {
+      panelText.textContent =
+        n === 1
+          ? "1 Flurstück gewählt – tippe für weitere oder bestätige mit „OK“."
+          : n +
+            " Flurstücke gewählt – tippe zum Hinzufügen/Entfernen oder „OK“.";
+      btnAktion.hidden = false;
+      btnAktion.textContent = "OK, übernehmen";
+    }
+  }
+
+  // -----------------------------------------------------------------------
   // Zustands-Wechsel: passt Bedienfeld, Cursor und Karte an.
   // -----------------------------------------------------------------------
-  function setze(neuerZustand) {
+  function setze(neuerZustand, gesamtflaeche) {
     zustand = neuerZustand;
 
     // Fadenkreuz nur während des Auswählens.
@@ -334,39 +386,34 @@ export function initGrundstueck(map) {
     if (zustand === "bereit") {
       panel.hidden = false;
       panelText.textContent = "Wähle dein Grundstück auf der Karte aus.";
+      btnAktion.hidden = false;
       btnAktion.textContent = "Grundstück auswählen";
       btnZurueck.hidden = true;
     } else if (zustand === "auswaehlen") {
       panel.hidden = false;
-      panelText.textContent = "Tippe auf dein Grundstück.";
-      btnAktion.hidden = true;
       btnZurueck.hidden = false;
       btnZurueck.textContent = "Abbrechen";
-    } else if (zustand === "vorschau") {
-      panel.hidden = false;
-      btnAktion.hidden = false;
-      panelText.textContent = aktuell.info
-        ? aktuell.info + " – passt das?"
-        : "Grundstück gefunden – passt das?";
-      btnAktion.textContent = "OK, übernehmen";
-      btnZurueck.hidden = false;
-      btnZurueck.textContent = "Anderes wählen";
+      aktualisiereAuswahlText();
     } else if (zustand === "fertig") {
       panel.hidden = false;
       btnAktion.hidden = true;
-      panelText.textContent = aktuell.info
-        ? "Übernommen: " + aktuell.info + "."
-        : "Grundstück übernommen.";
       btnZurueck.hidden = false;
       btnZurueck.textContent = "Neu beginnen";
+      const n = auswahl.length;
+      panelText.textContent =
+        (n === 1 ? "1 Flurstück" : n + " Flurstücke") +
+        " übernommen – Fläche " +
+        quadratmeter(gesamtflaeche || 0) +
+        ".";
     }
   }
 
   // -----------------------------------------------------------------------
-  // Klick auf die Karte: nur während Auswahl/Vorschau ein Flurstück holen.
+  // Klick auf die Karte: nur während des Auswählens. Ein Flurstück wird
+  // hinzugefügt – oder, wenn es schon gewählt ist, wieder entfernt (Umschalten).
   // -----------------------------------------------------------------------
   map.on("click", async (e) => {
-    if (zustand !== "auswaehlen" && zustand !== "vorschau") return;
+    if (zustand !== "auswaehlen") return;
 
     panelText.textContent = "Suche Flurstück …";
     try {
@@ -376,9 +423,17 @@ export function initGrundstueck(map) {
           "Hier wurde kein Flurstück gefunden. Bitte direkt auf das Grundstück tippen.";
         return;
       }
-      aktuell = flurstueck;
-      zeigeVorschau(flurstueck);
-      setze("vorschau");
+
+      // Schon gewählt? Dann entfernen (Umschalten), sonst hinzufügen.
+      const index = auswahl.findIndex((f) => f.id === flurstueck.id);
+      if (index >= 0) {
+        auswahl.splice(index, 1);
+      } else {
+        auswahl.push(flurstueck);
+      }
+
+      zeigeAuswahl();
+      aktualisiereAuswahlText();
     } catch (fehler) {
       console.error(fehler);
       panelText.textContent = "Kataster-Dienst gerade nicht erreichbar.";
@@ -390,19 +445,17 @@ export function initGrundstueck(map) {
   // -----------------------------------------------------------------------
   btnAktion.addEventListener("click", () => {
     if (zustand === "bereit") {
-      setze("auswaehlen"); // los geht's: auf das Grundstück tippen
-    } else if (zustand === "vorschau") {
-      uebernehmen(aktuell); // weiß ausblenden + bemaßen
-      setze("fertig");
+      setze("auswaehlen"); // los geht's: auf das/die Grundstück(e) tippen
+    } else if (zustand === "auswaehlen" && auswahl.length > 0) {
+      const gesamt = uebernehmen(); // weiß ausblenden + bemaßen
+      setze("fertig", gesamt);
     }
   });
 
   btnZurueck.addEventListener("click", () => {
     if (zustand === "auswaehlen") {
-      setze("bereit"); // Auswahl abgebrochen
-    } else if (zustand === "vorschau") {
       aufraeumen();
-      setze("auswaehlen"); // erneut tippen
+      setze("bereit"); // Auswahl abgebrochen
     } else if (zustand === "fertig") {
       aufraeumen();
       setze("bereit"); // ganz von vorn

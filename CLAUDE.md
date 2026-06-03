@@ -19,14 +19,16 @@ auch Nicht-Programmierer:innen dem Projekt folgen können.
 
 **Schritt 2 ist umgesetzt – Grundstück auswählen:**
 
-- Über das untere Bedienfeld auf das eigene Grundstück tippen.
+- Über das untere Bedienfeld auf das eigene Grundstück tippen. Mehrere
+  Flurstücke sind möglich: erneutes Antippen eines markierten Flurstücks hebt
+  die Markierung wieder auf (Umschalten).
 - Das amtliche Flurstück wird aus dem NRW-Kataster (ALKIS) geholt:
   WFS `wfs_nw_alkis_vereinfacht`, Objektart `ave:Flurstueck`.
   Der Dienst erlaubt direkten Browser-Zugriff (CORS) und liefert GML (XML)
   in EPSG:25832 (UTM, Meter).
-- Nach „OK" wird alles außerhalb des Grundstücks weiß ausgeblendet und das
-  Grundstück bemaßt (Seitenlängen in Metern + Fläche in m², direkt aus den
-  UTM-Koordinaten gerechnet – amtlich genau).
+- Nach „OK" wird alles außerhalb der gewählten Flurstücke weiß ausgeblendet;
+  jedes Flurstück wird bemaßt (Seitenlängen in Metern) und die Gesamtfläche in
+  m² angezeigt – direkt aus den UTM-Koordinaten gerechnet (amtlich genau).
 
 **Geplant (jeweils als eigener, späterer Schritt):**
 
