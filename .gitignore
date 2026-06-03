@@ -1,0 +1,11 @@
+# Abhängigkeiten (werden mit `npm install` erzeugt – gehören nicht ins Git)
+node_modules/
+
+# Build-Ausgabe von Vite
+dist/
+
+# Lokale Logs & Editor-/System-Dateien
+*.log
+.DS_Store
+.vscode/
+.idea/

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- mobile-first: korrekte Skalierung auf dem Handy, Notch-/Safe-Area-Unterstützung -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta
+      name="description"
+      content="Grünriss – plane deinen Garten in NRW auf dem aktuellen Luftbild."
+    />
+    <title>Grünriss – Gartenplanung für NRW</title>
+  </head>
+  <body>
+    <!-- Die Karte füllt den gesamten Bildschirm. -->
+    <div id="map"></div>
+
+    <!-- Schwebende Suchleiste – das Hauptelement der Oberfläche. -->
+    <div class="search" role="search">
+      <form id="search-form" class="search__box" autocomplete="off">
+        <!-- Lupen-Icon (Inline-SVG, damit wir keine zusätzliche Bild-Datei brauchen) -->
+        <svg
+          class="search__icon"
+          viewBox="0 0 24 24"
+          width="20"
+          height="20"
+          aria-hidden="true"
+        >
+          <circle cx="11" cy="11" r="7"></circle>
+          <line x1="16.5" y1="16.5" x2="21" y2="21"></line>
+        </svg>
+
+        <input
+          id="search-input"
+          class="search__input"
+          type="text"
+          name="adresse"
+          placeholder="Adresse eingeben, um zu starten …"
+          aria-label="Adresse suchen"
+        />
+
+        <!-- Lade-Spinner (nur sichtbar während der Adresssuche) -->
+        <span id="search-spinner" class="search__spinner" hidden></span>
+      </form>
+
+      <!-- Trefferliste der Adresssuche (wird per JavaScript gefüllt) -->
+      <ul id="search-results" class="results" hidden></ul>
+
+      <!-- Hinweis im leeren Zustand bzw. Fehlermeldungen -->
+      <p id="search-hint" class="search__hint">
+        Gib deine Adresse ein, um zu starten.
+      </p>
+    </div>
+
+    <!-- Einstiegspunkt: Vite lädt von hier unseren JavaScript-Code. -->
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

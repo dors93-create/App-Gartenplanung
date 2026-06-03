@@ -1,0 +1,205 @@
+/* =========================================================================
+   Grünriss – Stildatei
+   -------------------------------------------------------------------------
+   Aufbau:
+   1. Design-Tokens (Farben, Schatten, Radien) als CSS-Variablen
+   2. Grundlagen / Reset
+   3. Karte
+   4. Suchleiste (Hauptelement)
+   5. Trefferliste
+   6. Marker (Stecknadel auf der Karte)
+   Wir nutzen genau EINE Akzentfarbe (frisches Grün), sonst neutrale Grautöne.
+   ========================================================================= */
+
+/* 1. Design-Tokens ------------------------------------------------------- */
+:root {
+  /* Akzent: ein frisches Grün – sehr sparsam eingesetzt */
+  --accent: #16a34a;
+  --accent-strong: #15803d;
+
+  /* Neutrale Grautöne (hell, ruhig) */
+  --bg: #f5f6f7;
+  --surface: #ffffff;
+  --text: #1c1f23;
+  --text-muted: #6b7280;
+  --border: #eceef0;
+
+  /* Sanfte Schatten statt harter Rahmen */
+  --shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.04),
+    0 8px 24px rgba(16, 24, 40, 0.08);
+  --shadow-lift: 0 2px 4px rgba(16, 24, 40, 0.06),
+    0 12px 32px rgba(16, 24, 40, 0.14);
+
+  /* Dezent abgerundete Ecken */
+  --radius: 14px;
+  --radius-sm: 10px;
+}
+
+/* 2. Grundlagen ---------------------------------------------------------- */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  /* Geist als moderne, klare Sans-Serif; system-ui nur als Notfall-Fallback */
+  font-family: "Geist Variable", system-ui, -apple-system, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  /* Schärfere Schrift auf macOS/iOS */
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 3. Karte --------------------------------------------------------------- */
+#map {
+  position: absolute;
+  inset: 0; /* füllt den gesamten Bildschirm */
+  background: var(--bg); /* heller Hintergrund, solange das Luftbild lädt */
+}
+
+/* Die Standard-Bedienelemente von MapLibre dezenter einpassen */
+.maplibregl-ctrl-bottom-right {
+  margin: 8px;
+}
+.maplibregl-ctrl-attrib {
+  border-radius: var(--radius-sm) !important;
+  font-size: 11px;
+}
+
+/* 4. Suchleiste (Hauptelement) ------------------------------------------ */
+.search {
+  position: absolute;
+  /* oben, schwebend – mit Beachtung der Notch/Safe-Area auf dem Handy */
+  top: max(16px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 24px));
+  z-index: 10;
+}
+
+.search__box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: 0 14px;
+  height: 56px;
+  transition: box-shadow 0.2s ease;
+}
+
+/* Beim Fokus leicht „anheben“ – ohne harten Rahmen */
+.search__box:focus-within {
+  box-shadow: var(--shadow-lift);
+}
+
+.search__icon {
+  flex: none;
+  color: var(--text-muted);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.search__box:focus-within .search__icon {
+  color: var(--accent);
+}
+
+.search__input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 16px; /* >=16px verhindert das Auto-Zoomen auf iOS */
+  color: var(--text);
+}
+
+.search__input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Lade-Spinner */
+.search__spinner {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Hinweistext / Fehlermeldung unter dem Suchfeld */
+.search__hint {
+  margin: 10px 4px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+  /* leichter Halo, damit der Text auch über hellem Luftbild lesbar bleibt */
+  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.8);
+}
+
+.search__hint.is-error {
+  color: var(--accent-strong);
+}
+
+/* 5. Trefferliste -------------------------------------------------------- */
+.results {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 6px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.results__item {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.results__item:hover,
+.results__item.is-active {
+  background: var(--bg);
+}
+
+.results__title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.results__subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* 6. Marker (Stecknadel) ------------------------------------------------- */
+.marker {
+  width: 22px;
+  height: 22px;
+  border-radius: 50% 50% 50% 0;
+  background: var(--accent);
+  transform: rotate(-45deg);
+  box-shadow: var(--shadow-lift);
+  border: 3px solid #fff;
+}
