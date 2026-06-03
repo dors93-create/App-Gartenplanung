@@ -128,7 +128,9 @@ function clearResults() {
 // -------------------------------------------------------------------------
 
 // Fragt Nominatim nach einer Adresse und gibt eine Liste von Treffern zurück.
-async function geocode(query) {
+// "signal" erlaubt es, eine laufende Anfrage abzubrechen (für die Vorschläge
+// während des Tippens, damit nicht veraltete Treffer ankommen).
+async function geocode(query, signal) {
   // Wir bauen die Anfrage-URL zusammen:
   //  - format=json   -> maschinenlesbare Antwort
   //  - addressdetails -> liefert strukturierte Adressbestandteile
@@ -142,6 +144,7 @@ async function geocode(query) {
   url.searchParams.set("countrycodes", "de");
 
   const response = await fetch(url, {
+    signal, // erlaubt das Abbrechen der Anfrage
     headers: {
       // Nominatim bittet um eine sprechende Kennung der Anwendung.
       "Accept-Language": "de",
@@ -214,53 +217,85 @@ function selectPlace(place) {
     essential: true, // auch bei reduzierter Bewegung ausführen
   });
 
-  // Oberfläche aufräumen: Eingabe übernehmen, Liste schließen.
+  // Oberfläche aufräumen: noch geplante/laufende Vorschlagssuche stoppen,
+  // Eingabe übernehmen, Liste schließen.
+  clearTimeout(debounceTimer);
+  if (laufendeSuche) laufendeSuche.abort();
   input.value = place.display_name.split(",")[0];
   clearResults();
   showHint("Gefunden – du kannst die Karte jetzt frei erkunden.");
 }
 
 // -------------------------------------------------------------------------
-// 7. Reaktion auf das Absenden des Suchformulars
+// 7. Adressvervollständigung (Vorschläge während des Tippens)
 // -------------------------------------------------------------------------
 
-form.addEventListener("submit", async (event) => {
-  event.preventDefault(); // kein Neuladen der Seite
+// Damit wir den kostenlosen Nominatim-Dienst schonen, fragen wir nicht bei
+// jedem Tastendruck an, sondern erst nach einer kurzen Tipp-Pause.
+const DEBOUNCE_MS = 400; // Wartezeit nach dem letzten Tastendruck
+const MIN_ZEICHEN = 3; // erst ab dieser Eingabelänge suchen
 
+let debounceTimer = null; // Timer für die Tipp-Pause
+let laufendeSuche = null; // AbortController der aktuellen Anfrage
+
+// Startet (verzögert) eine Vorschlagssuche zur aktuellen Eingabe.
+function planeVorschlaege() {
   const query = input.value.trim();
-  if (!query) {
+
+  clearTimeout(debounceTimer); // alte, noch nicht gestartete Suche verwerfen
+
+  // Zu wenige Zeichen: Liste leeren und Start-Hinweis zeigen.
+  if (query.length < MIN_ZEICHEN) {
+    if (laufendeSuche) laufendeSuche.abort();
+    clearResults();
     showHint("Gib deine Adresse ein, um zu starten.");
     return;
   }
 
+  debounceTimer = setTimeout(() => sucheVorschlaege(query), DEBOUNCE_MS);
+}
+
+// Holt die Vorschläge und zeigt sie als Trefferliste an.
+async function sucheVorschlaege(query) {
+  // Eine eventuell noch laufende Anfrage abbrechen.
+  if (laufendeSuche) laufendeSuche.abort();
+  laufendeSuche = new AbortController();
+
   setLoading(true);
-  clearResults();
-  hint.hidden = true;
-
   try {
-    const results = await geocode(query);
-
+    const results = await geocode(query, laufendeSuche.signal);
     if (results.length === 0) {
+      clearResults();
       showHint("Keine Adresse gefunden. Bitte Eingabe prüfen.", true);
-      return;
-    }
-
-    // Genau ein Treffer: direkt hinfliegen. Mehrere: Liste zur Auswahl zeigen.
-    if (results.length === 1) {
-      selectPlace(results[0]);
     } else {
       renderResults(results);
-      showHint("Wähle die passende Adresse aus der Liste.");
+      hint.hidden = true;
     }
   } catch (error) {
+    if (error.name === "AbortError") return; // bewusst abgebrochen – ignorieren
     console.error(error);
     showHint("Die Adresssuche ist gerade nicht erreichbar.", true);
   } finally {
     setLoading(false);
   }
-});
+}
 
-// Tippt der Nutzer neu, blenden wir alte Treffer aus (aufgeräumter Eindruck).
-input.addEventListener("input", () => {
-  if (!resultsList.hidden) clearResults();
+// Bei jeder Eingabe eine (verzögerte) Vorschlagssuche planen.
+input.addEventListener("input", planeVorschlaege);
+
+// Enter (Formular absenden): den ersten Vorschlag übernehmen, sonst direkt suchen.
+form.addEventListener("submit", (event) => {
+  event.preventDefault(); // kein Neuladen der Seite
+  clearTimeout(debounceTimer);
+
+  // Gibt es bereits Vorschläge? Dann den obersten auswählen.
+  const ersterTreffer = resultsList.querySelector(".results__item");
+  if (!resultsList.hidden && ersterTreffer) {
+    ersterTreffer.click();
+    return;
+  }
+
+  // Sonst (z. B. sehr schnelles Tippen + Enter) eine direkte Suche starten.
+  const query = input.value.trim();
+  if (query.length >= MIN_ZEICHEN) sucheVorschlaege(query);
 });
