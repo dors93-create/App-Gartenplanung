@@ -1,0 +1,65 @@
+# Baut die App und veröffentlicht sie auf GitHub Pages.
+# Ergebnis: eine öffentliche URL, die man z. B. auf dem Handy öffnen kann.
+name: Deploy auf GitHub Pages
+
+on:
+  # Bei jedem Push auf den Entwicklungs-Branch automatisch neu veröffentlichen.
+  push:
+    branches: ["claude/grunriss-initial-setup-Fawpx"]
+  # Erlaubt zusätzlich das manuelle Auslösen über den "Actions"-Tab auf GitHub.
+  workflow_dispatch:
+
+# Rechte, die der Workflow braucht, um auf Pages zu veröffentlichen.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Es soll immer nur eine Veröffentlichung gleichzeitig laufen.
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code auschecken
+        uses: actions/checkout@v4
+
+      - name: Node.js einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Abhängigkeiten installieren
+        run: npm ci
+
+      - name: App bauen
+        run: npm run build
+        env:
+          # Basis-Pfad = "/<Repo-Name>/" (z. B. /App-Gartenplanung/)
+          VITE_BASE: "/${{ github.event.repository.name }}/"
+
+      - name: GitHub Pages vorbereiten (aktiviert Pages bei Bedarf automatisch)
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Fertige App als Pages-Artefakt hochladen
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    # Die veröffentlichte URL erscheint in dieser Umgebung im Actions-Tab.
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Auf GitHub Pages veröffentlichen
+        id: deployment
+        uses: actions/deploy-pages@v4
