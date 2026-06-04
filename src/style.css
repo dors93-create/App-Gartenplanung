@@ -303,3 +303,71 @@ body {
 .gp-auswahl-cursor .maplibregl-canvas {
   cursor: crosshair;
 }
+
+/* 9. Objekt-Editor: Werkzeugleiste (Schritt 3a) -------------------------- */
+.toolbar {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: max(18px, env(safe-area-inset-bottom));
+  width: min(640px, calc(100% - 24px));
+  z-index: 11; /* über dem Grundstücks-Panel */
+
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+  padding: 12px;
+}
+
+/* Waagerecht scrollbare Reihe der Objekt-Typen */
+.toolbar__chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 13px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.chip:hover {
+  border-color: #d6d9dc;
+}
+.chip.is-active {
+  border-color: var(--accent);
+  background: #f0fdf4;
+  color: var(--accent-strong);
+}
+
+/* kleines Farbquadrat im Chip */
+.chip__farbe {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.toolbar__hint {
+  margin: 8px 2px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}

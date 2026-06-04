@@ -64,6 +64,24 @@
       </div>
     </div>
 
+    <!-- Werkzeugleiste des Objekt-Editors (Schritt 3a) – zunächst verborgen. -->
+    <div id="ed-toolbar" class="toolbar" hidden>
+      <div id="ed-chips" class="toolbar__chips"></div>
+      <div class="toolbar__actions">
+        <button id="ed-undo" class="btn btn--ghost" type="button" hidden>
+          Punkt zurück
+        </button>
+        <button id="ed-finish" class="btn btn--primary" type="button" hidden>
+          Fläche fertig
+        </button>
+        <button id="ed-delete" class="btn btn--ghost" type="button" hidden>
+          Löschen
+        </button>
+        <button id="ed-done" class="btn btn--primary" type="button">Fertig</button>
+      </div>
+      <p id="ed-hint" class="toolbar__hint"></p>
+    </div>
+
     <!-- Einstiegspunkt: Vite lädt von hier unseren JavaScript-Code. -->
     <script type="module" src="/src/main.js"></script>
   </body>

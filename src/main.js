@@ -24,6 +24,9 @@ import "./style.css";
 // Logik für die Grundstücksauswahl (Schritt 2) in eigener Datei.
 import { initGrundstueck } from "./grundstueck.js";
 
+// Objekt-Editor (Schritt 3a): Garten selbst erfassen.
+import { initEditor } from "./editor.js";
+
 // -------------------------------------------------------------------------
 // 1. Konfiguration
 // -------------------------------------------------------------------------
@@ -94,8 +97,15 @@ map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-rig
 // Ein einzelner Marker, den wir bei jeder Suche wiederverwenden.
 let marker = null;
 
-// Steuerung der Grundstücksauswahl (Schritt 2) einrichten.
-const grundstueck = initGrundstueck(map);
+// Objekt-Editor (Schritt 3a) einrichten.
+const editor = initEditor(map);
+
+// Steuerung der Grundstücksauswahl (Schritt 2) einrichten. Beim Klick auf
+// „Garten erfassen“ öffnet sich der Editor; „Neu beginnen“ räumt ihn mit auf.
+const grundstueck = initGrundstueck(map, {
+  beimErfassen: (parcels) => editor.starten(parcels),
+  beimNeustart: () => editor.leeren(),
+});
 
 // -------------------------------------------------------------------------
 // 3. Verweise auf die HTML-Elemente der Suchleiste

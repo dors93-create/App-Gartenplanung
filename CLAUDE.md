@@ -30,9 +30,18 @@ auch Nicht-Programmierer:innen dem Projekt folgen können.
   jedes Flurstück wird bemaßt (Seitenlängen in Metern) und die Gesamtfläche in
   m² angezeigt – direkt aus den UTM-Koordinaten gerechnet (amtlich genau).
 
+**Schritt 3a ist umgesetzt – Objekt-Editor:**
+
+- Nach „Garten erfassen" können Objekte selbst eingetragen werden:
+  Flächen (Haus, Terrasse, Rasen, Weg, Beet) durch Antippen der Ecken zeichnen,
+  Bäume als Punkte setzen.
+- Objekte sind farbig, antippbar und löschbar; alles wird lokal im Browser
+  gespeichert (localStorage, je Grundstück) und übersteht das Neuladen.
+
 **Geplant (jeweils als eigener, späterer Schritt):**
 
-- Elemente platzieren (Beete, Bäume, Wege …)
+- Schritt 3b – Indikative Bestandsaufnahme (automatisch): Haus aus amtlichen
+  Daten + Luftbild-Analyse für Rasen/Terrasse/Bäume, befüllt den Editor vor.
 
 ## Technik
 
@@ -47,10 +56,11 @@ auch Nicht-Programmierer:innen dem Projekt folgen können.
 ## Projektstruktur
 
 ```
-index.html            Grundgerüst (Karte, Suchleiste, unteres Bedienfeld)
+index.html            Grundgerüst (Karte, Suchleiste, Panel, Editor-Leiste)
 src/main.js           Karte, Luftbild-Layer, Adresssuche/-vervollständigung
 src/grundstueck.js    Schritt 2: Flurstück abrufen, ausblenden, bemaßen
-src/style.css         Gestaltung (Design-Tokens, Suchleiste, Panel, Maße)
+src/editor.js         Schritt 3a: Objekte zeichnen/setzen, speichern
+src/style.css         Gestaltung (Design-Tokens, Suchleiste, Panel, Editor)
 CLAUDE.md             Diese Übersicht
 ```
 

@@ -63,7 +63,7 @@ const quadratmeter = (wert) =>
 // Wird von main.js mit der fertigen Karte aufgerufen und gibt eine kleine
 // Steuerung zurück ({ zeigeStart }).
 // -------------------------------------------------------------------------
-export function initGrundstueck(map) {
+export function initGrundstueck(map, optionen = {}) {
   // Verweise auf das untere Bedienfeld und seine Knöpfe.
   const panel = document.getElementById("gp-panel");
   const panelText = document.getElementById("gp-text");
@@ -396,7 +396,9 @@ export function initGrundstueck(map) {
       aktualisiereAuswahlText();
     } else if (zustand === "fertig") {
       panel.hidden = false;
-      btnAktion.hidden = true;
+      // Hauptknopf führt jetzt weiter in den Objekt-Editor (Schritt 3a).
+      btnAktion.hidden = false;
+      btnAktion.textContent = "Garten erfassen";
       btnZurueck.hidden = false;
       btnZurueck.textContent = "Neu beginnen";
       const n = auswahl.length;
@@ -449,6 +451,9 @@ export function initGrundstueck(map) {
     } else if (zustand === "auswaehlen" && auswahl.length > 0) {
       const gesamt = uebernehmen(); // weiß ausblenden + bemaßen
       setze("fertig", gesamt);
+    } else if (zustand === "fertig") {
+      // Weiter in den Objekt-Editor – die gewählten Flurstücke mitgeben.
+      if (optionen.beimErfassen) optionen.beimErfassen(auswahl);
     }
   });
 
@@ -458,6 +463,7 @@ export function initGrundstueck(map) {
       setze("bereit"); // Auswahl abgebrochen
     } else if (zustand === "fertig") {
       aufraeumen();
+      if (optionen.beimNeustart) optionen.beimNeustart(); // Editor mit aufräumen
       setze("bereit"); // ganz von vorn
     }
   });
