@@ -1,0 +1,24 @@
+# Einmaliger Test (kein Deployment): prüft den ALKIS-Dienst auf die Objektart
+# Gebäude (für die automatische Bestandsaufnahme, Schritt 3b).
+name: Probe ALKIS Gebaeude
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verfügbare FeatureType-Namen (Capabilities)
+        run: |
+          BASE="https://www.wfs.nrw.de/geobasis/wfs_nw_alkis_vereinfacht"
+          echo "########## FeatureType <Name>-Einträge ##########"
+          curl -s "$BASE?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetCapabilities" \
+            | grep -ioE "<Name>[^<]*</Name>" | sort -u
+
+      - name: GetFeature ave:Gebaeude (kleine Bbox in Köln)
+        run: |
+          BASE="https://www.wfs.nrw.de/geobasis/wfs_nw_alkis_vereinfacht"
+          URL="$BASE?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=ave:Gebaeude&COUNT=2&SRSNAME=urn:ogc:def:crs:EPSG::25832&BBOX=356000,5644000,356200,5644200,urn:ogc:def:crs:EPSG::25832"
+          echo "URL: $URL"
+          curl -s "$URL" | head -60

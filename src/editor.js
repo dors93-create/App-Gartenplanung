@@ -28,10 +28,15 @@ import polygonClipping from "polygon-clipping";
 // -------------------------------------------------------------------------
 const TYPEN = {
   haus: { name: "Haus", art: "flaeche", farbe: "#9aa0a6", rand: "#6b7280" },
+  gartenhaus: { name: "Gartenhaus", art: "flaeche", farbe: "#b08968", rand: "#8a6a4f" },
+  gewaechshaus: { name: "Gewächshaus", art: "flaeche", farbe: "#a9d6cf", rand: "#79b3aa" },
+  carport: { name: "Carport", art: "flaeche", farbe: "#aab2bd", rand: "#828c99" },
+  stellplatz: { name: "Stellplatz", art: "flaeche", farbe: "#bfc3c7", rand: "#9298a0" },
   terrasse: { name: "Terrasse", art: "flaeche", farbe: "#caa472", rand: "#a07d4e" },
-  rasen: { name: "Rasen", art: "flaeche", farbe: "#8cc06a", rand: "#5fa03f" },
   weg: { name: "Weg", art: "flaeche", farbe: "#cdbb98", rand: "#a3916f" },
+  pool: { name: "Pool", art: "flaeche", farbe: "#5bb0d8", rand: "#2f8fbf" },
   beet: { name: "Beet", art: "flaeche", farbe: "#caa6d6", rand: "#9a6fb0" },
+  rasen: { name: "Rasen", art: "flaeche", farbe: "#8cc06a", rand: "#5fa03f" },
   baum: { name: "Baum", art: "kreis", farbe: "#3f9b46", rand: "#2f7a34" },
 };
 
