@@ -266,6 +266,16 @@ body {
   background: var(--bg);
 }
 
+/* Roter Knopf für Abbrechen/Löschen */
+.btn--danger {
+  background: transparent;
+  color: #dc2626;
+  box-shadow: inset 0 0 0 1px #f0c4c4;
+}
+.btn--danger:hover {
+  background: #fef2f2;
+}
+
 /* Auf schmalen Handys: Text oben, Buttons darunter in voller Breite */
 @media (max-width: 480px) {
   .panel {
@@ -370,4 +380,49 @@ body {
   margin: 8px 2px 0;
   font-size: 13px;
   color: var(--text-muted);
+}
+
+/* Segment-Umschalter „Frei zeichnen | Rechteck“ */
+.seg-group {
+  display: inline-flex;
+  margin-top: 10px;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  gap: 3px;
+}
+.seg {
+  font: inherit;
+  font-size: 13px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 7px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.seg.is-active {
+  background: #fff;
+  color: var(--text);
+  box-shadow: var(--shadow-soft);
+}
+
+/* 10. Bearbeitungs-Griffe (ziehbare Punkte) -------------------------------- */
+.ed-griff {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--accent);
+  box-shadow: var(--shadow-soft);
+  cursor: grab;
+}
+/* Griff zum Verschieben des ganzen Objekts (gefüllt) */
+.ed-griff--move {
+  background: var(--accent);
+  border-color: #fff;
+}
+/* Griff zum Ändern des Radius (eines Baumkreises) */
+.ed-griff--radius {
+  border-color: var(--accent-strong);
 }

@@ -33,10 +33,13 @@ auch Nicht-Programmierer:innen dem Projekt folgen können.
 **Schritt 3a ist umgesetzt – Objekt-Editor:**
 
 - Nach „Garten erfassen" können Objekte selbst eingetragen werden:
-  Flächen (Haus, Terrasse, Rasen, Weg, Beet) durch Antippen der Ecken zeichnen,
-  Bäume als Punkte setzen.
-- Objekte sind farbig, antippbar und löschbar; alles wird lokal im Browser
-  gespeichert (localStorage, je Grundstück) und übersteht das Neuladen.
+  Flächen (Haus, Terrasse, Rasen, Weg, Beet) wahlweise frei zeichnen oder als
+  Rechteck; Bäume als Kreis (Mittelpunkt + Radius).
+- Bearbeiten: Objekt antippen → ziehbare Griffe (Ecken verschieben, Radius
+  ändern, ganzes Objekt verschieben) als native MapLibre-Marker; rote Knöpfe
+  für Abbrechen/Löschen.
+- Alles farbig und lokal im Browser gespeichert (localStorage, je Grundstück),
+  übersteht das Neuladen.
 
 **Geplant (jeweils als eigener, späterer Schritt):**
 

@@ -67,6 +67,15 @@
     <!-- Werkzeugleiste des Objekt-Editors (Schritt 3a) – zunächst verborgen. -->
     <div id="ed-toolbar" class="toolbar" hidden>
       <div id="ed-chips" class="toolbar__chips"></div>
+
+      <!-- Form-Umschalter für Flächen (nur sichtbar, wenn eine Fläche gewählt ist) -->
+      <div id="ed-form" class="seg-group" hidden>
+        <button id="ed-form-frei" class="seg is-active" type="button">
+          Frei zeichnen
+        </button>
+        <button id="ed-form-rechteck" class="seg" type="button">Rechteck</button>
+      </div>
+
       <div class="toolbar__actions">
         <button id="ed-undo" class="btn btn--ghost" type="button" hidden>
           Punkt zurück
@@ -74,10 +83,16 @@
         <button id="ed-finish" class="btn btn--primary" type="button" hidden>
           Fläche fertig
         </button>
-        <button id="ed-delete" class="btn btn--ghost" type="button" hidden>
+        <button id="ed-confirm" class="btn btn--primary" type="button" hidden>
+          Fertig
+        </button>
+        <button id="ed-delete" class="btn btn--danger" type="button" hidden>
           Löschen
         </button>
-        <button id="ed-done" class="btn btn--primary" type="button">Fertig</button>
+        <button id="ed-cancel" class="btn btn--danger" type="button" hidden>
+          Abbrechen
+        </button>
+        <button id="ed-close" class="btn btn--ghost" type="button">Schließen</button>
       </div>
       <p id="ed-hint" class="toolbar__hint"></p>
     </div>
