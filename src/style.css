@@ -309,6 +309,11 @@ body {
   font-weight: 600;
 }
 
+/* Flächen-/Maßwert eines Editor-Objekts (z. B. „245 m²“, „⌀ 6 m“) */
+.masslabel--wert {
+  font-weight: 600;
+}
+
 /* Während der Auswahl: Fadenkreuz-Cursor signalisiert „jetzt tippen“ */
 .gp-auswahl-cursor .maplibregl-canvas {
   cursor: crosshair;

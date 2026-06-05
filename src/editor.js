@@ -21,6 +21,7 @@
 // =========================================================================
 
 import maplibregl from "maplibre-gl";
+import polygonClipping from "polygon-clipping";
 
 // -------------------------------------------------------------------------
 // Objekt-Typen: Name, Art (Fläche oder Kreis) und Farben.
@@ -91,6 +92,32 @@ function ringMitte(ring) {
   return [lng / n, lat / n];
 }
 
+// Fläche eines Rings in m² (kurze lokale Projektion in Meter, dann Gauß'sche
+// Trapezformel). Für Garten-Größen mehr als genau genug.
+function ringFlaeche(ring) {
+  if (ring.length < 4) return 0;
+  const kx = 111320 * Math.cos((ring[0][1] * Math.PI) / 180);
+  let s = 0;
+  for (let i = 0; i < ring.length - 1; i++) {
+    s += ring[i][0] * kx * (ring[i + 1][1] * 111320);
+    s -= ring[i + 1][0] * kx * (ring[i][1] * 111320);
+  }
+  return Math.abs(s) / 2;
+}
+
+// Fläche einer Polygon-Koordinatenliste (Außenring minus Löcher).
+function polygonFlaeche(ringe) {
+  if (!ringe.length) return 0;
+  let a = ringFlaeche(ringe[0]);
+  for (let i = 1; i < ringe.length; i++) a -= ringFlaeche(ringe[i]);
+  return Math.max(0, a);
+}
+
+// Zahlen hübsch auf Deutsch.
+const fMeter = (w) =>
+  w.toLocaleString("de-DE", { maximumFractionDigits: 1 }) + " m";
+const fQm = (w) => Math.round(w).toLocaleString("de-DE") + " m²";
+
 // -------------------------------------------------------------------------
 // Hauptfunktion: richtet den Editor ein. Rückgabe: { starten, leeren }.
 // -------------------------------------------------------------------------
@@ -108,6 +135,7 @@ export function initEditor(map) {
   const btnDelete = document.getElementById("ed-delete");
   const btnCancel = document.getElementById("ed-cancel");
   const btnClose = document.getElementById("ed-close");
+  const btnRest = document.getElementById("ed-rest");
   const suchleiste = document.querySelector(".search");
   const gpPanel = document.getElementById("gp-panel");
 
@@ -122,6 +150,8 @@ export function initEditor(map) {
   let griffe = []; // ziehbare Marker des ausgewählten Objekts
   let planKey = "gruenriss:plan:default";
   let chipEls = [];
+  let parcelGeom = null; // Grundstücksfläche (für „Restfläche als Rasen“)
+  let massMarker = []; // Beschriftungen (Seitenlängen, Flächen)
 
   // -----------------------------------------------------------------------
   // Werkzeugleiste: Chips je Typ erzeugen.
@@ -205,12 +235,16 @@ export function initEditor(map) {
 
   // Ein Objekt -> GeoJSON-Feature (immer ein Vieleck).
   function alsFeature(o) {
-    const ring = o.art === "kreis" ? kreisRing(o.center, o.radius) : o.coords;
-    return {
-      type: "Feature",
-      properties: { id: o.id, typ: o.typ },
-      geometry: { type: "Polygon", coordinates: [ring] },
-    };
+    let geometry;
+    if (o.art === "kreis") {
+      geometry = { type: "Polygon", coordinates: [kreisRing(o.center, o.radius)] };
+    } else if (o.multi) {
+      // Zusammengesetzte Fläche (z. B. die Rasen-Restfläche).
+      geometry = { type: "MultiPolygon", coordinates: o.multi };
+    } else {
+      geometry = { type: "Polygon", coordinates: [o.coords] };
+    }
+    return { type: "Feature", properties: { id: o.id, typ: o.typ }, geometry };
   }
 
   function zeichneObjekte() {
@@ -273,6 +307,67 @@ export function initEditor(map) {
   const neueId = () =>
     Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
 
+  // Nach dem Ziehen: speichern UND Bemaßung neu setzen.
+  function gespeichertMass() {
+    speichere();
+    aktualisiereMasse();
+  }
+
+  // -----------------------------------------------------------------------
+  // Bemaßung: Flächen (m²) je Objekt, Seitenlängen für das gewählte Objekt,
+  // bei Bäumen der Durchmesser. Als nicht klickbare HTML-Etiketten.
+  // -----------------------------------------------------------------------
+  function massWeg() {
+    massMarker.forEach((m) => m.remove());
+    massMarker = [];
+  }
+  function massEtikett(lngLat, text, klasse) {
+    const el = document.createElement("div");
+    el.className = "masslabel " + (klasse || "");
+    el.textContent = text;
+    massMarker.push(
+      new maplibregl.Marker({ element: el }).setLngLat(lngLat).addTo(map),
+    );
+  }
+  function aktualisiereMasse() {
+    massWeg();
+    objekte.forEach((o) => {
+      if (o.art === "kreis") {
+        massEtikett(o.center, "⌀ " + fMeter(o.radius * 2), "masslabel--wert");
+        return;
+      }
+      const polys = o.multi ? o.multi : [[o.coords]];
+
+      // Flächen-Etikett in der Mitte des größten Teilstücks.
+      let flaeche = 0;
+      let groesster = polys[0][0];
+      let bestA = -1;
+      polys.forEach((p) => {
+        flaeche += polygonFlaeche(p);
+        const a = ringFlaeche(p[0]);
+        if (a > bestA) {
+          bestA = a;
+          groesster = p[0];
+        }
+      });
+      massEtikett(ringMitte(groesster), fQm(flaeche), "masslabel--wert");
+
+      // Seitenlängen nur für das ausgewählte Objekt (sonst zu unruhig).
+      if (o.id === selektiertId) {
+        polys.forEach((p) => {
+          const ring = p[0];
+          for (let i = 0; i < ring.length - 1; i++) {
+            const mitte = [
+              (ring[i][0] + ring[i + 1][0]) / 2,
+              (ring[i][1] + ring[i + 1][1]) / 2,
+            ];
+            massEtikett(mitte, fMeter(abstandMeter(ring[i], ring[i + 1])), "");
+          }
+        });
+      }
+    });
+  }
+
   // -----------------------------------------------------------------------
   // Bearbeitungs-Griffe (ziehbare Marker) anlegen/entfernen
   // -----------------------------------------------------------------------
@@ -305,17 +400,21 @@ export function initEditor(map) {
         rand.setLngLat(radiusPunkt(obj.center, obj.radius));
         zeichneObjekte();
       });
-      mitte.on("dragend", speichere);
+      mitte.on("dragend", gespeichertMass);
 
       rand.on("drag", () => {
         obj.radius = Math.max(0.5, abstandMeter(obj.center, rand.getLngLat().toArray()));
         zeichneObjekte();
       });
-      rand.on("dragend", speichere);
+      rand.on("dragend", gespeichertMass);
 
       griffe.push(mitte, rand);
       return;
     }
+
+    // Zusammengesetzte Fläche (Restfläche): nicht per Ecke editierbar,
+    // nur auswähl- und löschbar.
+    if (obj.multi) return;
 
     // Fläche: ein Griff je Eckpunkt + ein Verschiebe-Griff in der Mitte.
     const ring = obj.coords;
@@ -329,7 +428,7 @@ export function initEditor(map) {
         if (i === 0) ring[n] = p; // Ring geschlossen halten
         zeichneObjekte();
       });
-      g.on("dragend", speichere);
+      g.on("dragend", gespeichertMass);
       griffe.push(g);
     }
 
@@ -351,7 +450,7 @@ export function initEditor(map) {
       for (let i = 0; i < n; i++) griffe[i].setLngLat(ring[i]);
       zeichneObjekte();
     });
-    move.on("dragend", speichere);
+    move.on("dragend", gespeichertMass);
     griffe.push(move);
   }
 
@@ -371,6 +470,7 @@ export function initEditor(map) {
       griffeWeg();
     }
     zeichneObjekte();
+    aktualisiereMasse();
     aktualisiere();
   }
 
@@ -410,6 +510,7 @@ export function initEditor(map) {
     btnCancel.hidden = !(modus === "frei" || modus === "rechteck" || modus === "baum");
     btnConfirm.hidden = modus !== "bearbeiten";
     btnDelete.hidden = modus !== "bearbeiten";
+    btnRest.hidden = aktiverTyp !== "rasen"; // „Restfläche“ nur bei Rasen
     formBox.hidden = !istFlaeche;
 
     btnFormFrei.classList.toggle("is-active", formModus === "frei");
@@ -546,6 +647,31 @@ export function initEditor(map) {
     aktualisiere();
   });
 
+  // „Restfläche als Rasen“: Grundstücksfläche minus alle anderen Flächen.
+  btnRest.addEventListener("click", () => {
+    if (!parcelGeom) {
+      hint.textContent = "Grundstücksgrenze fehlt – bitte neu beginnen.";
+      return;
+    }
+    // Von der Grundstücksfläche jede vorhandene Fläche abziehen
+    // (Bäume bleiben außen vor – Rasen darf unter ihnen liegen).
+    let rest = parcelGeom;
+    objekte.forEach((o) => {
+      if (o.art !== "flaeche") return;
+      const clip = o.multi ? o.multi : [o.coords];
+      try {
+        rest = polygonClipping.difference(rest, clip);
+      } catch (e) {
+        console.warn("Verschneidung übersprungen:", e);
+      }
+    });
+    if (!rest || rest.length === 0) {
+      hint.textContent = "Es ist keine freie Fläche mehr übrig.";
+      return;
+    }
+    neuesObjekt({ id: neueId(), typ: "rasen", art: "flaeche", multi: rest });
+  });
+
   btnClose.addEventListener("click", () => beenden());
 
   // -----------------------------------------------------------------------
@@ -560,6 +686,7 @@ export function initEditor(map) {
     griffeWeg();
     zeichneFortschritt();
     zeichneObjekte();
+    aktualisiereMasse(); // Flächen-Etiketten bleiben sichtbar
     chipEls.forEach((c) => c.classList.remove("is-active"));
     toolbar.hidden = true;
     if (suchleiste) suchleiste.hidden = false;
@@ -574,6 +701,18 @@ export function initEditor(map) {
       planKey =
         "gruenriss:plan:" +
         ((parcels || []).map((p) => p.id).sort().join("|") || "default");
+
+      // Grundstücksfläche (Vereinigung aller gewählten Flurstücke) merken –
+      // Grundlage für „Restfläche als Rasen“.
+      try {
+        const polys = (parcels || [])
+          .filter((p) => p.ringLngLat)
+          .map((p) => [p.ringLngLat]);
+        parcelGeom = polys.length ? polygonClipping.union(...polys) : null;
+      } catch (e) {
+        parcelGeom = null;
+      }
+
       lade();
       ebenenSicherstellen();
 
@@ -584,6 +723,7 @@ export function initEditor(map) {
       selektiertId = null;
       griffeWeg();
       zeichneObjekte();
+      aktualisiereMasse();
       zeichneFortschritt();
 
       if (suchleiste) suchleiste.hidden = true;
@@ -597,6 +737,7 @@ export function initEditor(map) {
       punkte = [];
       selektiertId = null;
       griffeWeg();
+      massWeg();
       if (map.getSource(SRC_OBJ)) {
         const leer = { type: "FeatureCollection", features: [] };
         map.getSource(SRC_OBJ).setData(leer);

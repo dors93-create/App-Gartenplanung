@@ -38,6 +38,11 @@ auch Nicht-Programmierer:innen dem Projekt folgen können.
 - Bearbeiten: Objekt antippen → ziehbare Griffe (Ecken verschieben, Radius
   ändern, ganzes Objekt verschieben) als native MapLibre-Marker; rote Knöpfe
   für Abbrechen/Löschen.
+- „Restfläche als Rasen": füllt den noch freien Teil des Grundstücks
+  (Grundstück minus alle anderen Flächen) automatisch mit Rasen
+  (Flächen-Verschneidung via `polygon-clipping`).
+- Bemaßung: je Objekt die Fläche (m², bei Bäumen der Durchmesser); für das
+  ausgewählte Objekt zusätzlich die Seitenlängen.
 - Alles farbig und lokal im Browser gespeichert (localStorage, je Grundstück),
   übersteht das Neuladen.
 
