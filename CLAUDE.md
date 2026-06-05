@@ -46,10 +46,17 @@ auch Nicht-Programmierer:innen dem Projekt folgen können.
 - Alles farbig und lokal im Browser gespeichert (localStorage, je Grundstück),
   übersteht das Neuladen.
 
+**Schritt 3b ist begonnen – Automatische Bestandsaufnahme:**
+
+- Im (leeren) Editor „Automatisch erfassen": amtliche Gebäude (ALKIS,
+  Objektart `ave:GebaeudeBauwerk`) werden als Haus eingetragen und die
+  Restfläche als Rasen ergänzt. Alles bleibt editierbar.
+- Logik in `src/bestand.js` (WFS-Abruf, GML auslesen, EPSG:25832 → Lat/Lon).
+
 **Geplant (jeweils als eigener, späterer Schritt):**
 
-- Schritt 3b – Indikative Bestandsaufnahme (automatisch): Haus aus amtlichen
-  Daten + Luftbild-Analyse für Rasen/Terrasse/Bäume, befüllt den Editor vor.
+- Schritt 3b (Teil 2) – Luftbild-/Nutzungs-Analyse für Terrasse/Wege/Bäume
+  (z. B. ALKIS `ave:Nutzung` und Farb-/Textur-Auswertung des Luftbilds).
 
 ## Technik
 
@@ -67,7 +74,8 @@ auch Nicht-Programmierer:innen dem Projekt folgen können.
 index.html            Grundgerüst (Karte, Suchleiste, Panel, Editor-Leiste)
 src/main.js           Karte, Luftbild-Layer, Adresssuche/-vervollständigung
 src/grundstueck.js    Schritt 2: Flurstück abrufen, ausblenden, bemaßen
-src/editor.js         Schritt 3a: Objekte zeichnen/setzen, speichern
+src/editor.js         Schritt 3a: Objekte zeichnen/setzen, bemaßen, speichern
+src/bestand.js        Schritt 3b: amtliche Gebäude automatisch erfassen
 src/style.css         Gestaltung (Design-Tokens, Suchleiste, Panel, Editor)
 CLAUDE.md             Diese Übersicht
 ```

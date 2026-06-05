@@ -22,6 +22,7 @@
 
 import maplibregl from "maplibre-gl";
 import polygonClipping from "polygon-clipping";
+import { erfasseGebaeude } from "./bestand.js";
 
 // -------------------------------------------------------------------------
 // Objekt-Typen: Name, Art (Fläche oder Kreis) und Farben.
@@ -141,6 +142,7 @@ export function initEditor(map) {
   const btnCancel = document.getElementById("ed-cancel");
   const btnClose = document.getElementById("ed-close");
   const btnRest = document.getElementById("ed-rest");
+  const btnAuto = document.getElementById("ed-auto");
   const suchleiste = document.querySelector(".search");
   const gpPanel = document.getElementById("gp-panel");
 
@@ -156,6 +158,7 @@ export function initEditor(map) {
   let planKey = "gruenriss:plan:default";
   let chipEls = [];
   let parcelGeom = null; // Grundstücksfläche (für „Restfläche als Rasen“)
+  let parcelsData = []; // die gewählten Flurstücke (für die Auto-Erfassung)
   let massMarker = []; // Beschriftungen (Seitenlängen, Flächen)
 
   // -----------------------------------------------------------------------
@@ -516,6 +519,8 @@ export function initEditor(map) {
     btnConfirm.hidden = modus !== "bearbeiten";
     btnDelete.hidden = modus !== "bearbeiten";
     btnRest.hidden = aktiverTyp !== "rasen"; // „Restfläche“ nur bei Rasen
+    // „Automatisch erfassen“ nur am Anfang (leerer Plan, kein Werkzeug aktiv).
+    btnAuto.hidden = !(modus === "neutral" && objekte.length === 0);
     formBox.hidden = !istFlaeche;
 
     btnFormFrei.classList.toggle("is-active", formModus === "frei");
@@ -550,6 +555,24 @@ export function initEditor(map) {
     punkte = [];
     zeichneFortschritt();
     selektiere(obj.id); // direkt anpassbar
+  }
+
+  // Restfläche berechnen: Grundstück minus alle vorhandenen Flächen
+  // (Bäume bleiben außen vor – Rasen darf unter ihnen liegen).
+  // Rückgabe: MultiPolygon-Koordinaten oder null.
+  function restRasenGeom() {
+    if (!parcelGeom) return null;
+    let rest = parcelGeom;
+    objekte.forEach((o) => {
+      if (o.art !== "flaeche") return;
+      const clip = o.multi ? o.multi : [o.coords];
+      try {
+        rest = polygonClipping.difference(rest, clip);
+      } catch (e) {
+        console.warn("Verschneidung übersprungen:", e);
+      }
+    });
+    return rest && rest.length ? rest : null;
   }
 
   // -----------------------------------------------------------------------
@@ -654,27 +677,46 @@ export function initEditor(map) {
 
   // „Restfläche als Rasen“: Grundstücksfläche minus alle anderen Flächen.
   btnRest.addEventListener("click", () => {
-    if (!parcelGeom) {
-      hint.textContent = "Grundstücksgrenze fehlt – bitte neu beginnen.";
-      return;
-    }
-    // Von der Grundstücksfläche jede vorhandene Fläche abziehen
-    // (Bäume bleiben außen vor – Rasen darf unter ihnen liegen).
-    let rest = parcelGeom;
-    objekte.forEach((o) => {
-      if (o.art !== "flaeche") return;
-      const clip = o.multi ? o.multi : [o.coords];
-      try {
-        rest = polygonClipping.difference(rest, clip);
-      } catch (e) {
-        console.warn("Verschneidung übersprungen:", e);
-      }
-    });
-    if (!rest || rest.length === 0) {
+    const rest = restRasenGeom();
+    if (!rest) {
       hint.textContent = "Es ist keine freie Fläche mehr übrig.";
       return;
     }
     neuesObjekt({ id: neueId(), typ: "rasen", art: "flaeche", multi: rest });
+  });
+
+  // „Automatisch erfassen“: amtliche Gebäude als Haus eintragen und den Rest
+  // als Rasen ergänzen (zuverlässige Daten als Startpunkt; alles editierbar).
+  btnAuto.addEventListener("click", async () => {
+    hint.textContent = "Erfasse amtliche Gebäude …";
+    btnAuto.disabled = true;
+    try {
+      const haeuser = await erfasseGebaeude(parcelsData);
+      haeuser.forEach((ring) => {
+        const r = [...ring];
+        const a = r[0];
+        const z = r[r.length - 1];
+        if (a[0] !== z[0] || a[1] !== z[1]) r.push(a); // Ring schließen
+        objekte.push({ id: neueId(), typ: "haus", art: "flaeche", coords: r });
+      });
+      const rest = restRasenGeom(); // nach den Gebäuden -> Rasen drumherum
+      if (rest) objekte.push({ id: neueId(), typ: "rasen", art: "flaeche", multi: rest });
+
+      speichere();
+      selektiere(null); // neu zeichnen + Bemaßung
+      hint.textContent =
+        (haeuser.length === 0
+          ? "Keine Gebäude gefunden"
+          : haeuser.length === 1
+            ? "1 Gebäude erkannt"
+            : haeuser.length + " Gebäude erkannt") +
+        "; Restfläche als Rasen ergänzt. Jetzt anpassen oder Terrasse/Bäume ergänzen.";
+    } catch (e) {
+      console.error(e);
+      hint.textContent = "Automatische Erfassung nicht möglich (Dienst nicht erreichbar).";
+    } finally {
+      btnAuto.disabled = false;
+    }
   });
 
   btnClose.addEventListener("click", () => beenden());
@@ -706,6 +748,7 @@ export function initEditor(map) {
       planKey =
         "gruenriss:plan:" +
         ((parcels || []).map((p) => p.id).sort().join("|") || "default");
+      parcelsData = parcels || []; // für die automatische Gebäude-Erfassung
 
       // Grundstücksfläche (Vereinigung aller gewählten Flurstücke) merken –
       // Grundlage für „Restfläche als Rasen“.
