@@ -9,16 +9,19 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Verfügbare FeatureType-Namen (Capabilities)
+      - name: Verfügbare ave-Typnamen (Capabilities)
         run: |
           BASE="https://www.wfs.nrw.de/geobasis/wfs_nw_alkis_vereinfacht"
-          echo "########## FeatureType <Name>-Einträge ##########"
+          echo "########## alle ave:-Typnamen ##########"
           curl -s "$BASE?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetCapabilities" \
-            | grep -ioE "<Name>[^<]*</Name>" | sort -u
+            | grep -oE "ave:[A-Za-z]+" | sort -u
 
-      - name: GetFeature ave:Gebaeude (kleine Bbox in Köln)
+      - name: GetFeature ave:GebaeudeBauwerk (kleine Bbox in Köln)
         run: |
           BASE="https://www.wfs.nrw.de/geobasis/wfs_nw_alkis_vereinfacht"
-          URL="$BASE?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=ave:Gebaeude&COUNT=2&SRSNAME=urn:ogc:def:crs:EPSG::25832&BBOX=356000,5644000,356200,5644200,urn:ogc:def:crs:EPSG::25832"
-          echo "URL: $URL"
-          curl -s "$URL" | head -60
+          for TN in ave:GebaeudeBauwerk ave:Gebaeude ave:Bauwerk; do
+            echo "########## TYPENAMES=$TN ##########"
+            URL="$BASE?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=$TN&COUNT=1&SRSNAME=urn:ogc:def:crs:EPSG::25832&BBOX=356000,5644000,356200,5644200,urn:ogc:def:crs:EPSG::25832"
+            curl -s "$URL" | head -25
+            echo
+          done
