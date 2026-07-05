@@ -147,6 +147,7 @@
     background: var(--flaeche); border-radius: 10px; box-shadow: var(--schatten);
     padding: 8px 16px; font-size: 13.5px; font-weight: 600; z-index: 9;
     color: var(--accent-dunkel);
+    max-width: calc(100vw - 24px); width: max-content; text-align: center;
   }
   #bankrott-warnung {
     position: absolute; top: 62px; left: 50%; transform: translateX(-50%);
@@ -200,10 +201,11 @@
   <button class="knopf" id="k-tempo2" title="Doppelte Geschwindigkeit (Taste 2)">2×</button>
   <button class="knopf" id="k-tempo3" title="Dreifache Geschwindigkeit (Taste 3)">3×</button>
   <button class="knopf" id="k-musik" title="Musik ein/aus">🎵</button>
+  <button class="knopf" id="k-mitte" title="Zum Kontor bzw. Schiff springen">🧭</button>
 </div>
 
 <!-- Hinweis zu Spielbeginn -->
-<div id="hinweis">⚓ Willkommen! Platziere zuerst dein Kontor an der Küste.</div>
+<div id="hinweis">⛵ Tippe aufs Wasser, um zu segeln. Such dir eine Insel aus und baue dort dein Kontor an der Küste!</div>
 <div id="bankrott-warnung"></div>
 
 <!-- Baumenü (wird per JavaScript gefüllt) -->
@@ -244,7 +246,7 @@
 
 /* ---------- 1. KONSTANTEN ------------------------------------ */
 
-const N = 40;   // Kacheln je Seite (40×40-Karte)
+const N = 80;   // Kacheln je Seite (80×80-Weltkarte mit mehreren Inseln)
 const T = 40;   // Weltpixel je Kachel (interne Zeichengröße)
 
 // Wirtschafts-Stellschrauben – alle Werte "pro Sekunde" bei 1×-Tempo.
@@ -259,6 +261,8 @@ const SIM = {
   pleiteDauer:        60,      // Sekunden mit Gold < 0 bis zum Bankrott
   zielSiedler:        500,     // Siegbedingung
   baumNachwuchs:      0.02,    // Wald wächst langsam nach ("abbaubar", aber erneuerbar)
+  schiffTempo:        3.2,     // Segelgeschwindigkeit in Kacheln je Sekunde
+  schiffBauRadius:    6,       // so nah muss das Schiff an der Kontor-Baustelle ankern
 };
 
 // Gebäudekatalog. Kosten in Gold/Holz/Werkzeugen, Unterhalt in Gold je Sekunde.
@@ -386,45 +390,59 @@ function wertRauschen(rnd, gitter) {
   };
 }
 
-// Erzeugt die Insel. Probiert mehrere Zufalls-Startwerte, bis eine
-// Insel mit sinnvollem Landanteil herauskommt.
+// Erzeugt die Weltkarte: ein offenes Meer mit mehreren Inseln.
+// Es wird so lange gewürfelt, bis eine Welt mit einer ordentlichen
+// Hauptinsel (genug Platz, Wald und Gestein) herauskommt.
 function weltErzeugen() {
-  for (let versuch = 0; versuch < 40; versuch++) {
+  for (let versuch = 0; versuch < 80; versuch++) {
     const saat = (Math.random() * 1e9) | 0;
     const rnd = mulberry32(saat);
-    const grob = wertRauschen(rnd, 4);   // große Inselform
-    const fein = wertRauschen(rnd, 9);   // Details der Küstenlinie
-    const waldR = wertRauschen(rnd, 6);  // wo Wald wächst
+    const grob = wertRauschen(rnd, 8);    // große Landformen
+    const fein = wertRauschen(rnd, 18);   // Details der Küstenlinien
+    const waldR = wertRauschen(rnd, 12);  // wo Wald wächst
 
-    karte = []; belegt = [];
-    let land = 0, berge = 0;
-
-    for (let y = 0; y < N; y++) {
-      for (let x = 0; x < N; x++) {
-        const u = x / (N - 1), v = y / (N - 1);
-        // Radialer Abfall: Mitte hoch, Ränder tief → garantiert eine Insel
-        const dx = (u - 0.5) * 2, dy = (v - 0.5) * 2;
-        const abstand = Math.sqrt(dx * dx + dy * dy);
-        const hoehe = 0.62 * grob(u, v) + 0.38 * fein(u, v)
-                    - Math.pow(abstand, 1.9) * 0.62 - 0.04;
-
-        let typ;
-        if      (hoehe < 0.16) typ = 'wasser';
-        else if (hoehe < 0.21) typ = 'strand';
-        else if (hoehe < 0.52) typ = 'gras';
-        else                   typ = 'berg';
-
-        const kachel = { typ, baum: 0, stein: 0, var: rnd() };
-        if (typ === 'berg') { kachel.stein = 200 + Math.round(rnd() * 300); berge++; }
-        if (typ !== 'wasser') land++;
-        karte.push(kachel);
-        belegt.push(null);
+    // 4–6 Inseln auswürfeln: Mittelpunkt + Radius, mit Wasser dazwischen
+    const inseln = [];
+    const anzahl = 4 + Math.floor(rnd() * 3);
+    for (let i = 0; i < anzahl; i++) {
+      for (let probe = 0; probe < 40; probe++) {
+        // Die erste Insel ist immer groß – ein guter Startplatz
+        const r = i === 0 ? 16 + rnd() * 4 : 7 + rnd() * 8;
+        const cx = r + 3 + rnd() * (N - 2 * r - 6);
+        const cy = r + 3 + rnd() * (N - 2 * r - 6);
+        // Genug Abstand zu den anderen Inseln (freie Seewege)
+        let passt = true;
+        for (const ins of inseln) {
+          if (Math.hypot(ins.cx - cx, ins.cy - cy) < ins.r + r + 6) { passt = false; break; }
+        }
+        if (passt) { inseln.push({ cx, cy, r }); break; }
       }
     }
 
-    // Landanteil prüfen – sonst neue Insel würfeln
-    const anteil = land / (N * N);
-    if (anteil < 0.30 || anteil > 0.60 || berge < 4) continue;
+    karte = []; belegt = [];
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        // Landfaktor: 1 am Inselmittelpunkt, 0 am Inselrand und auf See
+        let f = 0;
+        for (const ins of inseln) {
+          f = Math.max(f, 1 - Math.hypot(x - ins.cx, y - ins.cy) / ins.r);
+        }
+        const u = x / (N - 1), v = y / (N - 1);
+        const rausch = 0.62 * grob(u, v) + 0.38 * fein(u, v);
+        const hoehe = f * (0.30 + 0.70 * rausch);
+
+        let typ;
+        if      (hoehe < 0.16) typ = 'wasser';
+        else if (hoehe < 0.22) typ = 'strand';
+        else if (hoehe < 0.62) typ = 'gras';
+        else                   typ = 'berg';
+
+        const k = { typ, baum: 0, stein: 0, var: rnd() };
+        if (typ === 'berg') k.stein = 200 + Math.round(rnd() * 300);
+        karte.push(k);
+        belegt.push(null);
+      }
+    }
 
     // Strand-Saum: Land direkt am Wasser wird zu Strand
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
@@ -445,9 +463,119 @@ function weltErzeugen() {
         if (w > 0.56) { k.typ = 'wald'; k.baum = Math.min(1, 0.4 + (w - 0.56) * 3); }
       }
     }
-    return; // Insel angenommen
+
+    // Qualitätsprüfung: zusammenhängende Landflächen vermessen (Breitensuche).
+    // Die größte Insel muss Platz, Wald und Gestein für eine Stadt bieten.
+    const marke = new Int16Array(N * N).fill(-1);
+    const flaechen = [];
+    for (let start = 0; start < N * N; start++) {
+      if (karte[start].typ === 'wasser' || marke[start] !== -1) continue;
+      const stapel = [start];
+      marke[start] = flaechen.length;
+      let groesse = 0, berg = 0, wald = 0;
+      while (stapel.length) {
+        const j = stapel.pop();
+        groesse++;
+        if (karte[j].typ === 'berg') berg++;
+        if (karte[j].baum > 0) wald++;
+        const x = j % N, y = (j / N) | 0;
+        for (const [ax, ay] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const nx = x + ax, ny = y + ay;
+          if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
+          const ni = ny * N + nx;
+          if (karte[ni].typ !== 'wasser' && marke[ni] === -1) {
+            marke[ni] = flaechen.length;
+            stapel.push(ni);
+          }
+        }
+      }
+      flaechen.push({ groesse, berg, wald });
+    }
+    const land = flaechen.reduce((s, f) => s + f.groesse, 0);
+    const haupt = flaechen.reduce((a, b) => (b.groesse > a.groesse ? b : a), { groesse: 0, berg: 0, wald: 0 });
+    if (flaechen.length < 3 || haupt.groesse < 380 || haupt.berg < 3 ||
+        haupt.wald < 30 || land / (N * N) > 0.45) continue;
+
+    return; // Welt angenommen
   }
-  // Notnagel (praktisch nie nötig): letzte gewürfelte Karte behalten
+  // Notnagel (praktisch nie nötig): letzte gewürfelte Welt behalten
+}
+
+/* ---------- 3b. DAS SCHIFF ------------------------------------ */
+// Zu Spielbeginn treibt dein Segelschiff auf dem Meer. Tippe aufs
+// Wasser, um es zu einer Insel deiner Wahl zu steuern – erst wenn es
+// nahe der Küste ankert, kann dort das Kontor gebaut werden.
+
+const schiff = { x: 0, y: 0, pfad: [] };  // Position in Kacheln (Mittelpunkt), Restweg
+
+// Startplatz: eine Wasserkachel mit etwas Abstand zum Land
+function schiffStart() {
+  for (let probe = 0; probe < 5000; probe++) {
+    const x = 2 + ((Math.random() * (N - 4)) | 0);
+    const y = 2 + ((Math.random() * (N - 4)) | 0);
+    let frei = true;
+    for (let dy = -2; dy <= 2 && frei; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const k = kachel(x + dx, y + dy);
+      if (!k || k.typ !== 'wasser') { frei = false; break; }
+    }
+    if (frei) { schiff.x = x + 0.5; schiff.y = y + 0.5; return; }
+  }
+  schiff.x = 2.5; schiff.y = 2.5; // Notnagel: Kartenecke ist praktisch immer Wasser
+}
+
+// Seeweg vom Schiff zu einer Zielkachel suchen (Breitensuche über Wasser).
+// Liefert die Wegpunkte oder null, wenn kein Wasserweg existiert.
+function segelWeg(zx, zy) {
+  const ziel = kachel(zx, zy);
+  if (!ziel || ziel.typ !== 'wasser') return null;
+  const sx = Math.floor(schiff.x), sy = Math.floor(schiff.y);
+  const si = sy * N + sx, zi = zy * N + zx;
+  if (si === zi) return [];
+  const vorher = new Int32Array(N * N).fill(-1);
+  vorher[si] = si;
+  const schlange = [si];
+  for (let kopf = 0; kopf < schlange.length; kopf++) {
+    const j = schlange[kopf];
+    if (j === zi) break;
+    const x = j % N, y = (j / N) | 0;
+    for (const [ax, ay] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nx = x + ax, ny = y + ay;
+      if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
+      const ni = ny * N + nx;
+      if (vorher[ni] !== -1 || karte[ni].typ !== 'wasser') continue;
+      vorher[ni] = j;
+      schlange.push(ni);
+    }
+  }
+  if (vorher[zi] === -1) return null;
+  // Weg vom Ziel rückwärts einsammeln und umdrehen
+  const weg = [];
+  for (let j = zi; j !== si; j = vorher[j]) {
+    weg.push({ x: (j % N) + 0.5, y: ((j / N) | 0) + 0.5 });
+  }
+  weg.reverse();
+  return weg;
+}
+
+// Das Schiff fährt seinen Weg Punkt für Punkt ab
+function schiffUpdate(dt) {
+  let strecke = SIM.schiffTempo * dt;
+  while (strecke > 0 && schiff.pfad.length) {
+    const zielP = schiff.pfad[0];
+    const dx = zielP.x - schiff.x, dy = zielP.y - schiff.y;
+    const d = Math.hypot(dx, dy);
+    if (d <= strecke) {
+      schiff.x = zielP.x; schiff.y = zielP.y;
+      schiff.pfad.shift();
+      strecke -= d;
+      if (!schiff.pfad.length && !state.kontorGebaut)
+        melden('⚓ Angekommen! Baue jetzt dein Kontor an der Küste.', 'angekommen');
+    } else {
+      schiff.x += dx / d * strecke;
+      schiff.y += dy / d * strecke;
+      strecke = 0;
+    }
+  }
 }
 
 function kachel(x, y) {
@@ -575,6 +703,8 @@ function platzOK(typ, ax, ay) {
     return { ok: false, grund: 'Muss an der Küste liegen' };
 
   const cx = ax + def.w / 2, cy = ay + def.h / 2;
+  if (typ === 'kontor' && Math.hypot(schiff.x - cx, schiff.y - cy) > SIM.schiffBauRadius)
+    return { ok: false, grund: 'Zu weit vom Schiff – segle zuerst vor diese Küste' };
   if (typ === 'holzfaeller' && baeumeImUmkreis(cx, cy, def.radius) < 0.5)
     return { ok: false, grund: 'Kein Wald in Reichweite' };
   if (typ === 'jagd' && baeumeImUmkreis(cx, cy, def.radius) < 0.5)
@@ -620,12 +750,12 @@ function platziere(typ, tx, ty) {
   for (let y = ay; y < ay + def.h; y++) for (let x = ax; x < ax + def.w; x++) {
     belegt[y * N + x] = geb;
     const k = kachel(x, y);
-    if (k.baum > 0) { k.baum = 0; state.terrainAlt = true; }
+    if (k.baum > 0) { k.baum = 0; kachelSchmutzig(x, y); }
   }
 
   if (typ === 'kontor') {
     state.kontorGebaut = true;
-    state.werkzeug = 'zeiger';
+    werkzeugWaehlen('zeiger');   // zurück zum Auswahl-Werkzeug (auch Cursor)
     document.getElementById('hinweis').style.display = 'none';
     melden('Kontor errichtet – jetzt Wohnhäuser und Betriebe bauen!');
     menueBauen(); // Menü neu aufbauen (Kontor verschwindet daraus)
@@ -680,7 +810,7 @@ function simSchritt(dt) {
       const k = karte[idx];
       if (k.typ === 'wald' && k.baum < 1 && !belegt[idx]) {
         k.baum = Math.min(1, k.baum + SIM.baumNachwuchs);
-        state.terrainAlt = true;
+        kachelSchmutzig(idx % N, (idx / N) | 0);
       }
     }
   }
@@ -715,11 +845,11 @@ function simSchritt(dt) {
           geb.fortschritt -= def.dauer;
           res.holz += 1;
           // Die dichteste Waldkachel im Umkreis wird etwas abgeholzt
-          let beste = null;
-          imUmkreis(z.x, z.y, def.radius, k => {
-            if (k.baum > 0 && (!beste || k.baum > beste.baum)) beste = k;
+          let beste = null, bx = 0, by = 0;
+          imUmkreis(z.x, z.y, def.radius, (k, x, y) => {
+            if (k.baum > 0 && (!beste || k.baum > beste.baum)) { beste = k; bx = x; by = y; }
           });
-          if (beste) { beste.baum = Math.max(0, beste.baum - 0.12); state.terrainAlt = true; }
+          if (beste) { beste.baum = Math.max(0, beste.baum - 0.12); kachelSchmutzig(bx, by); }
         }
         break;
       }
@@ -834,51 +964,80 @@ const terrainPuffer = document.createElement('canvas');
 terrainPuffer.width = N * T; terrainPuffer.height = N * T;
 const tctx = terrainPuffer.getContext('2d');
 
-function terrainZeichnen() {
-  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-    const k = kachel(x, y);
-    const px = x * T, py = y * T;
-    const v = (k.var - 0.5) * 14; // kleine Helligkeitsvariation je Kachel
+// Grundfarbe einer Kachel malen (Wasser, Strand, Gras, Wald, Berg)
+function kachelHintergrund(x, y) {
+  const k = kachel(x, y);
+  const px = x * T, py = y * T;
+  const v = (k.var - 0.5) * 14; // kleine Helligkeitsvariation je Kachel
 
-    let farbe;
-    if      (k.typ === 'wasser') farbe = `rgb(${64 + v},${118 + v},${168 + v})`;
-    else if (k.typ === 'strand') farbe = `rgb(${232 + v},${217 + v},${168 + v})`;
-    else if (k.typ === 'berg')   farbe = `rgb(${158 + v},${158 + v},${150 + v})`;
-    else if (k.typ === 'wald')   farbe = `rgb(${106 + v},${156 + v},${88 + v})`;
-    else                         farbe = `rgb(${127 + v},${176 + v},${105 + v})`;
-    tctx.fillStyle = farbe;
-    tctx.fillRect(px, py, T, T);
+  let farbe;
+  if      (k.typ === 'wasser') farbe = `rgb(${64 + v},${118 + v},${168 + v})`;
+  else if (k.typ === 'strand') farbe = `rgb(${232 + v},${217 + v},${168 + v})`;
+  else if (k.typ === 'berg')   farbe = `rgb(${158 + v},${158 + v},${150 + v})`;
+  else if (k.typ === 'wald')   farbe = `rgb(${106 + v},${156 + v},${88 + v})`;
+  else                         farbe = `rgb(${127 + v},${176 + v},${105 + v})`;
+  tctx.fillStyle = farbe;
+  tctx.fillRect(px, py, T, T);
 
-    // Wellen-Tupfer auf dem Wasser
-    if (k.typ === 'wasser' && k.var > 0.72) {
-      tctx.fillStyle = 'rgba(255,255,255,0.18)';
-      tctx.fillRect(px + 6 + k.var * 10, py + 12 + k.var * 8, 12, 2);
-    }
+  // Wellen-Tupfer auf dem Wasser
+  if (k.typ === 'wasser' && k.var > 0.72) {
+    tctx.fillStyle = 'rgba(255,255,255,0.18)';
+    tctx.fillRect(px + 6 + k.var * 10, py + 12 + k.var * 8, 12, 2);
+  }
+}
 
-    // Bäume als kleine Nadelbaum-Symbole, Anzahl nach Bestand
-    if (k.baum > 0.02) {
-      const anzahl = Math.max(1, Math.round(k.baum * 3));
-      tctx.textAlign = 'center'; tctx.textBaseline = 'middle';
-      for (let i = 0; i < anzahl; i++) {
-        const ox = ((k.var * 7 + i * 2.6) % 1) * (T - 14) + 7;
-        const oy = ((k.var * 13 + i * 3.7) % 1) * (T - 16) + 9;
-        tctx.font = `${12 + k.baum * 8}px sans-serif`;
-        tctx.fillText('🌲', px + ox, py + oy);
-      }
-    }
+// Symbole auf einer Kachel malen (Bäume, Berge, Gestein)
+function kachelInhalt(x, y) {
+  const k = kachel(x, y);
+  const px = x * T, py = y * T;
+  tctx.textAlign = 'center'; tctx.textBaseline = 'middle';
 
-    // Berge mit Gesteinssymbol
-    if (k.typ === 'berg') {
-      tctx.textAlign = 'center'; tctx.textBaseline = 'middle';
-      tctx.font = `${T * 0.72}px sans-serif`;
-      tctx.fillText('⛰️', px + T / 2, py + T / 2 + 2);
-      if (k.stein > 0 && k.var > 0.5) {
-        tctx.font = `${T * 0.28}px sans-serif`;
-        tctx.fillText('🪨', px + T * 0.75, py + T * 0.78);
-      }
+  // Bäume als kleine Nadelbaum-Symbole, Anzahl nach Bestand
+  if (k.baum > 0.02) {
+    const anzahl = Math.max(1, Math.round(k.baum * 3));
+    for (let i = 0; i < anzahl; i++) {
+      const ox = ((k.var * 7 + i * 2.6) % 1) * (T - 14) + 7;
+      const oy = ((k.var * 13 + i * 3.7) % 1) * (T - 16) + 9;
+      tctx.font = `${12 + k.baum * 8}px sans-serif`;
+      tctx.fillText('🌲', px + ox, py + oy);
     }
   }
+
+  // Berge mit Gesteinssymbol
+  if (k.typ === 'berg') {
+    tctx.font = `${T * 0.72}px sans-serif`;
+    tctx.fillText('⛰️', px + T / 2, py + T / 2 + 2);
+    if (k.stein > 0 && k.var > 0.5) {
+      tctx.font = `${T * 0.28}px sans-serif`;
+      tctx.fillText('🪨', px + T * 0.75, py + T * 0.78);
+    }
+  }
+}
+
+// Das komplette Terrain neu malen (nur beim Start nötig)
+function terrainZeichnen() {
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) kachelHintergrund(x, y);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) kachelInhalt(x, y);
   state.terrainAlt = false;
+  schmutzKacheln.clear();
+}
+
+// Geänderte Kacheln merken (z. B. gefällte oder nachgewachsene Bäume) …
+const schmutzKacheln = new Set();
+function kachelSchmutzig(x, y) { schmutzKacheln.add(y * N + x); }
+
+// … und nur diese Stellen auffrischen statt der ganzen Karte.
+// Es wird je ein 3×3-Block erneuert, weil Baum-Symbole leicht über
+// die Kachelränder hinausragen.
+function kachelnAuffrischen() {
+  for (const idx of schmutzKacheln) {
+    const x0 = idx % N, y0 = (idx / N) | 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++)
+      if (kachel(x0 + dx, y0 + dy)) kachelHintergrund(x0 + dx, y0 + dy);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++)
+      if (kachel(x0 + dx, y0 + dy)) kachelInhalt(x0 + dx, y0 + dy);
+  }
+  schmutzKacheln.clear();
 }
 
 // Abgerundetes Rechteck (eigene Hilfsfunktion, läuft überall)
@@ -901,6 +1060,7 @@ function zeichnen() {
   }
 
   if (state.terrainAlt) terrainZeichnen();
+  else if (schmutzKacheln.size) kachelnAuffrischen();
 
   // Hintergrund: tiefes Meer
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -965,6 +1125,20 @@ function zeichnen() {
       ctx.stroke();
     }
   }
+
+  // --- Das Schiff (leicht auf den Wellen schaukelnd) ---
+  if (schiff.pfad.length) {   // Ziel-Fähnchen, solange gesegelt wird
+    const zielP = schiff.pfad[schiff.pfad.length - 1];
+    ctx.font = `${T * 0.5}px sans-serif`;
+    ctx.fillText('🚩', zielP.x * T, zielP.y * T - 6);
+  }
+  const wippen = Math.sin(performance.now() / 650) * 1.5;
+  ctx.font = `${T * 0.9}px sans-serif`;
+  ctx.fillText('⛵', schiff.x * T, schiff.y * T - 4 + wippen);
+
+  // Beim Kontor-Bau: Baureichweite rund ums Schiff anzeigen
+  if (state.werkzeug === 'kontor')
+    kreisZeichnen({ x: schiff.x, y: schiff.y }, SIM.schiffBauRadius);
 
   // Wirkungskreis des ausgewählten Gebäudes
   if (state.auswahl) {
@@ -1044,7 +1218,7 @@ function kameraBegrenzen() {
 
 function zoomAuf(sx, sy, faktor) {
   const vorher = bildschirmZuWelt(sx, sy);
-  kamera.zoom = Math.min(2.6, Math.max(0.35, kamera.zoom * faktor));
+  kamera.zoom = Math.min(2.6, Math.max(0.15, kamera.zoom * faktor));
   // Der Punkt unter dem Mauszeiger bleibt an Ort und Stelle
   kamera.x = vorher.x - sx / kamera.zoom;
   kamera.y = vorher.y - sy / kamera.zoom;
@@ -1120,6 +1294,19 @@ leinwand.addEventListener('contextmenu', e => {
 function klickAufKarte(sx, sy) {
   if (state.vorbei) return;
   const t = bildschirmZuKachel(sx, sy);
+
+  // Tipp aufs Wasser: das Schiff segelt dorthin. Mit dem Zeiger-Werkzeug
+  // geht das jederzeit, vor dem Kontor-Bau sogar mit jedem Werkzeug.
+  if (t && kachel(t.x, t.y).typ === 'wasser' &&
+      (state.werkzeug === 'zeiger' || !state.kontorGebaut)) {
+    const weg = segelWeg(t.x, t.y);
+    if (weg) {
+      schiff.pfad = weg;
+      if (!state.kontorGebaut) melden('⛵ Leinen los!', 'segeln');
+    } else melden('Dorthin führt kein Seeweg');
+    state.auswahl = null; panelZeigen();
+    return;
+  }
 
   if (state.werkzeug === 'zeiger') {
     state.auswahl = t ? belegtAuf(t.x, t.y) : null;
@@ -1396,12 +1583,24 @@ $('k-musik').addEventListener('click', musikUmschalten);
 /* ---------- 11. HAUPTSCHLEIFE --------------------------------- */
 
 function kameraStart() {
-  // Kamera auf die Inselmitte ausrichten
-  kamera.zoom = Math.min(leinwand.clientWidth, leinwand.clientHeight) / (N * T) * 1.35;
-  kamera.zoom = Math.min(2.6, Math.max(0.35, kamera.zoom));
-  kamera.x = (N * T) / 2 - leinwand.clientWidth / (2 * kamera.zoom);
-  kamera.y = (N * T) / 2 - leinwand.clientHeight / (2 * kamera.zoom);
+  // Start: Blick aufs Schiff, so weit herausgezoomt, dass man das Meer
+  // und die nächsten Inseln gut sieht (auf ca. 30 Kacheln Sichtweite)
+  const wunsch = Math.min(leinwand.clientWidth, leinwand.clientHeight) / (30 * T);
+  kamera.zoom = Math.min(1.1, Math.max(0.3, wunsch));
+  kamera.x = schiff.x * T - leinwand.clientWidth / (2 * kamera.zoom);
+  kamera.y = schiff.y * T - leinwand.clientHeight / (2 * kamera.zoom);
+  kameraBegrenzen();
 }
+
+// 🧭-Knopf: Kamera zurück zum Kontor (oder zum Schiff)
+function zentrieren() {
+  const kontor = gebaeude.find(g => g.typ === 'kontor');
+  const ziel = kontor ? zentrum(kontor) : { x: schiff.x, y: schiff.y };
+  kamera.x = ziel.x * T - leinwand.clientWidth / (2 * kamera.zoom);
+  kamera.y = ziel.y * T - leinwand.clientHeight / (2 * kamera.zoom);
+  kameraBegrenzen();
+}
+$('k-mitte').addEventListener('click', zentrieren);
 
 let zuletzt = performance.now();
 let uiTakt = 0;
@@ -1412,7 +1611,10 @@ function schleife(jetzt) {
   dt = Math.min(dt, 0.1);   // große Sprünge (Tab im Hintergrund) abfangen
 
   const laeuft = !state.pause && !state.vorbei && (!state.gewonnen || state.weiterspielen);
-  if (laeuft && state.kontorGebaut) simSchritt(dt * state.tempo);
+  if (laeuft) {
+    schiffUpdate(dt * state.tempo);
+    simSchritt(dt * state.tempo);
+  }
 
   zeichnen();
 
@@ -1424,6 +1626,7 @@ function schleife(jetzt) {
 
 // --- Los geht's ---
 weltErzeugen();
+schiffStart();
 menueBauen();
 kameraStart();
 leinwand.classList.add('bauen');   // Start-Werkzeug ist das Kontor
