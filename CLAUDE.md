@@ -77,6 +77,8 @@ src/grundstueck.js    Schritt 2: Flurstück abrufen, ausblenden, bemaßen
 src/editor.js         Schritt 3a: Objekte zeichnen/setzen, bemaßen, speichern
 src/bestand.js        Schritt 3b: amtliche Gebäude automatisch erfassen
 src/style.css         Gestaltung (Design-Tokens, Suchleiste, Panel, Editor)
+public/inselspiel.html  Eigenständiges Insel-Aufbauspiel (Bonus): eine einzelne
+                        Datei, läuft auch ohne Server; wird mit veröffentlicht
 CLAUDE.md             Diese Übersicht
 ```
 

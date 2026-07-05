@@ -1,0 +1,1434 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Inselgründer – Aufbauspiel</title>
+<style>
+  /* ============================================================
+     Inselgründer – ein entspanntes Insel-Aufbauspiel
+     Gestaltung: hell & ruhig, eine grüne Akzentfarbe, sanfte
+     Schatten – passend zu den Konventionen des Projekts.
+     ============================================================ */
+  :root {
+    --accent: #16a34a;
+    --accent-dunkel: #15803d;
+    --rot: #dc2626;
+    --text: #1f2937;
+    --text-leise: #6b7280;
+    --flaeche: rgba(255, 255, 255, 0.92);
+    --schatten: 0 4px 18px rgba(0, 0, 0, 0.16);
+    --radius: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--text);
+    background: #2f5d8a; /* Tiefes Meer hinter der Karte */
+    -webkit-user-select: none; user-select: none;
+  }
+
+  /* Die Spielfläche füllt das ganze Fenster */
+  #karte {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    touch-action: none; /* Wir übernehmen Wischen/Zoomen selbst */
+    cursor: grab;
+  }
+  #karte.bauen  { cursor: crosshair; }
+  #karte.ziehen { cursor: grabbing; }
+
+  /* ---------- Ressourcenleiste oben ---------- */
+  #leiste-oben {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 4px;
+    background: var(--flaeche); border-radius: var(--radius);
+    box-shadow: var(--schatten);
+    padding: 6px 10px;
+    max-width: calc(100vw - 16px);
+    overflow-x: auto; scrollbar-width: none;
+    white-space: nowrap; z-index: 10;
+    font-size: 14px;
+  }
+  #leiste-oben::-webkit-scrollbar { display: none; }
+  .res {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 8px; border-radius: 8px;
+  }
+  .res b { font-variant-numeric: tabular-nums; }
+  .res small { color: var(--text-leise); font-size: 11px; }
+  .res.warnung b { color: var(--rot); }
+  .trenner { width: 1px; height: 20px; background: #e5e7eb; margin: 0 2px; flex: none; }
+
+  /* Ziel-Fortschritt (500 Siedler) */
+  #ziel {
+    display: inline-flex; flex-direction: column; gap: 2px; padding: 2px 8px;
+  }
+  #ziel-balken {
+    width: 90px; height: 5px; border-radius: 3px; background: #e5e7eb; overflow: hidden;
+  }
+  #ziel-balken > div { height: 100%; width: 0%; background: var(--accent); transition: width .4s; }
+
+  /* Tempo-/Pause-/Musik-Knöpfe */
+  .knopf {
+    border: none; background: #f3f4f6; color: var(--text);
+    border-radius: 8px; padding: 5px 9px; font-size: 13px; font-weight: 600;
+    cursor: pointer; flex: none;
+  }
+  .knopf:hover { background: #e5e7eb; }
+  .knopf.aktiv { background: var(--accent); color: #fff; }
+
+  /* ---------- Baumenü unten ---------- */
+  #baumenue {
+    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 6px; align-items: stretch;
+    background: var(--flaeche); border-radius: var(--radius);
+    box-shadow: var(--schatten); padding: 8px;
+    max-width: calc(100vw - 16px);
+    overflow-x: auto; scrollbar-width: none;
+    z-index: 10;
+  }
+  #baumenue::-webkit-scrollbar { display: none; }
+  .bau-knopf {
+    border: 2px solid transparent; background: #f9fafb; border-radius: 10px;
+    padding: 6px 8px 5px; cursor: pointer; text-align: center;
+    min-width: 66px; flex: none;
+    display: flex; flex-direction: column; gap: 1px; align-items: center;
+    font-family: inherit;
+  }
+  .bau-knopf:hover { background: #f3f4f6; }
+  .bau-knopf.aktiv { border-color: var(--accent); background: #f0fdf4; }
+  .bau-knopf:disabled { opacity: 0.42; cursor: not-allowed; }
+  .bau-knopf .symbol { font-size: 22px; line-height: 1.15; }
+  .bau-knopf .name   { font-size: 10.5px; font-weight: 600; }
+  .bau-knopf .kosten { font-size: 9.5px; color: var(--text-leise); }
+
+  /* ---------- Info-Panel (Klick auf ein Gebäude) ---------- */
+  #info-panel {
+    position: absolute; top: 64px; right: 10px; width: 236px;
+    background: var(--flaeche); border-radius: var(--radius);
+    box-shadow: var(--schatten); padding: 14px;
+    z-index: 11; display: none; font-size: 13px;
+  }
+  #info-panel h2 { font-size: 15px; margin-bottom: 2px; display: flex; align-items: center; gap: 7px; }
+  #info-panel .beschr { color: var(--text-leise); font-size: 12px; margin-bottom: 9px; }
+  #info-panel .zeile { display: flex; justify-content: space-between; padding: 2.5px 0; }
+  #info-panel .zeile span:last-child { font-weight: 600; font-variant-numeric: tabular-nums; }
+  #info-panel .beduerfnis { display: flex; justify-content: space-between; padding: 2px 0; }
+  #info-panel .ok   { color: var(--accent-dunkel); font-weight: 600; }
+  #info-panel .fehlt{ color: var(--rot); font-weight: 600; }
+  #info-panel hr { border: none; border-top: 1px solid #e5e7eb; margin: 8px 0; }
+  #info-panel .abriss-knopf {
+    width: 100%; margin-top: 10px; border: none; border-radius: 8px;
+    background: #fef2f2; color: var(--rot); font-weight: 600;
+    padding: 8px; cursor: pointer; font-family: inherit; font-size: 13px;
+  }
+  #info-panel .abriss-knopf:hover { background: #fee2e2; }
+  #panel-zu {
+    position: absolute; top: 8px; right: 10px; border: none; background: none;
+    font-size: 15px; color: var(--text-leise); cursor: pointer;
+  }
+
+  /* Auslastungs-Balken im Panel */
+  .auslast-balken { height: 6px; border-radius: 3px; background: #e5e7eb; overflow: hidden; margin-top: 3px; }
+  .auslast-balken > div { height: 100%; background: var(--accent); }
+
+  /* ---------- Meldungen (Toast) & Hinweise ---------- */
+  #toast {
+    position: absolute; bottom: 96px; left: 50%; transform: translateX(-50%);
+    background: rgba(31, 41, 55, 0.92); color: #fff;
+    border-radius: 10px; padding: 8px 16px; font-size: 13px;
+    z-index: 20; pointer-events: none; opacity: 0; transition: opacity .25s;
+    max-width: 90vw; text-align: center;
+  }
+  #hinweis {
+    position: absolute; top: 62px; left: 50%; transform: translateX(-50%);
+    background: var(--flaeche); border-radius: 10px; box-shadow: var(--schatten);
+    padding: 8px 16px; font-size: 13.5px; font-weight: 600; z-index: 9;
+    color: var(--accent-dunkel);
+  }
+  #bankrott-warnung {
+    position: absolute; top: 62px; left: 50%; transform: translateX(-50%);
+    background: #fef2f2; color: var(--rot); border-radius: 10px;
+    box-shadow: var(--schatten); padding: 8px 16px;
+    font-size: 13.5px; font-weight: 700; z-index: 12; display: none;
+  }
+
+  /* ---------- Großes Overlay (Sieg / Niederlage) ---------- */
+  #overlay {
+    position: absolute; inset: 0; z-index: 30;
+    background: rgba(255, 255, 255, 0.75); backdrop-filter: blur(4px);
+    display: none; align-items: center; justify-content: center;
+  }
+  #overlay .box {
+    background: #fff; border-radius: 16px; box-shadow: var(--schatten);
+    padding: 34px 40px; text-align: center; max-width: 420px; margin: 16px;
+  }
+  #overlay .box .gross { font-size: 44px; margin-bottom: 8px; }
+  #overlay .box h1 { font-size: 22px; margin-bottom: 8px; }
+  #overlay .box p { color: var(--text-leise); font-size: 14px; margin-bottom: 18px; line-height: 1.5; }
+  #overlay .box button {
+    border: none; border-radius: 10px; padding: 10px 20px; margin: 0 5px;
+    font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;
+  }
+  .knopf-gruen { background: var(--accent); color: #fff; }
+  .knopf-grau  { background: #f3f4f6; color: var(--text); }
+</style>
+</head>
+<body>
+
+<canvas id="karte"></canvas>
+
+<!-- Ressourcenleiste + Spielsteuerung -->
+<div id="leiste-oben">
+  <span class="res" title="Gold – Steuern minus Unterhalt">💰 <b id="r-gold">0</b> <small id="r-gold-rate"></small></span>
+  <span class="res" title="Holz – Baustoff, wird vom Holzfäller geschlagen">🪵 <b id="r-holz">0</b></span>
+  <span class="res" title="Werkzeuge – nötig für viele Gebäude, aus der Schmiede">⚒️ <b id="r-werkzeuge">0</b></span>
+  <span class="res" title="Nahrung – von Fischern und Jägern, wird laufend gegessen">🍞 <b id="r-nahrung">0</b></span>
+  <span class="res" title="Wolle – von der Schaffarm, Rohstoff der Weberei">🧶 <b id="r-wolle">0</b></span>
+  <span class="res" title="Stoffe – aus der Weberei, Bedürfnis der Siedler">🧵 <b id="r-stoffe">0</b></span>
+  <span class="trenner"></span>
+  <span class="res" title="Einwohner (Pioniere + Siedler)">👥 <b id="r-einwohner">0</b></span>
+  <span id="ziel" title="Ziel: 500 Siedler erreichen">
+    <small style="color:var(--text-leise);font-size:10.5px">🎯 <b id="r-siedler">0</b>/500 Siedler</small>
+    <span id="ziel-balken"><div></div></span>
+  </span>
+  <span class="trenner"></span>
+  <button class="knopf" id="k-pause" title="Pause (Leertaste)">⏸</button>
+  <button class="knopf aktiv" id="k-tempo1" title="Normale Geschwindigkeit (Taste 1)">1×</button>
+  <button class="knopf" id="k-tempo2" title="Doppelte Geschwindigkeit (Taste 2)">2×</button>
+  <button class="knopf" id="k-tempo3" title="Dreifache Geschwindigkeit (Taste 3)">3×</button>
+  <button class="knopf" id="k-musik" title="Musik ein/aus">🎵</button>
+</div>
+
+<!-- Hinweis zu Spielbeginn -->
+<div id="hinweis">⚓ Willkommen! Platziere zuerst dein Kontor an der Küste.</div>
+<div id="bankrott-warnung"></div>
+
+<!-- Baumenü (wird per JavaScript gefüllt) -->
+<div id="baumenue"></div>
+
+<!-- Info-Panel für angeklickte Gebäude -->
+<div id="info-panel">
+  <button id="panel-zu">✕</button>
+  <div id="panel-inhalt"></div>
+</div>
+
+<div id="toast"></div>
+
+<!-- Sieg / Niederlage -->
+<div id="overlay"><div class="box" id="overlay-box"></div></div>
+
+<script>
+'use strict';
+/* ==============================================================
+   INSELGRÜNDER
+   Ein browserbasiertes Aufbau-Strategiespiel im Stil klassischer
+   Insel-Aufbauspiele der 90er. Eine einzelne Datei, HTML5 Canvas,
+   reines JavaScript – lauffähig ohne Server.
+
+   Gliederung dieses Skripts:
+     1. Konstanten & Gebäude-Definitionen
+     2. Spielzustand
+     3. Weltgenerierung (prozedurale Insel)
+     4. Hilfsfunktionen (Umkreis, Küste, Marktanbindung …)
+     5. Bauen & Abreißen
+     6. Simulation (Produktion, Bevölkerung, Steuern)
+     7. Zeichnen (Terrain-Cache + Gebäude + Overlays)
+     8. Kamera & Eingabe (Maus, Touch, Tastatur)
+     9. Benutzeroberfläche (Leisten, Panel, Meldungen)
+    10. Musik (Web Audio API)
+    11. Hauptschleife
+   ============================================================== */
+
+/* ---------- 1. KONSTANTEN ------------------------------------ */
+
+const N = 40;   // Kacheln je Seite (40×40-Karte)
+const T = 40;   // Weltpixel je Kachel (interne Zeichengröße)
+
+// Wirtschafts-Stellschrauben – alle Werte "pro Sekunde" bei 1×-Tempo.
+const SIM = {
+  nahrungJeEinwohner: 0.004,   // Nahrung, die jede:r Einwohner:in isst
+  stoffeJeSiedler:    0.0015,  // Stoffe, die Siedler verbrauchen
+  steuerPionier:      0.03,    // Gold je Pionier
+  steuerSiedler:      0.07,    // Gold je Siedler
+  wachstumsDauer:     6,       // Sekunden bis +1 Einwohner (bei Zufriedenheit)
+  aufstiegsDauer:     8,       // Sekunden erfüllte Bedürfnisse bis zum Aufstieg
+  hungerBisWegzug:    14,      // Sekunden Hunger, bis jemand die Insel verlässt
+  pleiteDauer:        60,      // Sekunden mit Gold < 0 bis zum Bankrott
+  zielSiedler:        500,     // Siegbedingung
+  baumNachwuchs:      0.02,    // Wald wächst langsam nach ("abbaubar", aber erneuerbar)
+};
+
+// Gebäudekatalog. Kosten in Gold/Holz/Werkzeugen, Unterhalt in Gold je Sekunde.
+// "dauer" = Sekunden je Produktionszyklus, "radius" = Wirkungs-/Suchradius in Kacheln.
+const GEBAEUDE = {
+  kontor: {
+    name: 'Kontor', emoji: '⚓', w: 2, h: 2, farbe: '#d9c48a',
+    kosten: { gold: 0, holz: 0, werkzeuge: 0 }, unterhalt: 0,
+    marktRadius: 8, brauchtKueste: true,
+    beschr: 'Dein Handelsstützpunkt. Versorgt Häuser im Umkreis wie ein Marktplatz.',
+  },
+  marktplatz: {
+    name: 'Marktplatz', emoji: '⛲', w: 2, h: 2, farbe: '#e3cfa4',
+    kosten: { gold: 200, holz: 8, werkzeuge: 3 }, unterhalt: 0.10,
+    marktRadius: 9,
+    beschr: 'Versorgt Wohnhäuser im Umkreis. Ohne Marktanbindung wächst kein Haus.',
+  },
+  wohnhaus: {
+    name: 'Wohnhaus', emoji: '🛖', w: 1, h: 1, farbe: '#d8b78e',
+    kosten: { gold: 50, holz: 3, werkzeuge: 0 }, unterhalt: 0,
+    beschr: 'Hier leben deine Einwohner:innen und zahlen Steuern. Pioniere steigen zu Siedlern auf, wenn Nahrung, Stoffe und eine Kapelle vorhanden sind.',
+  },
+  fischer: {
+    name: 'Fischerhütte', emoji: '🎣', w: 1, h: 1, farbe: '#a9c3d6',
+    kosten: { gold: 90, holz: 5, werkzeuge: 2 }, unterhalt: 0.06,
+    dauer: 4, radius: 3, brauchtKueste: true,
+    beschr: 'Fängt Fisch (Nahrung). Muss direkt an der Küste stehen.',
+  },
+  holzfaeller: {
+    name: 'Holzfällerhütte', emoji: '🪓', w: 1, h: 1, farbe: '#b99b74',
+    kosten: { gold: 90, holz: 3, werkzeuge: 1 }, unterhalt: 0.06,
+    dauer: 5, radius: 4,
+    beschr: 'Schlägt Holz. Braucht Wald in Reichweite – der Wald wächst langsam nach.',
+  },
+  jagd: {
+    name: 'Jagdhütte', emoji: '🏹', w: 1, h: 1, farbe: '#a8b58a',
+    kosten: { gold: 110, holz: 4, werkzeuge: 1 }, unterhalt: 0.07,
+    dauer: 5, radius: 5,
+    beschr: 'Erlegt Wild (Nahrung). Braucht Wald in Reichweite, fällt aber keine Bäume.',
+  },
+  schaffarm: {
+    name: 'Schaffarm', emoji: '🐑', w: 1, h: 1, farbe: '#cfd8b0',
+    kosten: { gold: 180, holz: 6, werkzeuge: 2 }, unterhalt: 0.09,
+    dauer: 6, radius: 3,
+    beschr: 'Erzeugt Wolle. Braucht freies Grasland als Weide im Umkreis.',
+  },
+  weberei: {
+    name: 'Weberei', emoji: '🧶', w: 1, h: 1, farbe: '#d6b8c8',
+    kosten: { gold: 240, holz: 8, werkzeuge: 3 }, unterhalt: 0.12,
+    dauer: 5,
+    beschr: 'Webt Wolle zu Stoffen. Produktionskette: Schaffarm → Weberei → Stoffe.',
+  },
+  schmiede: {
+    name: 'Werkzeugschmiede', emoji: '⚒️', w: 1, h: 1, farbe: '#b8b8b8',
+    kosten: { gold: 280, holz: 10, werkzeuge: 2 }, unterhalt: 0.15,
+    dauer: 8, radius: 5,
+    beschr: 'Fertigt Werkzeuge aus Holz. Braucht ein Gesteinsvorkommen (Berge) in der Nähe.',
+  },
+  kapelle: {
+    name: 'Kapelle', emoji: '⛪', w: 2, h: 2, farbe: '#e8e2d4',
+    kosten: { gold: 400, holz: 12, werkzeuge: 4 }, unterhalt: 0.15,
+    radius: 9,
+    beschr: 'Stillt das Bedürfnis nach Glauben. Nötig, damit Pioniere zu Siedlern aufsteigen.',
+  },
+};
+
+// Reihenfolge im Baumenü
+const MENUE_REIHENFOLGE = ['kontor', 'marktplatz', 'wohnhaus', 'fischer',
+  'holzfaeller', 'jagd', 'schaffarm', 'weberei', 'schmiede', 'kapelle'];
+
+/* ---------- 2. SPIELZUSTAND ---------------------------------- */
+
+const res = { gold: 10000, holz: 40, werkzeuge: 20, nahrung: 40, wolle: 0, stoffe: 0 };
+
+let karte = [];      // N*N Kacheln: { typ, baum, stein, var }
+let belegt = [];     // N*N: welches Gebäude steht hier? (oder null)
+let gebaeude = [];   // Liste aller Gebäude
+let naechsteId = 1;
+
+const state = {
+  werkzeug: 'kontor',     // aktives Werkzeug: 'zeiger', 'abriss' oder Gebäudetyp
+  kontorGebaut: false,
+  auswahl: null,          // aktuell angeklicktes Gebäude
+  pause: false,
+  tempo: 1,               // 1, 2 oder 3
+  vorbei: false,          // Bankrott
+  gewonnen: false,        // 500 Siedler geschafft
+  weiterspielen: false,   // nach dem Sieg weiterspielen
+  pleiteZeit: 0,          // Sekunden mit Gold < 0
+  goldRate: 0,            // geglättete Bilanz (Gold je Sekunde)
+  hunger: false,          // Nahrungslager leer?
+  hover: null,            // Mauszeigerposition auf dem Bildschirm
+  terrainAlt: true,       // Terrain-Cache neu zeichnen?
+  spielzeit: 0,
+};
+
+const kamera = { x: 0, y: 0, zoom: 1 };
+
+/* ---------- 3. WELTGENERIERUNG ------------------------------- */
+
+// Einfacher, wiederholbarer Zufallszahlengenerator
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// Wertrauschen: grobes Zufallsgitter, weich interpoliert → sanfte Formen
+function wertRauschen(rnd, gitter) {
+  const g = [];
+  for (let i = 0; i < (gitter + 1) * (gitter + 1); i++) g.push(rnd());
+  const glatt = t => t * t * (3 - 2 * t);
+  return function (u, v) {   // u, v in 0..1
+    const fx = u * gitter, fy = v * gitter;
+    const x0 = Math.min(Math.floor(fx), gitter - 1);
+    const y0 = Math.min(Math.floor(fy), gitter - 1);
+    const tx = glatt(fx - x0), ty = glatt(fy - y0);
+    const w = (x, y) => g[y * (gitter + 1) + x];
+    const oben  = w(x0, y0)     * (1 - tx) + w(x0 + 1, y0)     * tx;
+    const unten = w(x0, y0 + 1) * (1 - tx) + w(x0 + 1, y0 + 1) * tx;
+    return oben * (1 - ty) + unten * ty;
+  };
+}
+
+// Erzeugt die Insel. Probiert mehrere Zufalls-Startwerte, bis eine
+// Insel mit sinnvollem Landanteil herauskommt.
+function weltErzeugen() {
+  for (let versuch = 0; versuch < 40; versuch++) {
+    const saat = (Math.random() * 1e9) | 0;
+    const rnd = mulberry32(saat);
+    const grob = wertRauschen(rnd, 4);   // große Inselform
+    const fein = wertRauschen(rnd, 9);   // Details der Küstenlinie
+    const waldR = wertRauschen(rnd, 6);  // wo Wald wächst
+
+    karte = []; belegt = [];
+    let land = 0, berge = 0;
+
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        const u = x / (N - 1), v = y / (N - 1);
+        // Radialer Abfall: Mitte hoch, Ränder tief → garantiert eine Insel
+        const dx = (u - 0.5) * 2, dy = (v - 0.5) * 2;
+        const abstand = Math.sqrt(dx * dx + dy * dy);
+        const hoehe = 0.62 * grob(u, v) + 0.38 * fein(u, v)
+                    - Math.pow(abstand, 1.9) * 0.62 - 0.04;
+
+        let typ;
+        if      (hoehe < 0.16) typ = 'wasser';
+        else if (hoehe < 0.21) typ = 'strand';
+        else if (hoehe < 0.52) typ = 'gras';
+        else                   typ = 'berg';
+
+        const kachel = { typ, baum: 0, stein: 0, var: rnd() };
+        if (typ === 'berg') { kachel.stein = 200 + Math.round(rnd() * 300); berge++; }
+        if (typ !== 'wasser') land++;
+        karte.push(kachel);
+        belegt.push(null);
+      }
+    }
+
+    // Landanteil prüfen – sonst neue Insel würfeln
+    const anteil = land / (N * N);
+    if (anteil < 0.30 || anteil > 0.60 || berge < 4) continue;
+
+    // Strand-Saum: Land direkt am Wasser wird zu Strand
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const k = kachel(x, y);
+      if (k.typ === 'gras') {
+        for (const [ax, ay] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const n = kachel(x + ax, y + ay);
+          if (n && n.typ === 'wasser') { k.typ = 'strand'; break; }
+        }
+      }
+    }
+
+    // Wald auf Grasflächen verteilen (dichte Kerne, lockere Ränder)
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const k = kachel(x, y);
+      if (k.typ === 'gras') {
+        const w = waldR(x / (N - 1), y / (N - 1));
+        if (w > 0.56) { k.typ = 'wald'; k.baum = Math.min(1, 0.4 + (w - 0.56) * 3); }
+      }
+    }
+    return; // Insel angenommen
+  }
+  // Notnagel (praktisch nie nötig): letzte gewürfelte Karte behalten
+}
+
+function kachel(x, y) {
+  if (x < 0 || y < 0 || x >= N || y >= N) return null;
+  return karte[y * N + x];
+}
+function belegtAuf(x, y) {
+  if (x < 0 || y < 0 || x >= N || y >= N) return null;
+  return belegt[y * N + x];
+}
+
+/* ---------- 4. HILFSFUNKTIONEN ------------------------------- */
+
+// Mittelpunkt eines Gebäudes in Kachel-Koordinaten
+function zentrum(geb) {
+  const def = GEBAEUDE[geb.typ];
+  return { x: geb.x + def.w / 2, y: geb.y + def.h / 2 };
+}
+function abstandGebaeude(a, b) {
+  const za = zentrum(a), zb = zentrum(b);
+  return Math.hypot(za.x - zb.x, za.y - zb.y);
+}
+
+// Alle Kacheln im Umkreis (Kreis, nicht Quadrat) um einen Punkt besuchen
+function imUmkreis(cx, cy, radius, fn) {
+  const r = Math.ceil(radius);
+  for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++) {
+    for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) {
+      const k = kachel(x, y);
+      if (!k) continue;
+      if (Math.hypot(x + 0.5 - cx, y + 0.5 - cy) <= radius) fn(k, x, y);
+    }
+  }
+}
+
+// Liegt Wasser höchstens 2 Kacheln von der Gebäudefläche entfernt?
+function kuesteNah(ax, ay, def) {
+  for (let y = ay - 2; y < ay + def.h + 2; y++) {
+    for (let x = ax - 2; x < ax + def.w + 2; x++) {
+      const k = kachel(x, y);
+      if (k && k.typ === 'wasser') return true;
+    }
+  }
+  return false;
+}
+
+// Baumdichte im Umkreis (Summe der Bestände)
+function baeumeImUmkreis(cx, cy, radius) {
+  let summe = 0;
+  imUmkreis(cx, cy, radius, k => { summe += k.baum; });
+  return summe;
+}
+
+// Freie Graskacheln im Umkreis (Weideland für die Schaffarm)
+function weideImUmkreis(cx, cy, radius) {
+  let n = 0;
+  imUmkreis(cx, cy, radius, (k, x, y) => {
+    if ((k.typ === 'gras' || k.typ === 'wald') && !belegtAuf(x, y)) n++;
+  });
+  return n;
+}
+
+// Wasserkacheln im Umkreis (Fanggründe des Fischers)
+function wasserImUmkreis(cx, cy, radius) {
+  let n = 0;
+  imUmkreis(cx, cy, radius, k => { if (k.typ === 'wasser') n++; });
+  return n;
+}
+
+// Gesteinsvorkommen mit Restbestand im Umkreis finden
+function steinKachelImUmkreis(cx, cy, radius) {
+  let fund = null;
+  imUmkreis(cx, cy, radius, (k) => {
+    if (k.typ === 'berg' && k.stein > 0 && !fund) fund = k;
+  });
+  return fund;
+}
+
+// Ist ein Punkt an einen Marktplatz oder das Kontor angebunden?
+function marktAnbindung(cx, cy) {
+  for (const g of gebaeude) {
+    const def = GEBAEUDE[g.typ];
+    if (!def.marktRadius) continue;
+    const z = zentrum(g);
+    if (Math.hypot(z.x - cx, z.y - cy) <= def.marktRadius) return true;
+  }
+  return false;
+}
+
+// Steht eine Kapelle in Reichweite eines Punkts?
+function kapelleInReichweite(cx, cy) {
+  for (const g of gebaeude) {
+    if (g.typ !== 'kapelle') continue;
+    const z = zentrum(g);
+    if (Math.hypot(z.x - cx, z.y - cy) <= GEBAEUDE.kapelle.radius) return true;
+  }
+  return false;
+}
+
+/* ---------- 5. BAUEN & ABREISSEN ------------------------------ */
+
+// Der Anker (linke obere Ecke) liegt so, dass der Mauszeiger
+// ungefähr in der Gebäudemitte ist.
+function ankerVon(typ, tx, ty) {
+  const def = GEBAEUDE[typ];
+  return { x: tx - Math.floor((def.w - 1) / 2), y: ty - Math.floor((def.h - 1) / 2) };
+}
+
+// Prüft, ob ein Gebäude an dieser Stelle stehen darf.
+function platzOK(typ, ax, ay) {
+  const def = GEBAEUDE[typ];
+  if (ax < 0 || ay < 0 || ax + def.w > N || ay + def.h > N)
+    return { ok: false, grund: 'Außerhalb der Karte' };
+
+  for (let y = ay; y < ay + def.h; y++) for (let x = ax; x < ax + def.w; x++) {
+    const k = kachel(x, y);
+    if (k.typ === 'wasser') return { ok: false, grund: 'Im Wasser kann nicht gebaut werden' };
+    if (k.typ === 'berg')   return { ok: false, grund: 'Auf Bergen kann nicht gebaut werden' };
+    if (belegtAuf(x, y))    return { ok: false, grund: 'Hier steht bereits ein Gebäude' };
+  }
+
+  if (typ === 'kontor' && state.kontorGebaut)
+    return { ok: false, grund: 'Es gibt bereits ein Kontor' };
+  if (def.brauchtKueste && !kuesteNah(ax, ay, def))
+    return { ok: false, grund: 'Muss an der Küste liegen' };
+
+  const cx = ax + def.w / 2, cy = ay + def.h / 2;
+  if (typ === 'holzfaeller' && baeumeImUmkreis(cx, cy, def.radius) < 0.5)
+    return { ok: false, grund: 'Kein Wald in Reichweite' };
+  if (typ === 'jagd' && baeumeImUmkreis(cx, cy, def.radius) < 0.5)
+    return { ok: false, grund: 'Kein Wald in Reichweite' };
+  if (typ === 'schmiede' && !steinKachelImUmkreis(cx, cy, def.radius))
+    return { ok: false, grund: 'Kein Gesteinsvorkommen (Berge) in der Nähe' };
+  if (typ === 'wohnhaus' && !marktAnbindung(cx, cy))
+    return { ok: false, grund: 'Außerhalb der Reichweite von Marktplatz/Kontor' };
+
+  return { ok: true };
+}
+
+function kostenReichen(typ) {
+  const k = GEBAEUDE[typ].kosten;
+  return res.gold >= k.gold && res.holz >= k.holz && res.werkzeuge >= k.werkzeuge;
+}
+
+function platziere(typ, tx, ty) {
+  const { x: ax, y: ay } = ankerVon(typ, tx, ty);
+  const pruefung = platzOK(typ, ax, ay);
+  if (!pruefung.ok) { melden(pruefung.grund); return false; }
+  if (!kostenReichen(typ)) { melden('Zu wenig Rohstoffe für dieses Gebäude'); return false; }
+
+  const def = GEBAEUDE[typ];
+  res.gold -= def.kosten.gold;
+  res.holz -= def.kosten.holz;
+  res.werkzeuge -= def.kosten.werkzeuge;
+
+  const geb = {
+    id: naechsteId++, typ, x: ax, y: ay,
+    fortschritt: 0,   // Produktionsfortschritt in Sekunden
+    eff: 0,           // Auslastung 0..1 (für das Info-Panel)
+  };
+  if (typ === 'wohnhaus') {
+    Object.assign(geb, {
+      stufe: 'pionier', ew: 2, maxEw: 8,
+      zufrieden: true, hungerZeit: 0, wachsZeit: 0, aufstiegZeit: 0,
+    });
+  }
+  gebaeude.push(geb);
+
+  // Kacheln belegen; Bäume auf dem Baufeld werden gerodet
+  for (let y = ay; y < ay + def.h; y++) for (let x = ax; x < ax + def.w; x++) {
+    belegt[y * N + x] = geb;
+    const k = kachel(x, y);
+    if (k.baum > 0) { k.baum = 0; state.terrainAlt = true; }
+  }
+
+  if (typ === 'kontor') {
+    state.kontorGebaut = true;
+    state.werkzeug = 'zeiger';
+    document.getElementById('hinweis').style.display = 'none';
+    melden('Kontor errichtet – jetzt Wohnhäuser und Betriebe bauen!');
+    menueBauen(); // Menü neu aufbauen (Kontor verschwindet daraus)
+  }
+  return true;
+}
+
+function abreissen(geb) {
+  const def = GEBAEUDE[geb.typ];
+  // Kacheln freigeben
+  for (let y = geb.y; y < geb.y + def.h; y++)
+    for (let x = geb.x; x < geb.x + def.w; x++)
+      belegt[y * N + x] = null;
+  gebaeude = gebaeude.filter(g => g !== geb);
+
+  // Die Hälfte von Gold und Holz gibt es zurück
+  res.gold += Math.floor(def.kosten.gold / 2);
+  res.holz += Math.floor(def.kosten.holz / 2);
+
+  if (geb.typ === 'kontor') { state.kontorGebaut = false; menueBauen(); }
+  if (state.auswahl === geb) { state.auswahl = null; panelZeigen(); }
+  melden(def.name + ' abgerissen');
+}
+
+/* ---------- 6. SIMULATION ------------------------------------- */
+
+function simSchritt(dt) {
+  state.spielzeit += dt;
+
+  // --- Bevölkerung zählen ---
+  let einwohner = 0, siedlerEw = 0, pionierEw = 0;
+  for (const g of gebaeude) {
+    if (g.typ !== 'wohnhaus') continue;
+    einwohner += g.ew;
+    if (g.stufe === 'siedler') siedlerEw += g.ew; else pionierEw += g.ew;
+  }
+
+  // --- Verbrauch: Nahrung (alle) und Stoffe (nur Siedler) ---
+  res.nahrung = Math.max(0, res.nahrung - einwohner * SIM.nahrungJeEinwohner * dt);
+  res.stoffe  = Math.max(0, res.stoffe  - siedlerEw * SIM.stoffeJeSiedler   * dt);
+  state.hunger = einwohner > 0 && res.nahrung <= 0.001;
+  const stoffeDa = res.stoffe > 0.5;
+
+  let steuern = 0, unterhalt = 0;
+
+  // --- Bäume wachsen langsam nach ---
+  state.baumTimer = (state.baumTimer || 0) + dt;
+  while (state.baumTimer >= 1) {
+    state.baumTimer -= 1;
+    for (let i = 0; i < 25; i++) {  // 25 Zufallsproben je Sekunde
+      const idx = (Math.random() * N * N) | 0;
+      const k = karte[idx];
+      if (k.typ === 'wald' && k.baum < 1 && !belegt[idx]) {
+        k.baum = Math.min(1, k.baum + SIM.baumNachwuchs);
+        state.terrainAlt = true;
+      }
+    }
+  }
+
+  // --- Alle Gebäude durchgehen ---
+  for (const geb of gebaeude) {
+    const def = GEBAEUDE[geb.typ];
+    unterhalt += def.unterhalt * dt;
+    const z = zentrum(geb);
+
+    switch (geb.typ) {
+
+      case 'fischer': {
+        // Auslastung hängt von den Fanggründen (Wasserkacheln) ab
+        geb.eff = Math.min(1, wasserImUmkreis(z.x, z.y, def.radius) / 6);
+        geb.fortschritt += dt * geb.eff;
+        if (geb.fortschritt >= def.dauer) { geb.fortschritt -= def.dauer; res.nahrung += 1; }
+        break;
+      }
+
+      case 'jagd': {
+        geb.eff = Math.min(1, baeumeImUmkreis(z.x, z.y, def.radius) / 5);
+        geb.fortschritt += dt * geb.eff;
+        if (geb.fortschritt >= def.dauer) { geb.fortschritt -= def.dauer; res.nahrung += 1; }
+        break;
+      }
+
+      case 'holzfaeller': {
+        geb.eff = Math.min(1, baeumeImUmkreis(z.x, z.y, def.radius) / 4);
+        geb.fortschritt += dt * geb.eff;
+        if (geb.fortschritt >= def.dauer) {
+          geb.fortschritt -= def.dauer;
+          res.holz += 1;
+          // Die dichteste Waldkachel im Umkreis wird etwas abgeholzt
+          let beste = null;
+          imUmkreis(z.x, z.y, def.radius, k => {
+            if (k.baum > 0 && (!beste || k.baum > beste.baum)) beste = k;
+          });
+          if (beste) { beste.baum = Math.max(0, beste.baum - 0.12); state.terrainAlt = true; }
+        }
+        break;
+      }
+
+      case 'schaffarm': {
+        geb.eff = Math.min(1, weideImUmkreis(z.x, z.y, def.radius) / 10);
+        geb.fortschritt += dt * geb.eff;
+        if (geb.fortschritt >= def.dauer) { geb.fortschritt -= def.dauer; res.wolle += 1; }
+        break;
+      }
+
+      case 'weberei': {
+        // Verarbeitet Wolle zu Stoffen – läuft nur, wenn Wolle da ist
+        if (res.wolle >= 1) {
+          geb.eff = Math.min(1, geb.eff + dt);      // sanft hochfahren
+          geb.fortschritt += dt;
+          if (geb.fortschritt >= def.dauer) {
+            geb.fortschritt -= def.dauer;
+            res.wolle -= 1; res.stoffe += 1;
+          }
+        } else geb.eff = Math.max(0, geb.eff - dt);
+        break;
+      }
+
+      case 'schmiede': {
+        // Fertigt Werkzeuge aus Holz, solange das Gestein reicht
+        const stein = steinKachelImUmkreis(z.x, z.y, def.radius);
+        if (res.holz >= 1 && stein) {
+          geb.eff = Math.min(1, geb.eff + dt);
+          geb.fortschritt += dt;
+          if (geb.fortschritt >= def.dauer) {
+            geb.fortschritt -= def.dauer;
+            res.holz -= 1; res.werkzeuge += 1; stein.stein -= 1;
+          }
+        } else geb.eff = Math.max(0, geb.eff - dt);
+        break;
+      }
+
+      case 'wohnhaus': {
+        const markt = marktAnbindung(z.x, z.y);
+        const satt = !state.hunger;
+        geb.zufrieden = markt && satt;
+
+        // Steuern: Unzufriedene zahlen nur die Hälfte
+        const satz = geb.stufe === 'siedler' ? SIM.steuerSiedler : SIM.steuerPionier;
+        steuern += geb.ew * satz * (geb.zufrieden ? 1 : 0.5) * dt;
+
+        // Hunger: nach einer Weile ziehen Leute weg
+        if (state.hunger) {
+          geb.hungerZeit += dt;
+          if (geb.hungerZeit >= SIM.hungerBisWegzug) {
+            geb.hungerZeit = 0;
+            if (geb.ew > 1) geb.ew -= 1;
+          }
+        } else geb.hungerZeit = Math.max(0, geb.hungerZeit - dt);
+
+        // Wachstum bei Zufriedenheit
+        if (geb.zufrieden && geb.ew < geb.maxEw) {
+          geb.wachsZeit += dt;
+          if (geb.wachsZeit >= SIM.wachstumsDauer) { geb.wachsZeit = 0; geb.ew += 1; }
+        } else geb.wachsZeit = 0;
+
+        // Aufstieg Pioniere → Siedler: Nahrung + Stoffe + Kapelle + volles Haus
+        if (geb.stufe === 'pionier') {
+          const bereit = geb.zufrieden && stoffeDa && geb.ew >= 6
+                       && kapelleInReichweite(z.x, z.y);
+          if (bereit) {
+            geb.aufstiegZeit += dt;
+            if (geb.aufstiegZeit >= SIM.aufstiegsDauer) {
+              geb.stufe = 'siedler'; geb.maxEw = 15; geb.aufstiegZeit = 0;
+              melden('🎉 Ein Haus ist zu Siedlern aufgestiegen!', 'aufstieg');
+            }
+          } else geb.aufstiegZeit = 0;
+        }
+        break;
+      }
+    }
+  }
+
+  // --- Goldbilanz ---
+  res.gold += steuern - unterhalt;
+  const rate = dt > 0 ? (steuern - unterhalt) / dt : 0;
+  state.goldRate = state.goldRate * 0.95 + rate * 0.05;
+
+  // --- Bankrott-Uhr ---
+  if (res.gold < 0) {
+    state.pleiteZeit += dt;
+    if (state.pleiteZeit >= SIM.pleiteDauer && !state.vorbei) spielVorbei();
+  } else state.pleiteZeit = 0;
+
+  // --- Siegbedingung ---
+  if (!state.gewonnen && siedlerEw >= SIM.zielSiedler) {
+    state.gewonnen = true;
+    gewonnenAnzeigen();
+  }
+
+  // Werte für die Anzeige merken
+  state.einwohner = einwohner;
+  state.siedlerEw = siedlerEw;
+  state.pionierEw = pionierEw;
+}
+
+/* ---------- 7. ZEICHNEN --------------------------------------- */
+
+const leinwand = document.getElementById('karte');
+const ctx = leinwand.getContext('2d');
+let dpr = 1;
+
+// Das Terrain ändert sich selten – wir zeichnen es einmal in einen
+// unsichtbaren Puffer und stempeln den jedes Bild nur noch auf.
+const terrainPuffer = document.createElement('canvas');
+terrainPuffer.width = N * T; terrainPuffer.height = N * T;
+const tctx = terrainPuffer.getContext('2d');
+
+function terrainZeichnen() {
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const k = kachel(x, y);
+    const px = x * T, py = y * T;
+    const v = (k.var - 0.5) * 14; // kleine Helligkeitsvariation je Kachel
+
+    let farbe;
+    if      (k.typ === 'wasser') farbe = `rgb(${64 + v},${118 + v},${168 + v})`;
+    else if (k.typ === 'strand') farbe = `rgb(${232 + v},${217 + v},${168 + v})`;
+    else if (k.typ === 'berg')   farbe = `rgb(${158 + v},${158 + v},${150 + v})`;
+    else if (k.typ === 'wald')   farbe = `rgb(${106 + v},${156 + v},${88 + v})`;
+    else                         farbe = `rgb(${127 + v},${176 + v},${105 + v})`;
+    tctx.fillStyle = farbe;
+    tctx.fillRect(px, py, T, T);
+
+    // Wellen-Tupfer auf dem Wasser
+    if (k.typ === 'wasser' && k.var > 0.72) {
+      tctx.fillStyle = 'rgba(255,255,255,0.18)';
+      tctx.fillRect(px + 6 + k.var * 10, py + 12 + k.var * 8, 12, 2);
+    }
+
+    // Bäume als kleine Nadelbaum-Symbole, Anzahl nach Bestand
+    if (k.baum > 0.02) {
+      const anzahl = Math.max(1, Math.round(k.baum * 3));
+      tctx.textAlign = 'center'; tctx.textBaseline = 'middle';
+      for (let i = 0; i < anzahl; i++) {
+        const ox = ((k.var * 7 + i * 2.6) % 1) * (T - 14) + 7;
+        const oy = ((k.var * 13 + i * 3.7) % 1) * (T - 16) + 9;
+        tctx.font = `${12 + k.baum * 8}px sans-serif`;
+        tctx.fillText('🌲', px + ox, py + oy);
+      }
+    }
+
+    // Berge mit Gesteinssymbol
+    if (k.typ === 'berg') {
+      tctx.textAlign = 'center'; tctx.textBaseline = 'middle';
+      tctx.font = `${T * 0.72}px sans-serif`;
+      tctx.fillText('⛰️', px + T / 2, py + T / 2 + 2);
+      if (k.stein > 0 && k.var > 0.5) {
+        tctx.font = `${T * 0.28}px sans-serif`;
+        tctx.fillText('🪨', px + T * 0.75, py + T * 0.78);
+      }
+    }
+  }
+  state.terrainAlt = false;
+}
+
+// Abgerundetes Rechteck (eigene Hilfsfunktion, läuft überall)
+function rundRect(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
+}
+
+function zeichnen() {
+  // Leinwandgröße an das Fenster anpassen (inkl. HiDPI)
+  dpr = window.devicePixelRatio || 1;
+  const b = leinwand.clientWidth, h = leinwand.clientHeight;
+  if (leinwand.width !== b * dpr || leinwand.height !== h * dpr) {
+    leinwand.width = b * dpr; leinwand.height = h * dpr;
+  }
+
+  if (state.terrainAlt) terrainZeichnen();
+
+  // Hintergrund: tiefes Meer
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#2f5d8a';
+  ctx.fillRect(0, 0, b, h);
+
+  // Ab hier in Weltkoordinaten zeichnen
+  const z = kamera.zoom;
+  ctx.setTransform(dpr * z, 0, 0, dpr * z, -kamera.x * dpr * z, -kamera.y * dpr * z);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(terrainPuffer, 0, 0);
+
+  // Gitterlinien nur beim Bauen einblenden
+  const bauModus = state.werkzeug !== 'zeiger' && state.werkzeug !== 'abriss';
+  if (bauModus) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+    ctx.lineWidth = 1 / z;
+    ctx.beginPath();
+    for (let i = 0; i <= N; i++) {
+      ctx.moveTo(i * T, 0); ctx.lineTo(i * T, N * T);
+      ctx.moveTo(0, i * T); ctx.lineTo(N * T, i * T);
+    }
+    ctx.stroke();
+  }
+
+  // --- Gebäude ---
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const geb of gebaeude) {
+    const def = GEBAEUDE[geb.typ];
+    const px = geb.x * T, py = geb.y * T, bw = def.w * T, bh = def.h * T;
+
+    // Sockel
+    rundRect(ctx, px + 3, py + 3, bw - 6, bh - 6, 6);
+    ctx.fillStyle = def.farbe;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Symbol – Siedlerhäuser sehen anders aus als Pionierhütten
+    let emoji = def.emoji;
+    if (geb.typ === 'wohnhaus' && geb.stufe === 'siedler') emoji = '🏠';
+    ctx.font = `${Math.min(bw, bh) * 0.58}px sans-serif`;
+    ctx.fillText(emoji, px + bw / 2, py + bh / 2 + 1);
+
+    // Bedürfnis-Punkt an jedem Wohnhaus: grün = zufrieden, rot = nicht
+    if (geb.typ === 'wohnhaus') {
+      ctx.beginPath();
+      ctx.arc(px + bw - 7, py + 7, 4.5, 0, Math.PI * 2);
+      ctx.fillStyle = geb.zufrieden ? '#16a34a' : '#dc2626';
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
+
+    // Auswahl-Rahmen
+    if (state.auswahl === geb) {
+      rundRect(ctx, px + 1, py + 1, bw - 2, bh - 2, 7);
+      ctx.strokeStyle = '#16a34a';
+      ctx.lineWidth = 3 / Math.sqrt(z);
+      ctx.stroke();
+    }
+  }
+
+  // Wirkungskreis des ausgewählten Gebäudes
+  if (state.auswahl) {
+    const def = GEBAEUDE[state.auswahl.typ];
+    const radius = def.marktRadius || def.radius;
+    if (radius) kreisZeichnen(zentrum(state.auswahl), radius);
+  }
+
+  // --- Bau-Vorschau unter dem Mauszeiger ---
+  if (bauModus && state.hover) {
+    const t = bildschirmZuKachel(state.hover.sx, state.hover.sy);
+    if (t) {
+      const def = GEBAEUDE[state.werkzeug];
+      const a = ankerVon(state.werkzeug, t.x, t.y);
+      const ok = platzOK(state.werkzeug, a.x, a.y).ok && kostenReichen(state.werkzeug);
+      const radius = def.marktRadius || def.radius;
+      if (radius) kreisZeichnen({ x: a.x + def.w / 2, y: a.y + def.h / 2 }, radius);
+
+      rundRect(ctx, a.x * T + 2, a.y * T + 2, def.w * T - 4, def.h * T - 4, 6);
+      ctx.fillStyle = ok ? 'rgba(22,163,74,0.35)' : 'rgba(220,38,38,0.35)';
+      ctx.fill();
+      ctx.strokeStyle = ok ? '#16a34a' : '#dc2626';
+      ctx.lineWidth = 2 / Math.sqrt(z);
+      ctx.stroke();
+      ctx.font = `${Math.min(def.w, def.h) * T * 0.55}px sans-serif`;
+      ctx.globalAlpha = 0.85;
+      ctx.fillText(def.emoji, (a.x + def.w / 2) * T, (a.y + def.h / 2) * T);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // Abriss-Vorschau: rotes Kreuz über dem Gebäude unter dem Zeiger
+  if (state.werkzeug === 'abriss' && state.hover) {
+    const t = bildschirmZuKachel(state.hover.sx, state.hover.sy);
+    const geb = t && belegtAuf(t.x, t.y);
+    if (geb) {
+      const def = GEBAEUDE[geb.typ];
+      rundRect(ctx, geb.x * T + 2, geb.y * T + 2, def.w * T - 4, def.h * T - 4, 6);
+      ctx.fillStyle = 'rgba(220,38,38,0.4)';
+      ctx.fill();
+    }
+  }
+}
+
+// Halbtransparenter Wirkungskreis (für Reichweiten)
+function kreisZeichnen(mitte, radius) {
+  ctx.beginPath();
+  ctx.arc(mitte.x * T, mitte.y * T, radius * T, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(22,163,74,0.08)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(22,163,74,0.55)';
+  ctx.lineWidth = 2 / kamera.zoom;
+  ctx.setLineDash([6 / kamera.zoom, 5 / kamera.zoom]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+/* ---------- 8. KAMERA & EINGABE ------------------------------- */
+
+function bildschirmZuWelt(sx, sy) {
+  return { x: sx / kamera.zoom + kamera.x, y: sy / kamera.zoom + kamera.y };
+}
+function bildschirmZuKachel(sx, sy) {
+  const w = bildschirmZuWelt(sx, sy);
+  const x = Math.floor(w.x / T), y = Math.floor(w.y / T);
+  if (x < 0 || y < 0 || x >= N || y >= N) return null;
+  return { x, y };
+}
+
+function kameraBegrenzen() {
+  const sb = leinwand.clientWidth / kamera.zoom;   // sichtbare Weltbreite
+  const sh = leinwand.clientHeight / kamera.zoom;
+  const rand = 6 * T; // etwas Meer am Rand erlauben
+  kamera.x = Math.min(Math.max(kamera.x, -rand), N * T + rand - sb);
+  kamera.y = Math.min(Math.max(kamera.y, -rand), N * T + rand - sh);
+}
+
+function zoomAuf(sx, sy, faktor) {
+  const vorher = bildschirmZuWelt(sx, sy);
+  kamera.zoom = Math.min(2.6, Math.max(0.35, kamera.zoom * faktor));
+  // Der Punkt unter dem Mauszeiger bleibt an Ort und Stelle
+  kamera.x = vorher.x - sx / kamera.zoom;
+  kamera.y = vorher.y - sy / kamera.zoom;
+  kameraBegrenzen();
+}
+
+// --- Zeiger-Ereignisse (Maus und Touch gemeinsam) ---
+const zeiger = new Map();       // aktive Finger/Maustasten
+let ziehStart = null;           // Startpunkt fürs Verschieben
+let gezogen = false;            // wurde wirklich gezogen (kein Klick)?
+let pinchAbstand = 0;
+
+leinwand.addEventListener('pointerdown', e => {
+  leinwand.setPointerCapture(e.pointerId);
+  zeiger.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (zeiger.size === 1) {
+    ziehStart = { sx: e.clientX, sy: e.clientY, kx: kamera.x, ky: kamera.y };
+    gezogen = false;
+  } else if (zeiger.size === 2) {
+    const [a, b] = [...zeiger.values()];
+    pinchAbstand = Math.hypot(a.x - b.x, a.y - b.y);
+  }
+});
+
+leinwand.addEventListener('pointermove', e => {
+  state.hover = { sx: e.clientX, sy: e.clientY };
+  if (!zeiger.has(e.pointerId)) return;
+  zeiger.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (zeiger.size === 1 && ziehStart) {
+    const dx = e.clientX - ziehStart.sx, dy = e.clientY - ziehStart.sy;
+    if (Math.abs(dx) + Math.abs(dy) > 6) gezogen = true;
+    if (gezogen) {
+      kamera.x = ziehStart.kx - dx / kamera.zoom;
+      kamera.y = ziehStart.ky - dy / kamera.zoom;
+      kameraBegrenzen();
+      leinwand.classList.add('ziehen');
+    }
+  } else if (zeiger.size === 2) {
+    // Zwei Finger: Zoomen (Pinch)
+    const [a, b] = [...zeiger.values()];
+    const abstand = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinchAbstand > 0) {
+      zoomAuf((a.x + b.x) / 2, (a.y + b.y) / 2, abstand / pinchAbstand);
+    }
+    pinchAbstand = abstand;
+  }
+});
+
+function zeigerEnde(e) {
+  const warEinzeln = zeiger.size === 1;
+  zeiger.delete(e.pointerId);
+  if (warEinzeln && !gezogen && ziehStart) klickAufKarte(e.clientX, e.clientY);
+  if (zeiger.size === 0) { ziehStart = null; leinwand.classList.remove('ziehen'); }
+  pinchAbstand = 0;
+}
+leinwand.addEventListener('pointerup', zeigerEnde);
+leinwand.addEventListener('pointercancel', zeigerEnde);
+
+// Mausrad: Zoomen auf den Mauszeiger
+leinwand.addEventListener('wheel', e => {
+  e.preventDefault();
+  zoomAuf(e.clientX, e.clientY, e.deltaY < 0 ? 1.12 : 1 / 1.12);
+}, { passive: false });
+
+// Rechtsklick: Werkzeug ablegen statt Kontextmenü
+leinwand.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  werkzeugWaehlen('zeiger');
+});
+
+// Ein Klick (kein Ziehen) auf die Karte
+function klickAufKarte(sx, sy) {
+  if (state.vorbei) return;
+  const t = bildschirmZuKachel(sx, sy);
+
+  if (state.werkzeug === 'zeiger') {
+    state.auswahl = t ? belegtAuf(t.x, t.y) : null;
+    panelZeigen();
+  } else if (state.werkzeug === 'abriss') {
+    const geb = t && belegtAuf(t.x, t.y);
+    if (geb) abreissen(geb);
+  } else if (t) {
+    platziere(state.werkzeug, t.x, t.y);
+  }
+}
+
+// Tastatur: Pfeile/WASD verschieben, Leertaste pausiert, 1–3 Tempo, Esc Zeiger
+window.addEventListener('keydown', e => {
+  const schritt = 90 / kamera.zoom;
+  switch (e.key) {
+    case 'ArrowLeft':  case 'a': kamera.x -= schritt; kameraBegrenzen(); e.preventDefault(); break;
+    case 'ArrowRight': case 'd': kamera.x += schritt; kameraBegrenzen(); e.preventDefault(); break;
+    case 'ArrowUp':    case 'w': kamera.y -= schritt; kameraBegrenzen(); e.preventDefault(); break;
+    case 'ArrowDown':  case 's': kamera.y += schritt; kameraBegrenzen(); e.preventDefault(); break;
+    case ' ': pauseUmschalten(); e.preventDefault(); break;
+    case '1': tempoSetzen(1); break;
+    case '2': tempoSetzen(2); break;
+    case '3': tempoSetzen(3); break;
+    case 'Escape':
+      werkzeugWaehlen('zeiger');
+      state.auswahl = null; panelZeigen();
+      break;
+  }
+});
+
+/* ---------- 9. BENUTZEROBERFLÄCHE ------------------------------ */
+
+const $ = id => document.getElementById(id);
+
+// Baumenü aus dem Gebäudekatalog erzeugen
+function menueBauen() {
+  const menue = $('baumenue');
+  menue.innerHTML = '';
+
+  // Zeiger-Werkzeug (Auswählen)
+  menue.appendChild(bauKnopf('zeiger', '👆', 'Auswählen', 'Gebäude anklicken für Details'));
+
+  for (const typ of MENUE_REIHENFOLGE) {
+    // Das Kontor gibt es nur einmal – danach verschwindet der Knopf
+    if (typ === 'kontor' && state.kontorGebaut) continue;
+    const def = GEBAEUDE[typ];
+    const k = def.kosten;
+    const kostenText = [k.gold ? `💰${k.gold}` : '', k.holz ? `🪵${k.holz}` : '',
+      k.werkzeuge ? `⚒️${k.werkzeuge}` : ''].filter(Boolean).join(' ') || 'gratis';
+    const knopf = bauKnopf(typ, def.emoji, def.name, def.beschr + ' – Kosten: ' + kostenText);
+    knopf.querySelector('.kosten').textContent = kostenText;
+    menue.appendChild(knopf);
+  }
+
+  // Abriss-Werkzeug
+  menue.appendChild(bauKnopf('abriss', '🧨', 'Abreißen', 'Gebäude entfernen (halbe Kosten zurück)'));
+  menueAktualisieren();
+}
+
+function bauKnopf(werkzeug, symbol, name, tipp) {
+  const b = document.createElement('button');
+  b.className = 'bau-knopf';
+  b.dataset.werkzeug = werkzeug;
+  b.title = tipp;
+  b.innerHTML = `<span class="symbol">${symbol}</span><span class="name">${name}</span><span class="kosten"></span>`;
+  b.addEventListener('click', () => werkzeugWaehlen(werkzeug));
+  return b;
+}
+
+function werkzeugWaehlen(werkzeug) {
+  // Vor dem Kontor kann nur das Kontor gebaut werden
+  if (!state.kontorGebaut && werkzeug !== 'kontor' && werkzeug !== 'zeiger') {
+    melden('Baue zuerst dein Kontor an der Küste!');
+    return;
+  }
+  state.werkzeug = werkzeug;
+  if (werkzeug !== 'zeiger') { state.auswahl = null; panelZeigen(); }
+  leinwand.classList.toggle('bauen', werkzeug !== 'zeiger');
+  menueAktualisieren();
+}
+
+function menueAktualisieren() {
+  for (const b of document.querySelectorAll('.bau-knopf')) {
+    const w = b.dataset.werkzeug;
+    b.classList.toggle('aktiv', w === state.werkzeug);
+    if (GEBAEUDE[w]) b.disabled = state.kontorGebaut ? !kostenReichen(w)
+                                                     : (w !== 'kontor');
+  }
+}
+
+// Ressourcenleiste und Panel auffrischen (ein paar Mal pro Sekunde)
+function uiAktualisieren() {
+  $('r-gold').textContent = Math.floor(res.gold).toLocaleString('de-DE');
+  $('r-gold').parentElement.classList.toggle('warnung', res.gold < 0);
+  const rate = state.goldRate;
+  $('r-gold-rate').textContent = (rate >= 0 ? '+' : '') + rate.toFixed(1) + '/s';
+  $('r-holz').textContent = Math.floor(res.holz);
+  $('r-werkzeuge').textContent = Math.floor(res.werkzeuge);
+  $('r-nahrung').textContent = Math.floor(res.nahrung);
+  $('r-nahrung').parentElement.classList.toggle('warnung', state.hunger);
+  $('r-wolle').textContent = Math.floor(res.wolle);
+  $('r-stoffe').textContent = Math.floor(res.stoffe);
+  $('r-einwohner').textContent = state.einwohner || 0;
+  $('r-siedler').textContent = state.siedlerEw || 0;
+  $('ziel-balken').firstElementChild.style.width =
+    Math.min(100, (state.siedlerEw || 0) / SIM.zielSiedler * 100) + '%';
+
+  // Bankrott-Warnung mit Countdown
+  const warnung = $('bankrott-warnung');
+  if (res.gold < 0 && !state.vorbei) {
+    warnung.style.display = 'block';
+    warnung.textContent = '⚠️ Kasse leer! Bankrott in ' +
+      Math.ceil(SIM.pleiteDauer - state.pleiteZeit) + ' s – Unterhalt senken oder Steuern steigern!';
+  } else warnung.style.display = 'none';
+
+  menueAktualisieren();
+  if (state.auswahl) panelZeigen();
+}
+
+// Info-Panel für das ausgewählte Gebäude
+function panelZeigen() {
+  const panel = $('info-panel');
+  const geb = state.auswahl;
+  if (!geb) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+
+  const def = GEBAEUDE[geb.typ];
+  let html = `<h2><span>${geb.typ === 'wohnhaus' && geb.stufe === 'siedler' ? '🏠' : def.emoji}</span> ${def.name}</h2>`;
+  html += `<div class="beschr">${def.beschr}</div>`;
+
+  if (geb.typ === 'wohnhaus') {
+    const z = zentrum(geb);
+    const markt = marktAnbindung(z.x, z.y);
+    const kap = kapelleInReichweite(z.x, z.y);
+    const stufe = geb.stufe === 'siedler' ? 'Siedler' : 'Pioniere';
+    html += `<div class="zeile"><span>Stufe</span><span>${stufe}</span></div>`;
+    html += `<div class="zeile"><span>Einwohner</span><span>${geb.ew} / ${geb.maxEw}</span></div>`;
+    html += `<div class="zeile"><span>Stimmung</span><span>${geb.zufrieden ? '😊 zufrieden' : '😠 unzufrieden'}</span></div>`;
+    html += '<hr><b style="font-size:12px">Bedürfnisse</b>';
+    html += beduerfnis('Marktanbindung', markt);
+    html += beduerfnis('Nahrung', !state.hunger);
+    if (geb.stufe === 'pionier') {
+      html += '<hr><b style="font-size:12px">Für den Aufstieg zu Siedlern</b>';
+      html += beduerfnis('Stoffe im Lager', res.stoffe > 0.5);
+      html += beduerfnis('Kapelle in Reichweite', kap);
+      html += beduerfnis('Volles Haus (ab 6 Ew.)', geb.ew >= 6);
+    }
+  } else if (def.dauer) {
+    const prozent = Math.round(geb.eff * 100);
+    html += `<div class="zeile"><span>Auslastung</span><span>${prozent} %</span></div>`;
+    html += `<div class="auslast-balken"><div style="width:${prozent}%"></div></div>`;
+    html += `<div class="zeile" style="margin-top:6px"><span>Produktionstakt</span><span>alle ${def.dauer} s</span></div>`;
+    html += `<div class="zeile"><span>Unterhalt</span><span>${(def.unterhalt * 60).toFixed(0)} 💰/min</span></div>`;
+  } else {
+    if (def.marktRadius) html += `<div class="zeile"><span>Versorgungsradius</span><span>${def.marktRadius} Felder</span></div>`;
+    if (def.radius && geb.typ === 'kapelle') html += `<div class="zeile"><span>Wirkungsradius</span><span>${def.radius} Felder</span></div>`;
+    if (def.unterhalt) html += `<div class="zeile"><span>Unterhalt</span><span>${(def.unterhalt * 60).toFixed(0)} 💰/min</span></div>`;
+  }
+
+  html += `<button class="abriss-knopf" onclick="abreissenAuswahl()">🧨 Abreißen</button>`;
+  $('panel-inhalt').innerHTML = html;
+}
+function beduerfnis(name, erfuellt) {
+  return `<div class="beduerfnis"><span>${name}</span>` +
+         `<span class="${erfuellt ? 'ok' : 'fehlt'}">${erfuellt ? '✓' : '✗'}</span></div>`;
+}
+function abreissenAuswahl() { if (state.auswahl) abreissen(state.auswahl); }
+$('panel-zu').addEventListener('click', () => { state.auswahl = null; panelZeigen(); });
+
+// Kurze Meldung am unteren Rand; gleiche Meldungen werden gedrosselt
+let toastTimer = null;
+const meldungZuletzt = {};
+function melden(text, schluessel) {
+  const jetzt = performance.now();
+  if (schluessel) {
+    if (meldungZuletzt[schluessel] && jetzt - meldungZuletzt[schluessel] < 8000) return;
+    meldungZuletzt[schluessel] = jetzt;
+  }
+  const toast = $('toast');
+  toast.textContent = text;
+  toast.style.opacity = 1;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toast.style.opacity = 0; }, 2600);
+}
+
+// Pause & Geschwindigkeit
+function pauseUmschalten() {
+  state.pause = !state.pause;
+  $('k-pause').textContent = state.pause ? '▶' : '⏸';
+  $('k-pause').classList.toggle('aktiv', state.pause);
+}
+function tempoSetzen(t) {
+  state.tempo = t;
+  if (state.pause) pauseUmschalten();
+  for (const n of [1, 2, 3]) $('k-tempo' + n).classList.toggle('aktiv', n === t);
+}
+$('k-pause').addEventListener('click', pauseUmschalten);
+$('k-tempo1').addEventListener('click', () => tempoSetzen(1));
+$('k-tempo2').addEventListener('click', () => tempoSetzen(2));
+$('k-tempo3').addEventListener('click', () => tempoSetzen(3));
+
+// Sieg- und Niederlage-Overlays
+function spielVorbei() {
+  state.vorbei = true;
+  $('overlay').style.display = 'flex';
+  $('overlay-box').innerHTML = `
+    <div class="gross">💸</div>
+    <h1>Bankrott!</h1>
+    <p>Die Kasse war zu lange leer – deine Siedlung ist zahlungsunfähig.<br>
+       Erreichte Siedler: <b>${state.siedlerEw || 0}</b> von ${SIM.zielSiedler}.</p>
+    <button class="knopf-gruen" onclick="location.reload()">Neue Insel besiedeln</button>`;
+}
+function gewonnenAnzeigen() {
+  $('overlay').style.display = 'flex';
+  $('overlay-box').innerHTML = `
+    <div class="gross">🎉</div>
+    <h1>Ziel erreicht!</h1>
+    <p>${SIM.zielSiedler} Siedler leben auf deiner Insel – ohne Bankrott.<br>
+       Eine blühende Siedlung! Du kannst weiterspielen oder neu beginnen.</p>
+    <button class="knopf-grau" onclick="weiterspielen()">Weiterspielen</button>
+    <button class="knopf-gruen" onclick="location.reload()">Neue Insel</button>`;
+}
+function weiterspielen() {
+  state.weiterspielen = true;
+  $('overlay').style.display = 'none';
+}
+
+/* ---------- 10. MUSIK (Web Audio API) ------------------------- */
+// Ein sehr ruhiger, generativer Klangteppich: alle paar Sekunden ein
+// weicher Akkord aus Sinustönen – ganz ohne Audiodateien.
+
+const musik = { an: false, ctx: null, timer: null, takt: 0 };
+const AKKORDE = [                       // sanfte Folge in C-Dur
+  [130.8, 261.6, 329.6, 392.0],         // C
+  [110.0, 220.0, 261.6, 329.6],         // Am
+  [87.3, 174.6, 220.0, 261.6],          // F
+  [98.0, 196.0, 246.9, 293.7],          // G
+];
+
+function akkordSpielen() {
+  const ac = musik.ctx, t = ac.currentTime;
+  const noten = AKKORDE[musik.takt++ % AKKORDE.length];
+  for (let i = 0; i < noten.length; i++) {
+    const osc = ac.createOscillator();
+    const laut = ac.createGain();
+    osc.type = i === 0 ? 'triangle' : 'sine';   // Bass etwas wärmer
+    osc.frequency.value = noten[i];
+    // Weich ein- und ausblenden, damit nichts knackt
+    laut.gain.setValueAtTime(0, t);
+    laut.gain.linearRampToValueAtTime(i === 0 ? 0.035 : 0.028, t + 1.4);
+    laut.gain.linearRampToValueAtTime(0, t + 4.2);
+    osc.connect(laut).connect(ac.destination);
+    osc.start(t);
+    osc.stop(t + 4.3);
+  }
+}
+
+function musikUmschalten() {
+  if (!musik.an) {
+    if (!musik.ctx) musik.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    musik.ctx.resume();
+    musik.an = true;
+    akkordSpielen();
+    musik.timer = setInterval(akkordSpielen, 4400);
+  } else {
+    musik.an = false;
+    clearInterval(musik.timer);
+  }
+  $('k-musik').classList.toggle('aktiv', musik.an);
+}
+$('k-musik').addEventListener('click', musikUmschalten);
+
+/* ---------- 11. HAUPTSCHLEIFE --------------------------------- */
+
+function kameraStart() {
+  // Kamera auf die Inselmitte ausrichten
+  kamera.zoom = Math.min(leinwand.clientWidth, leinwand.clientHeight) / (N * T) * 1.35;
+  kamera.zoom = Math.min(2.6, Math.max(0.35, kamera.zoom));
+  kamera.x = (N * T) / 2 - leinwand.clientWidth / (2 * kamera.zoom);
+  kamera.y = (N * T) / 2 - leinwand.clientHeight / (2 * kamera.zoom);
+}
+
+let zuletzt = performance.now();
+let uiTakt = 0;
+
+function schleife(jetzt) {
+  let dt = (jetzt - zuletzt) / 1000;
+  zuletzt = jetzt;
+  dt = Math.min(dt, 0.1);   // große Sprünge (Tab im Hintergrund) abfangen
+
+  const laeuft = !state.pause && !state.vorbei && (!state.gewonnen || state.weiterspielen);
+  if (laeuft && state.kontorGebaut) simSchritt(dt * state.tempo);
+
+  zeichnen();
+
+  uiTakt += dt;
+  if (uiTakt >= 0.25) { uiTakt = 0; uiAktualisieren(); }
+
+  requestAnimationFrame(schleife);
+}
+
+// --- Los geht's ---
+weltErzeugen();
+menueBauen();
+kameraStart();
+leinwand.classList.add('bauen');   // Start-Werkzeug ist das Kontor
+uiAktualisieren();
+requestAnimationFrame(schleife);
+</script>
+</body>
+</html>
