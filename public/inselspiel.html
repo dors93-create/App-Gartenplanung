@@ -178,6 +178,15 @@
     color: var(--accent-dunkel);
     max-width: calc(100vw - 24px); width: max-content; text-align: center;
   }
+  #punkte {
+    position: absolute; top: 62px; left: 10px; z-index: 8;
+    background: var(--flaeche); border-radius: 10px; box-shadow: var(--schatten);
+    padding: 7px 10px; font-size: 11.5px; min-width: 132px;
+  }
+  #punkte b { font-size: 11px; }
+  .punkte-zeile { display: flex; justify-content: space-between; gap: 10px; padding: 1.5px 0; }
+  .punkte-zeile span:last-child { font-weight: 600; font-variant-numeric: tabular-nums; }
+
   #bankrott-warnung {
     position: absolute; top: 62px; left: 50%; transform: translateX(-50%);
     background: #fef2f2; color: var(--rot); border-radius: 10px;
@@ -216,11 +225,9 @@
   <span class="res" title="Holz – Baustoff, wird vom Holzfäller geschlagen">🪵 <b id="r-holz">0</b></span>
   <span class="res" title="Werkzeuge – nötig für viele Gebäude, aus der Schmiede">⚒️ <b id="r-werkzeuge">0</b></span>
   <span class="res" title="Nahrung – von Fischern und Jägern, wird laufend gegessen">🍞 <b id="r-nahrung">0</b></span>
-  <span class="res" title="Wolle – von der Schaffarm, Rohstoff der Weberei">🧶 <b id="r-wolle">0</b></span>
-  <span class="res" title="Stoffe – aus der Weberei, Bedürfnis der Siedler">🧵 <b id="r-stoffe">0</b></span>
-  <span class="res" title="Getreide – vom Bauernhof, Rohstoff der Brauerei">🌾 <b id="r-getreide">0</b></span>
-  <span class="res" title="Bier – aus der Brauerei, Bedürfnis der Bürger">🍺 <b id="r-bier">0</b></span>
-  <span class="res" title="Wein – vom Weingut, Bedürfnis der Aristokraten">🍷 <b id="r-wein">0</b></span>
+  <span class="res" title="Ziegel – aus der Ziegelei, Baumaterial für höhere Stufen">🧱 <b id="r-ziegel">0</b></span>
+  <span class="res" title="Stoffe – aus der Weberei, Bedürfnis ab Siedlern">🧵 <b id="r-stoffe">0</b></span>
+  <span class="res" title="Alkohol – aus der Brennerei, Bedürfnis ab Siedlern (alle weiteren Waren: Kontor anklicken)">🥃 <b id="r-alkohol">0</b></span>
   <span class="trenner"></span>
   <span class="res" title="Einwohner (Pioniere + Siedler)">👥 <b id="r-einwohner">0</b></span>
   <span id="ziel" title="Ziel: 500 Siedler erreichen">
@@ -235,6 +242,9 @@
   <button class="knopf" id="k-musik" title="Musik ein/aus">🎵</button>
   <button class="knopf" id="k-mitte" title="Zum Kontor bzw. Schiff springen">🧭</button>
 </div>
+
+<!-- Punktestand des Wettrennens -->
+<div id="punkte"></div>
 
 <!-- Hinweis zu Spielbeginn -->
 <div id="hinweis">⛵ Tippe aufs Wasser, um zu segeln. Such dir eine Insel aus und baue dort dein Kontor an der Küste!</div>
@@ -308,165 +318,297 @@ const SIM = {
 // Platz im Haus, zahlt mehr Steuern – und stellt höhere Ansprüche.
 // "brauch" = laufender Verbrauch je Einwohner:in und Sekunde,
 // "gebaeudeNah" = dieses Gebäude muss in Reichweite stehen.
+// Fünf Bevölkerungsstufen wie im klassischen Vorbild. Jede Stufe hat mehr
+// Platz im Haus, zahlt mehr Steuern – und stellt höhere Ansprüche.
+// "brauch" = laufender Verbrauch je Einwohner:in und Sekunde.
+// "gebaeudeNah" + "material" = Voraussetzungen, um AUF diese Stufe
+// aufzusteigen (öffentliches Gebäude in Reichweite, Baumaterial).
 const STUFEN = [
-  { name: 'Pioniere',     dativ: 'Siedlern',     emoji: '🛖', maxEw: 8,
+  { name: 'Pioniere',     dativ: 'Siedlern',    emoji: '🛖', maxEw: 8,
     steuer: 0.03, brauch: {} },
-  { name: 'Siedler',      dativ: 'Bürgern',      emoji: '🏠', maxEw: 15,
-    steuer: 0.07, brauch: { stoffe: 0.0015 },                 gebaeudeNah: 'kapelle' },
-  { name: 'Bürger',       dativ: 'Aristokraten', emoji: '🏘️', maxEw: 25,
-    steuer: 0.14, brauch: { stoffe: 0.0015, bier: 0.0012 },   gebaeudeNah: 'schule' },
-  { name: 'Aristokraten', dativ: null,           emoji: '🏰', maxEw: 40,
-    steuer: 0.25, brauch: { stoffe: 0.0015, bier: 0.0012, wein: 0.0008 },
-    gebaeudeNah: 'theater' },
+  { name: 'Siedler',      dativ: 'Bürgern',     emoji: '🏠', maxEw: 15,
+    steuer: 0.07, brauch: { stoffe: 0.0012, alkohol: 0.0012 },
+    gebaeudeNah: 'kapelle',  material: { holz: 2 } },
+  { name: 'Bürger',       dativ: 'Kaufleuten',  emoji: '🏘️', maxEw: 25,
+    steuer: 0.13, brauch: { stoffe: 0.0012, alkohol: 0.0012, tabak: 0.0008, gewuerze: 0.0007 },
+    gebaeudeNah: 'schule',   material: { holz: 3, ziegel: 2 } },
+  { name: 'Kaufleute',    dativ: 'Aristokraten', emoji: '🏛️', maxEw: 40,
+    steuer: 0.20, brauch: { stoffe: 0.0012, alkohol: 0.0012, tabak: 0.0008, gewuerze: 0.0007, kleidung: 0.0006 },
+    gebaeudeNah: 'badehaus', material: { holz: 4, ziegel: 4 } },
+  { name: 'Aristokraten', dativ: null,          emoji: '🏰', maxEw: 60,
+    steuer: 0.30, brauch: { stoffe: 0.0012, alkohol: 0.0012, tabak: 0.0008, gewuerze: 0.0007, kleidung: 0.0006, schmuck: 0.0004 },
+    gebaeudeNah: 'theater',  material: { holz: 5, ziegel: 6 } },
 ];
-// Hinweis: "gebaeudeNah"/"brauch" einer Stufe sind die Bedingungen, um
-// AUF diese Stufe aufzusteigen – und danach ihr laufendes Bedürfnis.
 
 // Handelspreise am Kontor (Gold je Einheit): Kaufen ist teurer als
 // Verkaufen, damit sich eigene Produktion immer lohnt.
 const PREISE = {
-  holz:      { kauf: 3,  verkauf: 1 },
-  werkzeuge: { kauf: 12, verkauf: 5 },
-  nahrung:   { kauf: 2,  verkauf: 1 },
-  wolle:     { kauf: 4,  verkauf: 1 },
-  stoffe:    { kauf: 8,  verkauf: 3 },
-  getreide:  { kauf: 3,  verkauf: 1 },
-  bier:      { kauf: 8,  verkauf: 3 },
-  wein:      { kauf: 15, verkauf: 6 },
+  holz:          { kauf: 3,  verkauf: 1 },
+  werkzeuge:     { kauf: 12, verkauf: 5 },
+  ziegel:        { kauf: 6,  verkauf: 2 },
+  nahrung:       { kauf: 2,  verkauf: 1 },
+  wolle:         { kauf: 4,  verkauf: 1 },
+  stoffe:        { kauf: 8,  verkauf: 3 },
+  getreide:      { kauf: 3,  verkauf: 1 },
+  mehl:          { kauf: 4,  verkauf: 1 },
+  zuckerrohr:    { kauf: 3,  verkauf: 1 },
+  alkohol:       { kauf: 9,  verkauf: 3 },
+  tabakblaetter: { kauf: 4,  verkauf: 1 },
+  tabak:         { kauf: 10, verkauf: 4 },
+  gewuerze:      { kauf: 8,  verkauf: 3 },
+  kleidung:      { kauf: 14, verkauf: 6 },
+  schmuck:       { kauf: 20, verkauf: 8 },
 };
-const WAREN_EMOJI = { gold: '💰', holz: '🪵', werkzeuge: '⚒️', nahrung: '🍞',
-  wolle: '🧶', stoffe: '🧵', getreide: '🌾', bier: '🍺', wein: '🍷' };
-const WAREN_NAME = { holz: 'Holz', werkzeuge: 'Werkzeuge', nahrung: 'Nahrung',
-  wolle: 'Wolle', stoffe: 'Stoffe', getreide: 'Getreide', bier: 'Bier', wein: 'Wein' };
+const WAREN_EMOJI = { gold: '💰', holz: '🪵', werkzeuge: '⚒️', ziegel: '🧱',
+  nahrung: '🍞', wolle: '🧶', stoffe: '🧵', getreide: '🌾', mehl: '🥣',
+  zuckerrohr: '🎋', alkohol: '🥃', tabakblaetter: '🍂', tabak: '🚬',
+  gewuerze: '🌶️', kleidung: '👕', schmuck: '💍' };
+const WAREN_NAME = { holz: 'Holz', werkzeuge: 'Werkzeuge', ziegel: 'Ziegel',
+  nahrung: 'Nahrung', wolle: 'Wolle', stoffe: 'Stoffe', getreide: 'Getreide',
+  mehl: 'Mehl', zuckerrohr: 'Zuckerrohr', alkohol: 'Alkohol',
+  tabakblaetter: 'Tabakblätter', tabak: 'Tabakwaren', gewuerze: 'Gewürze',
+  kleidung: 'Kleidung', schmuck: 'Schmuck' };
 
 // Gebäudekatalog. Kosten in Gold/Holz/Werkzeugen, Unterhalt in Gold je Sekunde.
 // "dauer" = Sekunden je Produktionszyklus, "radius" = Wirkungs-/Suchradius in Kacheln.
 const GEBAEUDE = {
+  // ---------- ab Pionieren (abStufe 0) ----------
   kontor: {
-    name: 'Kontor', emoji: '⚓', w: 2, h: 2, farbe: '#d9c48a',
-    kosten: { gold: 0, holz: 0, werkzeuge: 0 }, unterhalt: 0,
+    name: 'Kontor', emoji: '⚓', w: 2, h: 2, farbe: '#d9c48a', abStufe: 0,
+    kosten: {}, unterhalt: 0,
     marktRadius: 8, brauchtKueste: true,
     beschr: 'Dein Handelsstützpunkt. Versorgt Häuser im Umkreis wie ein Marktplatz – anklicken, um Waren zu kaufen und zu verkaufen.',
   },
   marktplatz: {
-    name: 'Marktplatz', emoji: '⛲', w: 2, h: 2, farbe: '#e3cfa4',
+    name: 'Marktplatz', emoji: '⛲', w: 2, h: 2, farbe: '#e3cfa4', abStufe: 0,
     kosten: { gold: 200, holz: 8, werkzeuge: 3 }, unterhalt: 0.10,
     marktRadius: 9,
     beschr: 'Versorgt Wohnhäuser im Umkreis. Ohne Marktanbindung wächst kein Haus.',
   },
   wohnhaus: {
-    name: 'Wohnhaus', emoji: '🛖', w: 1, h: 1, farbe: '#d8b78e',
-    kosten: { gold: 50, holz: 3, werkzeuge: 0 }, unterhalt: 0,
-    beschr: 'Hier leben deine Einwohner:innen und zahlen Steuern. Pioniere steigen zu Siedlern auf, wenn Nahrung, Stoffe und eine Kapelle vorhanden sind.',
+    name: 'Wohnhaus', emoji: '🛖', w: 1, h: 1, farbe: '#d8b78e', abStufe: 0,
+    kosten: { gold: 50, holz: 3 }, unterhalt: 0,
+    beschr: 'Hier leben deine Einwohner:innen und zahlen Steuern. Mit erfüllten Bedürfnissen steigen sie über fünf Stufen bis zu Aristokraten auf.',
   },
   fischer: {
-    name: 'Fischerhütte', emoji: '🎣', w: 1, h: 1, farbe: '#a9c3d6',
+    name: 'Fischerhütte', emoji: '🎣', w: 1, h: 1, farbe: '#a9c3d6', abStufe: 0,
     kosten: { gold: 90, holz: 5, werkzeuge: 2 }, unterhalt: 0.06,
     dauer: 4, radius: 3, brauchtKueste: true,
     beschr: 'Fängt Fisch (Nahrung). Muss direkt an der Küste stehen.',
   },
   holzfaeller: {
-    name: 'Holzfällerhütte', emoji: '🪓', w: 1, h: 1, farbe: '#b99b74',
+    name: 'Holzfällerhütte', emoji: '🪓', w: 1, h: 1, farbe: '#b99b74', abStufe: 0,
     kosten: { gold: 90, holz: 3, werkzeuge: 1 }, unterhalt: 0.06,
     dauer: 5, radius: 4,
     beschr: 'Schlägt Holz. Braucht Wald in Reichweite – der Wald wächst langsam nach.',
   },
   jagd: {
-    name: 'Jagdhütte', emoji: '🏹', w: 1, h: 1, farbe: '#a8b58a',
+    name: 'Jagdhütte', emoji: '🏹', w: 1, h: 1, farbe: '#a8b58a', abStufe: 0,
     kosten: { gold: 110, holz: 4, werkzeuge: 1 }, unterhalt: 0.07,
     dauer: 5, radius: 5,
     beschr: 'Erlegt Wild (Nahrung). Braucht Wald in Reichweite, fällt aber keine Bäume.',
   },
   schaffarm: {
-    name: 'Schaffarm', emoji: '🐑', w: 1, h: 1, farbe: '#cfd8b0',
+    name: 'Schaffarm', emoji: '🐑', w: 1, h: 1, farbe: '#cfd8b0', abStufe: 0,
     kosten: { gold: 180, holz: 6, werkzeuge: 2 }, unterhalt: 0.09,
     dauer: 6, radius: 3,
     beschr: 'Erzeugt Wolle. Braucht freies Grasland als Weide im Umkreis.',
   },
   weberei: {
-    name: 'Weberei', emoji: '🧶', w: 1, h: 1, farbe: '#d6b8c8',
+    name: 'Weberei', emoji: '🧶', w: 1, h: 1, farbe: '#d6b8c8', abStufe: 0,
     kosten: { gold: 240, holz: 8, werkzeuge: 3 }, unterhalt: 0.12,
     dauer: 5,
-    beschr: 'Webt Wolle zu Stoffen. Produktionskette: Schaffarm → Weberei → Stoffe.',
+    beschr: 'Webt Wolle zu Stoffen. Kette: Schaffarm → Weberei → Stoffe (Bedürfnis ab Siedlern).',
   },
-  schmiede: {
-    name: 'Werkzeugschmiede', emoji: '⚒️', w: 1, h: 1, farbe: '#b8b8b8',
-    kosten: { gold: 280, holz: 10, werkzeuge: 2 }, unterhalt: 0.15,
-    dauer: 8, radius: 5,
-    beschr: 'Fertigt Werkzeuge aus Holz. Braucht ein Gesteinsvorkommen (Berge) in der Nähe.',
+  zuckerrohr: {
+    name: 'Zuckerrohrplantage', emoji: '🎋', w: 1, h: 1, farbe: '#bcd6a0', abStufe: 0,
+    kosten: { gold: 180, holz: 5, werkzeuge: 1 }, unterhalt: 0.08,
+    dauer: 5, radius: 3,
+    beschr: 'Baut Zuckerrohr an. Braucht freie Felder im Umkreis – Rohstoff der Brennerei.',
+  },
+  brennerei: {
+    name: 'Brennerei', emoji: '🥃', w: 1, h: 1, farbe: '#d9b06a', abStufe: 0,
+    kosten: { gold: 300, holz: 10, werkzeuge: 3 }, unterhalt: 0.14,
+    dauer: 5,
+    beschr: 'Brennt Alkohol aus Zuckerrohr. Kette: Plantage → Brennerei (Bedürfnis ab Siedlern).',
   },
   kapelle: {
-    name: 'Kapelle', emoji: '⛪', w: 2, h: 2, farbe: '#e8e2d4',
+    name: 'Kapelle', emoji: '⛪', w: 2, h: 2, farbe: '#e8e2d4', abStufe: 0,
     kosten: { gold: 400, holz: 12, werkzeuge: 4 }, unterhalt: 0.15,
     radius: 9,
     beschr: 'Stillt das Bedürfnis nach Glauben. Nötig, damit Pioniere zu Siedlern aufsteigen.',
   },
-  bauernhof: {
-    name: 'Bauernhof', emoji: '🌾', w: 1, h: 1, farbe: '#e0d29a',
+  // ---------- ab Siedlern (abStufe 1) ----------
+  ziegelei: {
+    name: 'Ziegelei', emoji: '🧱', w: 1, h: 1, farbe: '#cf9a86', abStufe: 1,
+    kosten: { gold: 250, holz: 8, werkzeuge: 2 }, unterhalt: 0.12,
+    dauer: 6, radius: 5,
+    beschr: 'Brennt Ziegel – das Baumaterial für höhere Häuser und Prunkbauten. Braucht Gestein (Berge) in der Nähe.',
+  },
+  schmiede: {
+    name: 'Werkzeugschmiede', emoji: '⚒️', w: 1, h: 1, farbe: '#b8b8b8', abStufe: 1,
+    kosten: { gold: 280, holz: 10, werkzeuge: 2 }, unterhalt: 0.15,
+    dauer: 8, radius: 5,
+    beschr: 'Fertigt Werkzeuge aus Holz. Braucht ein Gesteinsvorkommen (Berge) in der Nähe. Bis dahin: Werkzeuge im Kontor kaufen.',
+  },
+  getreidefarm: {
+    name: 'Getreidefarm', emoji: '🌾', w: 1, h: 1, farbe: '#e0d29a', abStufe: 1,
     kosten: { gold: 200, holz: 6, werkzeuge: 2 }, unterhalt: 0.09,
     dauer: 5, radius: 3,
     beschr: 'Baut Getreide an. Braucht freie Felder (Grasland) im Umkreis.',
   },
-  brauerei: {
-    name: 'Brauerei', emoji: '🍺', w: 1, h: 1, farbe: '#d9b06a',
-    kosten: { gold: 300, holz: 10, werkzeuge: 3 }, unterhalt: 0.14,
-    dauer: 6,
-    beschr: 'Braut Bier aus Getreide. Produktionskette: Bauernhof → Brauerei → Bier (Bedürfnis der Bürger).',
+  muehle: {
+    name: 'Mühle', emoji: '⚙️', w: 1, h: 1, farbe: '#d8cdb8', abStufe: 1,
+    kosten: { gold: 250, holz: 8, werkzeuge: 2 }, unterhalt: 0.10,
+    dauer: 4,
+    beschr: 'Mahlt Getreide zu Mehl. Kette: Getreidefarm → Mühle → Bäckerei.',
   },
-  weingut: {
-    name: 'Weingut', emoji: '🍇', w: 1, h: 1, farbe: '#c3a3cf',
-    kosten: { gold: 500, holz: 12, werkzeuge: 4 }, unterhalt: 0.18,
-    dauer: 9, radius: 3,
-    beschr: 'Keltert edlen Wein. Braucht freie Weinberge (Grasland) im Umkreis – Bedürfnis der Aristokraten.',
+  baeckerei: {
+    name: 'Bäckerei', emoji: '🥖', w: 1, h: 1, farbe: '#e2c398', abStufe: 1,
+    kosten: { gold: 300, holz: 8, werkzeuge: 3 }, unterhalt: 0.12,
+    dauer: 4,
+    beschr: 'Backt aus Mehl reichlich Brot – die ergiebigste Nahrungsquelle.',
   },
   schule: {
-    name: 'Schule', emoji: '🏫', w: 2, h: 2, farbe: '#c9d4e0',
-    kosten: { gold: 600, holz: 15, werkzeuge: 5 }, unterhalt: 0.25,
+    name: 'Schule', emoji: '🏫', w: 2, h: 2, farbe: '#c9d4e0', abStufe: 1,
+    kosten: { gold: 600, holz: 15, werkzeuge: 5, ziegel: 10 }, unterhalt: 0.25,
     radius: 9,
     beschr: 'Bildung für alle! Nötig, damit Siedler zu Bürgern aufsteigen.',
   },
-  theater: {
-    name: 'Theater', emoji: '🎭', w: 2, h: 2, farbe: '#e0c9d4',
-    kosten: { gold: 1000, holz: 20, werkzeuge: 8 }, unterhalt: 0.40,
+  // ---------- ab Bürgern (abStufe 2) ----------
+  rinderfarm: {
+    name: 'Rinderfarm', emoji: '🐄', w: 1, h: 1, farbe: '#d3c4a2', abStufe: 2,
+    kosten: { gold: 250, holz: 8, werkzeuge: 2 }, unterhalt: 0.10,
+    dauer: 7, radius: 3,
+    beschr: 'Züchtet Rinder auf der Weide – liefert kräftige Fleischrationen (Nahrung).',
+  },
+  tabakplantage: {
+    name: 'Tabakplantage', emoji: '🍂', w: 1, h: 1, farbe: '#c9b884', abStufe: 2,
+    kosten: { gold: 280, holz: 8, werkzeuge: 2 }, unterhalt: 0.11,
+    dauer: 5, radius: 3,
+    beschr: 'Baut Tabak an. Braucht freie Felder im Umkreis – Rohstoff für Tabakwaren.',
+  },
+  tabakladen: {
+    name: 'Tabakwaren-Manufaktur', emoji: '🚬', w: 1, h: 1, farbe: '#bfa98e', abStufe: 2,
+    kosten: { gold: 350, holz: 10, werkzeuge: 3, ziegel: 5 }, unterhalt: 0.15,
+    dauer: 5,
+    beschr: 'Rollt Tabakblätter zu Tabakwaren (Bedürfnis ab Bürgern).',
+  },
+  gewuerzplantage: {
+    name: 'Gewürzplantage', emoji: '🌶️', w: 1, h: 1, farbe: '#d1a48a', abStufe: 2,
+    kosten: { gold: 300, holz: 8, werkzeuge: 2 }, unterhalt: 0.11,
+    dauer: 6, radius: 3,
+    beschr: 'Erntet feurige Gewürze (Bedürfnis ab Bürgern). Braucht freie Felder im Umkreis.',
+  },
+  badehaus: {
+    name: 'Badehaus', emoji: '🛁', w: 2, h: 2, farbe: '#bcd4d8', abStufe: 2,
+    kosten: { gold: 800, holz: 15, werkzeuge: 6, ziegel: 15 }, unterhalt: 0.30,
     radius: 9,
-    beschr: 'Kultur und Zerstreuung. Nötig, damit Bürger zu Aristokraten aufsteigen.',
+    beschr: 'Wellness der alten Schule. Nötig, damit Bürger zu Kaufleuten aufsteigen.',
+  },
+  // ---------- ab Kaufleuten (abStufe 3) ----------
+  schneiderei: {
+    name: 'Schneiderei', emoji: '👕', w: 1, h: 1, farbe: '#d6c2d8', abStufe: 3,
+    kosten: { gold: 450, holz: 10, werkzeuge: 4, ziegel: 8 }, unterhalt: 0.18,
+    dauer: 6,
+    beschr: 'Näht feine Kleidung aus Stoffen (Bedürfnis ab Kaufleuten).',
+  },
+  goldschmiede: {
+    name: 'Goldschmiede', emoji: '💍', w: 1, h: 1, farbe: '#e2cf9a', abStufe: 3,
+    kosten: { gold: 600, holz: 10, werkzeuge: 5, ziegel: 10 }, unterhalt: 0.22,
+    dauer: 9, radius: 5,
+    beschr: 'Fertigt Schmuck aus Edelmetall-Vorkommen der Berge (Bedürfnis der Aristokraten).',
+  },
+  theater: {
+    name: 'Theater', emoji: '🎭', w: 2, h: 2, farbe: '#e0c9d4', abStufe: 3,
+    kosten: { gold: 1200, holz: 20, werkzeuge: 8, ziegel: 25 }, unterhalt: 0.40,
+    radius: 9,
+    beschr: 'Kultur und Zerstreuung. Nötig, damit Kaufleute zu Aristokraten aufsteigen.',
   },
 };
 
 // Was jedes Gebäude produziert, verbraucht und wo es stehen muss –
 // wird im Info-Panel angezeigt, damit die Ketten verständlich sind.
 const GEB_INFO = {
-  kontor:      { produziert: 'Marktversorgung + Handel', standort: 'An der Küste, nahe beim Schiff' },
-  marktplatz:  { produziert: 'Marktversorgung (Radius 9)' },
-  wohnhaus:    { verbraucht: '🍞 – höhere Stufen auch 🧵 🍺 🍷', produziert: '💰 Steuern' },
-  fischer:     { produziert: '1 🍞 alle 4 s', standort: 'Wasser im Umkreis (R 3)' },
-  holzfaeller: { produziert: '1 🪵 alle 5 s', standort: 'Wald im Umkreis (R 4)' },
-  jagd:        { produziert: '1 🍞 alle 5 s', standort: 'Wald im Umkreis (R 5)' },
-  schaffarm:   { produziert: '1 🧶 alle 6 s', standort: 'Freie Weide im Umkreis (R 3)' },
-  weberei:     { produziert: '1 🧵 alle 5 s', verbraucht: '1 🧶 Wolle' },
-  schmiede:    { produziert: '1 ⚒️ alle 8 s', verbraucht: '1 🪵 Holz + Gestein', standort: 'Berge im Umkreis (R 5)' },
-  kapelle:     { produziert: 'Glaube (Radius 9)' },
-  bauernhof:   { produziert: '1 🌾 alle 5 s', standort: 'Freie Felder im Umkreis (R 3)' },
-  brauerei:    { produziert: '1 🍺 alle 6 s', verbraucht: '1 🌾 Getreide' },
-  weingut:     { produziert: '1 🍷 alle 9 s', standort: 'Freie Weinberge im Umkreis (R 3)' },
-  schule:      { produziert: 'Bildung (Radius 9)' },
-  theater:     { produziert: 'Kultur (Radius 9)' },
+  kontor:          { produziert: 'Marktversorgung + Handel', standort: 'An der Küste, nahe beim Schiff' },
+  marktplatz:      { produziert: 'Marktversorgung (Radius 9)' },
+  wohnhaus:        { verbraucht: '🍞, höhere Stufen auch 🧵 🥃 🚬 🌶️ 👕 💍', produziert: '💰 Steuern' },
+  fischer:         { produziert: '1 🍞 alle 4 s', standort: 'Wasser im Umkreis (R 3)' },
+  holzfaeller:     { produziert: '1 🪵 alle 5 s', standort: 'Wald im Umkreis (R 4)' },
+  jagd:            { produziert: '1 🍞 alle 5 s', standort: 'Wald im Umkreis (R 5)' },
+  schaffarm:       { produziert: '1 🧶 alle 6 s', standort: 'Freie Weide im Umkreis (R 3)' },
+  weberei:         { produziert: '1 🧵 alle 5 s', verbraucht: '1 🧶 Wolle' },
+  zuckerrohr:      { produziert: '1 🎋 alle 5 s', standort: 'Freie Felder im Umkreis (R 3)' },
+  brennerei:       { produziert: '1 🥃 alle 5 s', verbraucht: '1 🎋 Zuckerrohr' },
+  kapelle:         { produziert: 'Glaube (Radius 9)' },
+  ziegelei:        { produziert: '1 🧱 alle 6 s', verbraucht: 'Gestein', standort: 'Berge im Umkreis (R 5)' },
+  schmiede:        { produziert: '1 ⚒️ alle 8 s', verbraucht: '1 🪵 Holz + Gestein', standort: 'Berge im Umkreis (R 5)' },
+  getreidefarm:    { produziert: '1 🌾 alle 5 s', standort: 'Freie Felder im Umkreis (R 3)' },
+  muehle:          { produziert: '1 🥣 alle 4 s', verbraucht: '1 🌾 Getreide' },
+  baeckerei:       { produziert: '2 🍞 alle 4 s', verbraucht: '1 🥣 Mehl' },
+  schule:          { produziert: 'Bildung (Radius 9)' },
+  rinderfarm:      { produziert: '2 🍞 alle 7 s', standort: 'Freie Weide im Umkreis (R 3)' },
+  tabakplantage:   { produziert: '1 🍂 alle 5 s', standort: 'Freie Felder im Umkreis (R 3)' },
+  tabakladen:      { produziert: '1 🚬 alle 5 s', verbraucht: '1 🍂 Tabakblätter' },
+  gewuerzplantage: { produziert: '1 🌶️ alle 6 s', standort: 'Freie Felder im Umkreis (R 3)' },
+  badehaus:        { produziert: 'Erholung (Radius 9)' },
+  schneiderei:     { produziert: '1 👕 alle 6 s', verbraucht: '1 🧵 Stoffe' },
+  goldschmiede:    { produziert: '1 💍 alle 9 s', verbraucht: 'Gestein', standort: 'Berge im Umkreis (R 5)' },
+  theater:         { produziert: 'Kultur (Radius 9)' },
 };
 
-// Reihenfolge im Baumenü
-const MENUE_REIHENFOLGE = ['kontor', 'marktplatz', 'wohnhaus', 'fischer',
-  'holzfaeller', 'jagd', 'schaffarm', 'weberei', 'schmiede', 'kapelle',
-  'bauernhof', 'brauerei', 'schule', 'weingut', 'theater'];
+// Reihenfolge im Baumenü (nach Freischaltstufe sortiert)
+const MENUE_REIHENFOLGE = ['kontor', 'marktplatz', 'wohnhaus', 'holzfaeller',
+  'fischer', 'jagd', 'schaffarm', 'weberei', 'zuckerrohr', 'brennerei', 'kapelle',
+  'ziegelei', 'schmiede', 'getreidefarm', 'muehle', 'baeckerei', 'schule',
+  'rinderfarm', 'tabakplantage', 'tabakladen', 'gewuerzplantage', 'badehaus',
+  'schneiderei', 'goldschmiede', 'theater'];
 
 /* ---------- 2. SPIELZUSTAND ---------------------------------- */
 
-const res = { gold: 10000, holz: 40, werkzeuge: 20, nahrung: 40,
-              wolle: 0, stoffe: 0, getreide: 0, bier: 0, wein: 0 };
+// Bauplan, den die KI-Spieler Schritt für Schritt abarbeiten
+const KI_PLAN = ['wohnhaus', 'fischer', 'wohnhaus', 'holzfaeller', 'wohnhaus',
+  'jagd', 'wohnhaus', 'kapelle', 'schaffarm', 'weberei', 'wohnhaus', 'wohnhaus',
+  'zuckerrohr', 'brennerei', 'fischer', 'wohnhaus', 'ziegelei', 'schule',
+  'wohnhaus', 'wohnhaus', 'marktplatz', 'getreidefarm', 'muehle', 'baeckerei',
+  'wohnhaus', 'wohnhaus', 'tabakplantage', 'tabakladen', 'gewuerzplantage',
+  'badehaus', 'wohnhaus', 'wohnhaus', 'fischer', 'schneiderei', 'goldschmiede',
+  'theater', 'wohnhaus', 'wohnhaus', 'wohnhaus'];
+
+// Ab welcher eigenen Höchststufe eine KI diese Ware im Handel einkauft
+const KI_EINKAUF = { nahrung: 0, holz: 0, stoffe: 0, alkohol: 0, ziegel: 1,
+  tabak: 1, gewuerze: 1, kleidung: 2, schmuck: 3 };
+
+// Alle Spieler: du (Index 0) und drei Konkurrent:innen mit eigener Kasse,
+// eigenen Lagern und eigener Insel. "start" = Spielsekunde der Besiedlung.
+function neuerSpieler(id, name, farbe, ki, start) {
+  return {
+    id, name, farbe, ki, start,
+    kontor: null, planIdx: 0, extra: 0, timer: id * 1.3,
+    maxStufe: 0,                 // höchste erreichte Bevölkerungsstufe
+    einwohner: 0, siedlerEw: 0,  // wird in der Simulation gefüllt
+    mangel: {}, hunger: false,
+    plan: ki ? [...KI_PLAN] : null,   // Bauplan nur für die KI
+    res: { gold: 10000, holz: 40, werkzeuge: 20, ziegel: 0, nahrung: 40,
+           wolle: 0, stoffe: 0, getreide: 0, mehl: 0, zuckerrohr: 0,
+           alkohol: 0, tabakblaetter: 0, tabak: 0, gewuerze: 0,
+           kleidung: 0, schmuck: 0 },
+  };
+}
+const spieler = [
+  neuerSpieler(0, 'Du',       '#16a34a', false, 0),
+  neuerSpieler(1, 'Isabella', '#dc2626', true,  25),
+  neuerSpieler(2, 'Wilhelm',  '#2563eb', true,  70),
+  neuerSpieler(3, 'Giovanna', '#d97706', true,  120),
+];
+const res = spieler[0].res;   // Kurzname für die eigenen Vorräte
 
 let karte = [];      // N*N Kacheln: { typ, baum, stein, var }
 let belegt = [];     // N*N: welches Gebäude steht hier? (oder null)
 let gebaeude = [];   // Liste aller Gebäude
 let naechsteId = 1;
+let inselMarke = null;    // je Kachel: Nummer der Landfläche (Insel) oder -1
+let inselGroessen = [];   // Größe jeder Insel in Kacheln
 
 const state = {
   werkzeug: 'kontor',     // aktives Werkzeug: 'zeiger', 'abriss' oder Gebäudetyp
@@ -476,6 +618,7 @@ const state = {
   tempo: 1,               // 1, 2 oder 3
   vorbei: false,          // Bankrott
   gewonnen: false,        // 500 Siedler geschafft
+  rennenVorbei: false,    // hat schon jemand das Ziel erreicht?
   weiterspielen: false,   // nach dem Sieg weiterspielen
   pleiteZeit: 0,          // Sekunden mit Gold < 0
   goldRate: 0,            // geglättete Bilanz (Gold je Sekunde)
@@ -624,6 +767,9 @@ function weltErzeugen() {
     if (flaechen.length < 4 || haupt.groesse < 450 || haupt.berg < 4 ||
         haupt.wald < 40 || land / (N * N) > 0.40) continue;
 
+    // Insel-Kennzeichnung für die KI-Besiedlung aufheben
+    inselMarke = marke;
+    inselGroessen = flaechen.map(f => f.groesse);
     return; // Welt angenommen
   }
   // Notnagel (praktisch nie nötig): letzte gewürfelte Welt behalten
@@ -782,11 +928,11 @@ function steinKachelImUmkreis(cx, cy, radius) {
   return fund;
 }
 
-// Ist ein Punkt an einen Marktplatz oder das Kontor angebunden?
-function marktAnbindung(cx, cy) {
+// Ist ein Punkt an einen EIGENEN Marktplatz bzw. das Kontor angebunden?
+function marktAnbindung(cx, cy, sid = 0) {
   for (const g of gebaeude) {
     const def = GEBAEUDE[g.typ];
-    if (!def.marktRadius) continue;
+    if (!def.marktRadius || g.spieler !== sid) continue;
     const z = zentrum(g);
     if (Math.hypot(z.x - cx, z.y - cy) <= def.marktRadius) return true;
   }
@@ -794,9 +940,9 @@ function marktAnbindung(cx, cy) {
 }
 
 // Steht ein Gebäude dieses Typs (Kapelle, Schule, Theater …) in Reichweite?
-function gebaeudeInReichweite(typ, cx, cy) {
+function gebaeudeInReichweite(typ, cx, cy, sid = 0) {
   for (const g of gebaeude) {
-    if (g.typ !== typ) continue;
+    if (g.typ !== typ || g.spieler !== sid) continue;
     const z = zentrum(g);
     if (Math.hypot(z.x - cx, z.y - cy) <= GEBAEUDE[typ].radius) return true;
   }
@@ -813,8 +959,10 @@ function ankerVon(typ, tx, ty) {
 }
 
 // Prüft, ob ein Gebäude an dieser Stelle stehen darf.
-function platzOK(typ, ax, ay) {
+function platzOK(typ, ax, ay, sid = 0) {
   const def = GEBAEUDE[typ];
+  if (spieler[sid].maxStufe < def.abStufe)
+    return { ok: false, grund: 'Erst ab ' + STUFEN[def.abStufe].name + 'n verfügbar' };
   if (ax < 0 || ay < 0 || ax + def.w > N || ay + def.h > N)
     return { ok: false, grund: 'Außerhalb der Karte' };
 
@@ -825,44 +973,50 @@ function platzOK(typ, ax, ay) {
     if (belegtAuf(x, y))    return { ok: false, grund: 'Hier steht bereits ein Gebäude' };
   }
 
-  if (typ === 'kontor' && state.kontorGebaut)
+  if (typ === 'kontor' && sid === 0 && state.kontorGebaut)
     return { ok: false, grund: 'Es gibt bereits ein Kontor' };
   if (def.brauchtKueste && !kuesteNah(ax, ay, def))
     return { ok: false, grund: 'Muss an der Küste liegen' };
 
   const cx = ax + def.w / 2, cy = ay + def.h / 2;
-  if (typ === 'kontor' && Math.hypot(schiff.x - cx, schiff.y - cy) > SIM.schiffBauRadius)
+  if (typ === 'kontor' && sid === 0 &&
+      Math.hypot(schiff.x - cx, schiff.y - cy) > SIM.schiffBauRadius)
     return { ok: false, grund: 'Zu weit vom Schiff – segle zuerst vor diese Küste' };
   if (typ === 'holzfaeller' && baeumeImUmkreis(cx, cy, def.radius) < 0.5)
     return { ok: false, grund: 'Kein Wald in Reichweite' };
   if (typ === 'jagd' && baeumeImUmkreis(cx, cy, def.radius) < 0.5)
     return { ok: false, grund: 'Kein Wald in Reichweite' };
-  if (typ === 'schmiede' && !steinKachelImUmkreis(cx, cy, def.radius))
+  if ((typ === 'schmiede' || typ === 'ziegelei' || typ === 'goldschmiede') &&
+      !steinKachelImUmkreis(cx, cy, def.radius))
     return { ok: false, grund: 'Kein Gesteinsvorkommen (Berge) in der Nähe' };
-  if (typ === 'wohnhaus' && !marktAnbindung(cx, cy))
+  if (typ === 'wohnhaus' && !marktAnbindung(cx, cy, sid))
     return { ok: false, grund: 'Außerhalb der Reichweite von Marktplatz/Kontor' };
 
   return { ok: true };
 }
 
-function kostenReichen(typ) {
-  const k = GEBAEUDE[typ].kosten;
-  return res.gold >= k.gold && res.holz >= k.holz && res.werkzeuge >= k.werkzeuge;
+function kostenReichen(typ, sid = 0) {
+  const R = spieler[sid].res;
+  for (const [ware, menge] of Object.entries(GEBAEUDE[typ].kosten))
+    if (R[ware] < menge) return false;
+  return true;
 }
 
-function platziere(typ, tx, ty) {
+function platziere(typ, tx, ty, sid = 0) {
   const { x: ax, y: ay } = ankerVon(typ, tx, ty);
-  const pruefung = platzOK(typ, ax, ay);
-  if (!pruefung.ok) { melden(pruefung.grund); return false; }
-  if (!kostenReichen(typ)) { melden('Zu wenig Rohstoffe für dieses Gebäude'); return false; }
+  const pruefung = platzOK(typ, ax, ay, sid);
+  if (!pruefung.ok) { if (sid === 0) melden(pruefung.grund); return false; }
+  if (!kostenReichen(typ, sid)) {
+    if (sid === 0) melden('Zu wenig Rohstoffe für dieses Gebäude');
+    return false;
+  }
 
   const def = GEBAEUDE[typ];
-  res.gold -= def.kosten.gold;
-  res.holz -= def.kosten.holz;
-  res.werkzeuge -= def.kosten.werkzeuge;
+  const R = spieler[sid].res;
+  for (const [ware, menge] of Object.entries(def.kosten)) R[ware] -= menge;
 
   const geb = {
-    id: naechsteId++, typ, x: ax, y: ay,
+    id: naechsteId++, typ, x: ax, y: ay, spieler: sid,
     fortschritt: 0,   // Produktionsfortschritt in Sekunden
     eff: 0,           // Auslastung 0..1 (für das Info-Panel)
   };
@@ -882,7 +1036,8 @@ function platziere(typ, tx, ty) {
     if (k.baum > 0) { k.baum = 0; kachelSchmutzig(x, y); }
   }
 
-  if (typ === 'kontor') {
+  if (typ === 'kontor') spieler[sid].kontor = geb;
+  if (typ === 'kontor' && sid === 0) {
     state.kontorGebaut = true;
     werkzeugWaehlen('zeiger');   // zurück zum Auswahl-Werkzeug (auch Cursor)
     document.getElementById('hinweis').style.display = 'none';
@@ -900,13 +1055,96 @@ function abreissen(geb) {
       belegt[y * N + x] = null;
   gebaeude = gebaeude.filter(g => g !== geb);
 
-  // Die Hälfte von Gold und Holz gibt es zurück
-  res.gold += Math.floor(def.kosten.gold / 2);
-  res.holz += Math.floor(def.kosten.holz / 2);
+  // Die Hälfte der Kosten gibt es zurück
+  const R = spieler[geb.spieler].res;
+  for (const [ware, menge] of Object.entries(def.kosten))
+    R[ware] += Math.floor(menge / 2);
 
-  if (geb.typ === 'kontor') { state.kontorGebaut = false; menueBauen(); }
+  if (geb.typ === 'kontor' && geb.spieler === 0) { state.kontorGebaut = false; menueBauen(); }
   if (state.auswahl === geb) { state.auswahl = null; panelZeigen(); }
   melden(def.name + ' abgerissen');
+}
+
+/* ---------- 5b. DIE KI-KONKURRENTEN ---------------------------- */
+// Drei Computer-Spieler besiedeln nacheinander eigene Inseln, bauen
+// nach einem festen Plan, kaufen fehlende Waren im Handel ein und
+// nehmen am Wettrennen auf 500 Siedler teil.
+
+// Größte noch unbesiedelte Insel suchen und dort das Kontor errichten
+function kiSiedeln(sp) {
+  const besetzt = new Set();
+  for (const g of gebaeude)
+    if (g.typ === 'kontor') besetzt.add(inselMarke[g.y * N + g.x]);
+  let insel = -1, groesse = 0;
+  for (let i = 0; i < inselGroessen.length; i++)
+    if (!besetzt.has(i) && inselGroessen[i] > groesse) { insel = i; groesse = inselGroessen[i]; }
+  if (insel < 0) return;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    if (inselMarke[y * N + x] !== insel) continue;
+    const a = ankerVon('kontor', x, y);
+    if (platzOK('kontor', a.x, a.y, sp.id).ok && platziere('kontor', x, y, sp.id)) {
+      melden(`⛵ ${sp.name} hat eine Insel besiedelt!`, 'ki-siedeln');
+      return;
+    }
+  }
+}
+
+// Bauplatz möglichst nah am eigenen Kontor suchen
+function kiBauplatz(sp, typ) {
+  const kz = zentrum(sp.kontor);
+  let beste = null, besteD = 1e9;
+  const R = 16;
+  for (let y = Math.max(0, Math.floor(kz.y - R)); y < Math.min(N, kz.y + R); y++) {
+    for (let x = Math.max(0, Math.floor(kz.x - R)); x < Math.min(N, kz.x + R); x++) {
+      const d = Math.hypot(x - kz.x, y - kz.y);
+      if (d >= besteD) continue;
+      const a = ankerVon(typ, x, y);
+      if (platzOK(typ, a.x, a.y, sp.id).ok) { beste = { x, y }; besteD = d; }
+    }
+  }
+  return beste;
+}
+
+// Ein KI-Zug alle 5 Spielsekunden: einkaufen, dann bauen
+function kiTick(sp, dt) {
+  sp.timer += dt;
+  if (sp.timer < 5) return;
+  sp.timer = 0;
+
+  // Noch keine Insel? Zur Startzeit besiedeln.
+  if (!sp.kontor) {
+    if (state.spielzeit >= sp.start) kiSiedeln(sp);
+    return;
+  }
+  const R = sp.res;
+  if (R.gold < 0) return;   // pleite: erst einmal sparen
+
+  // Einkaufen: fehlende Waren im Handel besorgen (gleiche Preise wie du)
+  for (const [ware, abStufe] of Object.entries(KI_EINKAUF)) {
+    if (sp.maxStufe >= abStufe && R[ware] < 12 && R.gold > 1200) {
+      R.gold -= PREISE[ware].kauf * 10;
+      R[ware] += 10;
+    }
+  }
+  if (R.werkzeuge < 3 && R.gold > 1200) {
+    R.gold -= PREISE.werkzeuge.kauf * 10;
+    R.werkzeuge += 10;
+  }
+
+  // Bauen: nächster Punkt auf dem Plan, danach freies Wachstum
+  let typ = sp.plan ? sp.plan[sp.planIdx] : undefined;
+  const nachPlan = typ !== undefined;
+  if (!nachPlan) {
+    typ = sp.extra % 5 === 4 ? 'fischer'
+        : (sp.extra % 9 === 8 ? 'marktplatz' : 'wohnhaus');
+  }
+  if (sp.maxStufe < GEBAEUDE[typ].abStufe) return;  // wartet auf Aufstieg
+  if (!kostenReichen(typ, sp.id)) return;            // wartet auf Rohstoffe
+  const platz = kiBauplatz(sp, typ);
+  if (!platz) { if (nachPlan) sp.planIdx++; return; } // kein Platz: überspringen
+  if (platziere(typ, platz.x, platz.y, sp.id)) {
+    if (nachPlan) sp.planIdx++; else sp.extra++;
+  }
 }
 
 /* ---------- 6. SIMULATION ------------------------------------- */
@@ -914,27 +1152,33 @@ function abreissen(geb) {
 function simSchritt(dt) {
   state.spielzeit += dt;
 
-  // --- Bevölkerung zählen und den Warenbedarf aller Stufen sammeln ---
-  let einwohner = 0, siedlerEw = 0, pionierEw = 0;
-  const bedarf = { nahrung: 0 };   // Ware → Verbrauch je Sekunde
+  // --- Bevölkerung zählen und den Warenbedarf JE SPIELER sammeln ---
+  for (const sp of spieler) {
+    sp.einwohner = 0; sp.siedlerEw = 0;
+    sp._bedarf = { nahrung: 0 };   // Ware → Verbrauch je Sekunde
+  }
   for (const g of gebaeude) {
     if (g.typ !== 'wohnhaus') continue;
-    einwohner += g.ew;
-    if (g.stufe >= 1) siedlerEw += g.ew; else pionierEw += g.ew;
-    bedarf.nahrung += g.ew * SIM.nahrungJeEinwohner;
+    const sp = spieler[g.spieler];
+    sp.einwohner += g.ew;
+    if (g.stufe >= 1) sp.siedlerEw += g.ew;
+    sp._bedarf.nahrung += g.ew * SIM.nahrungJeEinwohner;
     for (const [ware, satz] of Object.entries(STUFEN[g.stufe].brauch))
-      bedarf[ware] = (bedarf[ware] || 0) + g.ew * satz;
+      sp._bedarf[ware] = (sp._bedarf[ware] || 0) + g.ew * satz;
   }
 
   // --- Verbrauch vom Lager abbuchen; leere Lager als Mangel vermerken ---
-  state.mangel = {};
-  for (const [ware, proSek] of Object.entries(bedarf)) {
-    res[ware] = Math.max(0, res[ware] - proSek * dt);
-    if (proSek > 0 && res[ware] <= 0.001) state.mangel[ware] = true;
+  for (const sp of spieler) {
+    sp.mangel = {};
+    for (const [ware, proSek] of Object.entries(sp._bedarf)) {
+      sp.res[ware] = Math.max(0, sp.res[ware] - proSek * dt);
+      if (proSek > 0 && sp.res[ware] <= 0.001) sp.mangel[ware] = true;
+    }
+    sp.hunger = sp.einwohner > 0 && !!sp.mangel.nahrung;
   }
-  state.hunger = einwohner > 0 && !!state.mangel.nahrung;
 
-  let steuern = 0, unterhalt = 0;
+  const steuernJe = spieler.map(() => 0);
+  const unterhaltJe = spieler.map(() => 0);
 
   // --- Bäume wachsen langsam nach ---
   state.baumTimer = (state.baumTimer || 0) + dt;
@@ -950,36 +1194,49 @@ function simSchritt(dt) {
     }
   }
 
-  // --- Alle Gebäude durchgehen ---
+  // --- Alle Gebäude durchgehen (jedes wirtschaftet für seinen Besitzer) ---
   for (const geb of gebaeude) {
     const def = GEBAEUDE[geb.typ];
-    unterhalt += def.unterhalt * dt;
+    const sp = spieler[geb.spieler];
+    const R = sp.res;
+    unterhaltJe[geb.spieler] += def.unterhalt * dt;
     const z = zentrum(geb);
 
-    switch (geb.typ) {
-
-      case 'fischer': {
-        // Auslastung hängt von den Fanggründen (Wasserkacheln) ab
-        geb.eff = Math.min(1, wasserImUmkreis(z.x, z.y, def.radius) / 6);
-        geb.fortschritt += dt * geb.eff;
-        if (geb.fortschritt >= def.dauer) { geb.fortschritt -= def.dauer; res.nahrung += 1; }
-        break;
+    // Kleine Helfer für die zwei Produktions-Bauarten:
+    // Sammler ernten aus der Umgebung, Verarbeiter wandeln eine Ware um.
+    // Liefert true, wenn in diesem Schritt eine Einheit fertig wurde.
+    const sammler = (eff, ware, menge = 1) => {
+      geb.eff = eff;
+      geb.fortschritt += dt * eff;
+      if (geb.fortschritt >= def.dauer) {
+        geb.fortschritt -= def.dauer;
+        R[ware] += menge;
+        return true;
       }
-
-      case 'jagd': {
-        geb.eff = Math.min(1, baeumeImUmkreis(z.x, z.y, def.radius) / 5);
-        geb.fortschritt += dt * geb.eff;
-        if (geb.fortschritt >= def.dauer) { geb.fortschritt -= def.dauer; res.nahrung += 1; }
-        break;
-      }
-
-      case 'holzfaeller': {
-        geb.eff = Math.min(1, baeumeImUmkreis(z.x, z.y, def.radius) / 4);
-        geb.fortschritt += dt * geb.eff;
+      return false;
+    };
+    const verarbeiter = (rein, raus, menge = 1) => {
+      if (R[rein] >= 1) {
+        geb.eff = Math.min(1, geb.eff + dt);
+        geb.fortschritt += dt;
         if (geb.fortschritt >= def.dauer) {
           geb.fortschritt -= def.dauer;
-          res.holz += 1;
-          // Die dichteste Waldkachel im Umkreis wird etwas abgeholzt
+          R[rein] -= 1; R[raus] += menge;
+        }
+      } else geb.eff = Math.max(0, geb.eff - dt);
+    };
+
+    switch (geb.typ) {
+      // --- Sammler: ernten aus dem Umkreis ---
+      case 'fischer':
+        sammler(Math.min(1, wasserImUmkreis(z.x, z.y, def.radius) / 6), 'nahrung');
+        break;
+      case 'jagd':
+        sammler(Math.min(1, baeumeImUmkreis(z.x, z.y, def.radius) / 5), 'nahrung');
+        break;
+      case 'holzfaeller': {
+        const geerntet = sammler(Math.min(1, baeumeImUmkreis(z.x, z.y, def.radius) / 4), 'holz');
+        if (geerntet) {               // gerade geerntet → Wald etwas lichten
           let beste = null, bx = 0, by = 0;
           imUmkreis(z.x, z.y, def.radius, (k, x, y) => {
             if (k.baum > 0 && (!beste || k.baum > beste.baum)) { beste = k; bx = x; by = y; }
@@ -988,83 +1245,80 @@ function simSchritt(dt) {
         }
         break;
       }
-
-      case 'schaffarm': {
-        geb.eff = Math.min(1, weideImUmkreis(z.x, z.y, def.radius) / 10);
-        geb.fortschritt += dt * geb.eff;
-        if (geb.fortschritt >= def.dauer) { geb.fortschritt -= def.dauer; res.wolle += 1; }
+      case 'schaffarm':
+        sammler(Math.min(1, weideImUmkreis(z.x, z.y, def.radius) / 10), 'wolle');
         break;
-      }
-
-      case 'bauernhof': {
-        // Wie die Schaffarm, nur mit Getreide als Ertrag
-        geb.eff = Math.min(1, weideImUmkreis(z.x, z.y, def.radius) / 10);
-        geb.fortschritt += dt * geb.eff;
-        if (geb.fortschritt >= def.dauer) { geb.fortschritt -= def.dauer; res.getreide += 1; }
+      case 'getreidefarm':
+        sammler(Math.min(1, weideImUmkreis(z.x, z.y, def.radius) / 10), 'getreide');
         break;
-      }
-
-      case 'weingut': {
-        geb.eff = Math.min(1, weideImUmkreis(z.x, z.y, def.radius) / 10);
-        geb.fortschritt += dt * geb.eff;
-        if (geb.fortschritt >= def.dauer) { geb.fortschritt -= def.dauer; res.wein += 1; }
+      case 'zuckerrohr':
+        sammler(Math.min(1, weideImUmkreis(z.x, z.y, def.radius) / 10), 'zuckerrohr');
         break;
-      }
-
-      case 'brauerei': {
-        // Verarbeitet Getreide zu Bier – läuft nur, wenn Getreide da ist
-        if (res.getreide >= 1) {
-          geb.eff = Math.min(1, geb.eff + dt);
-          geb.fortschritt += dt;
-          if (geb.fortschritt >= def.dauer) {
-            geb.fortschritt -= def.dauer;
-            res.getreide -= 1; res.bier += 1;
-          }
-        } else geb.eff = Math.max(0, geb.eff - dt);
+      case 'tabakplantage':
+        sammler(Math.min(1, weideImUmkreis(z.x, z.y, def.radius) / 10), 'tabakblaetter');
         break;
-      }
-
-      case 'weberei': {
-        // Verarbeitet Wolle zu Stoffen – läuft nur, wenn Wolle da ist
-        if (res.wolle >= 1) {
-          geb.eff = Math.min(1, geb.eff + dt);      // sanft hochfahren
-          geb.fortschritt += dt;
-          if (geb.fortschritt >= def.dauer) {
-            geb.fortschritt -= def.dauer;
-            res.wolle -= 1; res.stoffe += 1;
-          }
-        } else geb.eff = Math.max(0, geb.eff - dt);
+      case 'gewuerzplantage':
+        sammler(Math.min(1, weideImUmkreis(z.x, z.y, def.radius) / 10), 'gewuerze');
         break;
-      }
+      case 'rinderfarm':
+        sammler(Math.min(1, weideImUmkreis(z.x, z.y, def.radius) / 10), 'nahrung', 2);
+        break;
 
-      case 'schmiede': {
-        // Fertigt Werkzeuge aus Holz, solange das Gestein reicht
+      // --- Verarbeiter: wandeln eine Ware in eine andere um ---
+      case 'weberei':     verarbeiter('wolle', 'stoffe'); break;
+      case 'brennerei':   verarbeiter('zuckerrohr', 'alkohol'); break;
+      case 'muehle':      verarbeiter('getreide', 'mehl'); break;
+      case 'baeckerei':   verarbeiter('mehl', 'nahrung', 2); break;
+      case 'tabakladen':  verarbeiter('tabakblaetter', 'tabak'); break;
+      case 'schneiderei': verarbeiter('stoffe', 'kleidung'); break;
+
+      // --- Betriebe am Gestein ---
+      case 'ziegelei': {
         const stein = steinKachelImUmkreis(z.x, z.y, def.radius);
-        if (res.holz >= 1 && stein) {
+        if (stein) {
+          geb.eff = Math.min(1, geb.eff + dt);
+          geb.fortschritt += dt;
+          if (geb.fortschritt >= def.dauer) { geb.fortschritt -= def.dauer; R.ziegel += 1; stein.stein -= 1; }
+        } else geb.eff = Math.max(0, geb.eff - dt);
+        break;
+      }
+      case 'schmiede': {
+        const stein = steinKachelImUmkreis(z.x, z.y, def.radius);
+        if (R.holz >= 1 && stein) {
           geb.eff = Math.min(1, geb.eff + dt);
           geb.fortschritt += dt;
           if (geb.fortschritt >= def.dauer) {
             geb.fortschritt -= def.dauer;
-            res.holz -= 1; res.werkzeuge += 1; stein.stein -= 1;
+            R.holz -= 1; R.werkzeuge += 1; stein.stein -= 1;
           }
         } else geb.eff = Math.max(0, geb.eff - dt);
         break;
       }
+      case 'goldschmiede': {
+        const stein = steinKachelImUmkreis(z.x, z.y, def.radius);
+        if (stein) {
+          geb.eff = Math.min(1, geb.eff + dt);
+          geb.fortschritt += dt;
+          if (geb.fortschritt >= def.dauer) { geb.fortschritt -= def.dauer; R.schmuck += 1; stein.stein -= 1; }
+        } else geb.eff = Math.max(0, geb.eff - dt);
+        break;
+      }
 
+      // --- Wohnhäuser: Zufriedenheit, Steuern, Wachstum, Aufstieg ---
       case 'wohnhaus': {
         const st = STUFEN[geb.stufe];
-        const markt = marktAnbindung(z.x, z.y);
+        const markt = marktAnbindung(z.x, z.y, geb.spieler);
         // Zufrieden = Markt + satt + alle Waren der eigenen Stufe vorrätig
-        let warenOK = !state.hunger;
+        let warenOK = !sp.hunger;
         for (const ware of Object.keys(st.brauch))
-          if (state.mangel[ware]) warenOK = false;
+          if (sp.mangel[ware]) warenOK = false;
         geb.zufrieden = markt && warenOK;
 
         // Steuern: Unzufriedene zahlen nur die Hälfte
-        steuern += geb.ew * st.steuer * (geb.zufrieden ? 1 : 0.5) * dt;
+        steuernJe[geb.spieler] += geb.ew * st.steuer * (geb.zufrieden ? 1 : 0.5) * dt;
 
         // Hunger: nach einer Weile ziehen Leute weg
-        if (state.hunger) {
+        if (sp.hunger) {
           geb.hungerZeit += dt;
           if (geb.hungerZeit >= SIM.hungerBisWegzug) {
             geb.hungerZeit = 0;
@@ -1079,19 +1333,32 @@ function simSchritt(dt) {
         } else geb.wachsZeit = 0;
 
         // Aufstieg zur nächsten Stufe: Haus gut gefüllt, die Waren der
-        // nächsten Stufe im Lager und ihr Gebäude in Reichweite
+        // nächsten Stufe im Lager, ihr Gebäude in Reichweite und
+        // Baumaterial (Holz/Ziegel) vorhanden
         const naechste = STUFEN[geb.stufe + 1];
         if (naechste) {
           let bereit = geb.zufrieden && geb.ew >= Math.ceil(st.maxEw * 0.75);
           for (const ware of Object.keys(naechste.brauch))
-            if (res[ware] < 0.5) bereit = false;
-          if (naechste.gebaeudeNah && !gebaeudeInReichweite(naechste.gebaeudeNah, z.x, z.y))
+            if (R[ware] < 0.5) bereit = false;
+          if (naechste.material)
+            for (const [ware, menge] of Object.entries(naechste.material))
+              if (R[ware] < menge) bereit = false;
+          if (naechste.gebaeudeNah &&
+              !gebaeudeInReichweite(naechste.gebaeudeNah, z.x, z.y, geb.spieler))
             bereit = false;
           if (bereit) {
             geb.aufstiegZeit += dt;
             if (geb.aufstiegZeit >= SIM.aufstiegsDauer) {
+              if (naechste.material)   // Baumaterial wird verbaut
+                for (const [ware, menge] of Object.entries(naechste.material))
+                  R[ware] -= menge;
               geb.stufe++; geb.maxEw = naechste.maxEw; geb.aufstiegZeit = 0;
-              melden(`🎉 Ein Haus ist zu ${st.dativ} aufgestiegen!`, 'aufstieg');
+              const warNeu = geb.stufe > sp.maxStufe;
+              sp.maxStufe = Math.max(sp.maxStufe, geb.stufe);
+              if (geb.spieler === 0) {
+                melden(`🎉 Ein Haus ist zu ${st.dativ} aufgestiegen!`, 'aufstieg');
+                if (warNeu) menueBauen();   // neue Gebäude freigeschaltet
+              }
             }
           } else geb.aufstiegZeit = 0;
         }
@@ -1100,27 +1367,41 @@ function simSchritt(dt) {
     }
   }
 
-  // --- Goldbilanz ---
-  res.gold += steuern - unterhalt;
-  const rate = dt > 0 ? (steuern - unterhalt) / dt : 0;
+  // --- Goldbilanz je Spieler ---
+  for (const sp of spieler) sp.res.gold += steuernJe[sp.id] - unterhaltJe[sp.id];
+  const rate = dt > 0 ? (steuernJe[0] - unterhaltJe[0]) / dt : 0;
   state.goldRate = state.goldRate * 0.95 + rate * 0.05;
 
-  // --- Bankrott-Uhr ---
+  // --- Die KI-Spieler ziehen ---
+  for (const sp of spieler) if (sp.ki) kiTick(sp, dt);
+
+  // --- Bankrott-Uhr (gilt nur für dich) ---
   if (res.gold < 0) {
     state.pleiteZeit += dt;
     if (state.pleiteZeit >= SIM.pleiteDauer && !state.vorbei) spielVorbei();
   } else state.pleiteZeit = 0;
 
-  // --- Siegbedingung ---
-  if (!state.gewonnen && siedlerEw >= SIM.zielSiedler) {
-    state.gewonnen = true;
-    gewonnenAnzeigen();
+  // --- Wettrennen: Wer erreicht zuerst das Siedler-Ziel? ---
+  if (!state.rennenVorbei) {
+    if (spieler[0].siedlerEw >= SIM.zielSiedler) {
+      state.rennenVorbei = true; state.gewonnen = true;
+      gewonnenAnzeigen();
+    } else {
+      for (const sp of spieler) {
+        if (sp.ki && sp.siedlerEw >= SIM.zielSiedler) {
+          state.rennenVorbei = true;
+          verlorenAnzeigen(sp);
+          break;
+        }
+      }
+    }
   }
 
-  // Werte für die Anzeige merken
-  state.einwohner = einwohner;
-  state.siedlerEw = siedlerEw;
-  state.pionierEw = pionierEw;
+  // Werte für die Anzeige merken (deine Sicht)
+  state.einwohner = spieler[0].einwohner;
+  state.siedlerEw = spieler[0].siedlerEw;
+  state.hunger = spieler[0].hunger;
+  state.mangel = spieler[0].mangel;
 }
 
 /* ---------- 7. ZEICHNEN --------------------------------------- */
@@ -1279,6 +1560,15 @@ function zeichnen() {
     if (geb.typ === 'wohnhaus') emoji = STUFEN[geb.stufe].emoji;
     ctx.font = `${Math.min(bw, bh) * 0.58}px sans-serif`;
     ctx.fillText(emoji, px + bw / 2, py + bh / 2 + 1);
+
+    // Besitzer-Fähnchen: farbiger Punkt oben links
+    ctx.beginPath();
+    ctx.arc(px + 7, py + 7, 4, 0, Math.PI * 2);
+    ctx.fillStyle = spieler[geb.spieler].farbe;
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
 
     // Bedürfnis-Punkt an jedem Wohnhaus: grün = zufrieden, rot = nicht
     if (geb.typ === 'wohnhaus') {
@@ -1496,7 +1786,12 @@ function klickAufKarte(sx, sy) {
   } else if (state.werkzeug === 'abriss') {
     // Nicht sofort abreißen – erst die Bestätigung einholen
     const geb = t && belegtAuf(t.x, t.y);
-    state.vorschau = geb ? { modus: 'abriss', geb } : null;
+    if (geb && geb.spieler !== 0) {
+      melden(`Das gehört ${spieler[geb.spieler].name}!`);
+      state.vorschau = null;
+    } else {
+      state.vorschau = geb ? { modus: 'abriss', geb } : null;
+    }
     bestaetigungZeigen();
   } else if (t) {
     // Nicht sofort bauen – die Vorschau wartet auf den ✓-Knopf.
@@ -1541,10 +1836,10 @@ function menueBauen() {
     // Das Kontor gibt es nur einmal – danach verschwindet der Knopf
     if (typ === 'kontor' && state.kontorGebaut) continue;
     const def = GEBAEUDE[typ];
-    const k = def.kosten;
-    const kostenText = [k.gold ? `💰${k.gold}` : '', k.holz ? `🪵${k.holz}` : '',
-      k.werkzeuge ? `⚒️${k.werkzeuge}` : ''].filter(Boolean).join(' ') || 'gratis';
+    const kostenText = Object.entries(def.kosten)
+      .map(([ware, menge]) => `${WAREN_EMOJI[ware]}${menge}`).join(' ') || 'gratis';
     const knopf = bauKnopf(typ, def.emoji, def.name, def.beschr + ' – Kosten: ' + kostenText);
+    knopf.dataset.kosten = kostenText;
     knopf.querySelector('.kosten').textContent = kostenText;
     menue.appendChild(knopf);
   }
@@ -1647,8 +1942,16 @@ function menueAktualisieren() {
   for (const b of document.querySelectorAll('.bau-knopf')) {
     const w = b.dataset.werkzeug;
     b.classList.toggle('aktiv', w === state.werkzeug);
-    if (GEBAEUDE[w]) b.disabled = state.kontorGebaut ? !kostenReichen(w)
-                                                     : (w !== 'kontor');
+    if (GEBAEUDE[w]) {
+      // Gebäude sind erst ab einer bestimmten Bevölkerungsstufe freigeschaltet
+      const gesperrt = spieler[0].maxStufe < GEBAEUDE[w].abStufe;
+      b.disabled = state.kontorGebaut ? (gesperrt || !kostenReichen(w))
+                                      : (w !== 'kontor');
+      const kostenFeld = b.querySelector('.kosten');
+      if (kostenFeld) kostenFeld.textContent = gesperrt
+        ? '🔒 ab ' + STUFEN[GEBAEUDE[w].abStufe].name
+        : (b.dataset.kosten || '');
+    }
   }
 }
 
@@ -1662,11 +1965,17 @@ function uiAktualisieren() {
   $('r-werkzeuge').textContent = Math.floor(res.werkzeuge);
   $('r-nahrung').textContent = Math.floor(res.nahrung);
   $('r-nahrung').parentElement.classList.toggle('warnung', state.hunger);
-  $('r-wolle').textContent = Math.floor(res.wolle);
+  $('r-ziegel').textContent = Math.floor(res.ziegel);
   $('r-stoffe').textContent = Math.floor(res.stoffe);
-  $('r-getreide').textContent = Math.floor(res.getreide);
-  $('r-bier').textContent = Math.floor(res.bier);
-  $('r-wein').textContent = Math.floor(res.wein);
+  $('r-alkohol').textContent = Math.floor(res.alkohol);
+
+  // Punktestand des Wettrennens (nach Siedlern sortiert)
+  const rangliste = [...spieler].sort((a, b) =>
+    (b.siedlerEw - a.siedlerEw) || (b.einwohner - a.einwohner));
+  $('punkte').innerHTML = '<b>🏁 Wettlauf auf ' + SIM.zielSiedler + ' Siedler</b>' +
+    rangliste.map(sp => `<div class="punkte-zeile">` +
+      `<span><span style="color:${sp.farbe}">●</span> ${sp.name}</span>` +
+      `<span>${sp.kontor ? STUFEN[sp.maxStufe].emoji + ' ' + sp.siedlerEw : '⛵ …'}</span></div>`).join('');
   $('r-einwohner').textContent = state.einwohner || 0;
   $('r-siedler').textContent = state.siedlerEw || 0;
   $('ziel-balken').firstElementChild.style.width =
@@ -1694,8 +2003,12 @@ function panelZeigen() {
   const def = GEBAEUDE[geb.typ];
   const info = GEB_INFO[geb.typ] || {};
   const kopfEmoji = geb.typ === 'wohnhaus' ? STUFEN[geb.stufe].emoji : def.emoji;
+  const besitzer = spieler[geb.spieler];
   let html = `<h2><span>${kopfEmoji}</span> ${def.name}</h2>`;
   html += `<div class="beschr">${def.beschr}</div>`;
+  if (geb.spieler !== 0)
+    html += `<div class="zeile"><span>Besitzer</span>` +
+            `<span style="color:${besitzer.farbe}">● ${besitzer.name}</span></div>`;
 
   // Was das Gebäude produziert, verbraucht und wo es wirkt
   if (info.produziert) html += `<div class="zeile"><span>Produziert</span><span>${info.produziert}</span></div>`;
@@ -1710,17 +2023,21 @@ function panelZeigen() {
     html += `<div class="zeile"><span>Einwohner</span><span>${geb.ew} / ${geb.maxEw}</span></div>`;
     html += `<div class="zeile"><span>Stimmung</span><span>${geb.zufrieden ? '😊 zufrieden' : '😠 unzufrieden'}</span></div>`;
     html += '<hr><b style="font-size:12px">Bedürfnisse</b>';
-    html += beduerfnis('Marktanbindung', marktAnbindung(z.x, z.y));
-    html += beduerfnis('🍞 Nahrung', !state.hunger);
+    html += beduerfnis('Marktanbindung', marktAnbindung(z.x, z.y, geb.spieler));
+    html += beduerfnis('🍞 Nahrung', !besitzer.hunger);
     for (const ware of Object.keys(st.brauch))
-      html += beduerfnis(`${WAREN_EMOJI[ware]} ${WAREN_NAME[ware]}`, !state.mangel[ware]);
+      html += beduerfnis(`${WAREN_EMOJI[ware]} ${WAREN_NAME[ware]}`, !besitzer.mangel[ware]);
     if (naechste) {
       html += `<hr><b style="font-size:12px">Für den Aufstieg zu ${st.dativ}</b>`;
       for (const ware of Object.keys(naechste.brauch))
-        html += beduerfnis(`${WAREN_EMOJI[ware]} ${WAREN_NAME[ware]} im Lager`, res[ware] > 0.5);
+        html += beduerfnis(`${WAREN_EMOJI[ware]} ${WAREN_NAME[ware]} im Lager`, besitzer.res[ware] > 0.5);
+      if (naechste.material)
+        for (const [ware, menge] of Object.entries(naechste.material))
+          html += beduerfnis(`${WAREN_EMOJI[ware]} ${menge} ${WAREN_NAME[ware]} (Baumaterial)`,
+                             besitzer.res[ware] >= menge);
       if (naechste.gebaeudeNah)
         html += beduerfnis(`${GEBAEUDE[naechste.gebaeudeNah].emoji} ${GEBAEUDE[naechste.gebaeudeNah].name} in Reichweite`,
-                           gebaeudeInReichweite(naechste.gebaeudeNah, z.x, z.y));
+                           gebaeudeInReichweite(naechste.gebaeudeNah, z.x, z.y, geb.spieler));
       html += beduerfnis(`Gut gefülltes Haus (ab ${Math.ceil(st.maxEw * 0.75)} Ew.)`,
                          geb.ew >= Math.ceil(st.maxEw * 0.75));
     }
@@ -1736,8 +2053,8 @@ function panelZeigen() {
     if (def.unterhalt) html += `<div class="zeile"><span>Unterhalt</span><span>${(def.unterhalt * 60).toFixed(0)} 💰/min</span></div>`;
   }
 
-  // Handel: nur am Kontor – kaufen ist teurer als verkaufen
-  if (geb.typ === 'kontor') {
+  // Handel: nur am eigenen Kontor – kaufen ist teurer als verkaufen
+  if (geb.typ === 'kontor' && geb.spieler === 0) {
     html += '<hr><b style="font-size:12px">⚖️ Handel (je 10 Stück)</b>';
     for (const ware of Object.keys(PREISE)) {
       const p = PREISE[ware];
@@ -1750,14 +2067,15 @@ function panelZeigen() {
     }
   }
 
-  html += `<button class="abriss-knopf" onclick="abreissenAuswahl()">🧨 Abreißen</button>`;
+  if (geb.spieler === 0)
+    html += `<button class="abriss-knopf" onclick="abreissenAuswahl()">🧨 Abreißen</button>`;
   $('panel-inhalt').innerHTML = html;
 }
 function beduerfnis(name, erfuellt) {
   return `<div class="beduerfnis"><span>${name}</span>` +
          `<span class="${erfuellt ? 'ok' : 'fehlt'}">${erfuellt ? '✓' : '✗'}</span></div>`;
 }
-function abreissenAuswahl() { if (state.auswahl) abreissen(state.auswahl); }
+function abreissenAuswahl() { if (state.auswahl && state.auswahl.spieler === 0) abreissen(state.auswahl); }
 $('panel-zu').addEventListener('click', () => { state.auswahl = null; panelZeigen(); });
 
 // Kurze Meldung am unteren Rand; gleiche Meldungen werden gedrosselt
@@ -1816,6 +2134,19 @@ function gewonnenAnzeigen() {
 function weiterspielen() {
   state.weiterspielen = true;
   $('overlay').style.display = 'none';
+}
+
+// Eine KI hat das Wettrennen gewonnen
+function verlorenAnzeigen(sp) {
+  $('overlay').style.display = 'flex';
+  $('overlay-box').innerHTML = `
+    <div class="gross">🏁</div>
+    <h1>${sp.name} gewinnt das Wettrennen!</h1>
+    <p><span style="color:${sp.farbe}">● ${sp.name}</span> hat zuerst ${SIM.zielSiedler} Siedler erreicht.<br>
+       Deine Siedlung: <b>${spieler[0].siedlerEw}</b> Siedler.<br>
+       Du kannst trotzdem weiterbauen – oder eine neue Welt versuchen.</p>
+    <button class="knopf-grau" onclick="weiterspielen()">Weiterspielen</button>
+    <button class="knopf-gruen" onclick="location.reload()">Neue Welt</button>`;
 }
 
 /* ---------- 10. MUSIK (Web Audio API) ------------------------- */
