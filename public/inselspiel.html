@@ -97,6 +97,15 @@
     display: flex; flex-direction: column; gap: 1px; align-items: center;
     font-family: inherit;
   }
+  .bau-gruppe {
+    display: flex; flex-direction: column; gap: 2px; flex: none;
+    padding-left: 8px; margin-left: 2px; border-left: 1px solid #e5e7eb;
+  }
+  .gruppe-titel {
+    font-size: 9.5px; font-weight: 700; color: var(--text-leise);
+    text-transform: uppercase; letter-spacing: 0.5px; padding-left: 2px;
+  }
+  .gruppe-knoepfe { display: flex; gap: 6px; }
   .bau-knopf:hover { background: #f3f4f6; }
   .bau-knopf.aktiv { border-color: var(--accent); background: #f0fdf4; }
   .bau-knopf:disabled { opacity: 0.42; cursor: not-allowed; }
@@ -134,6 +143,19 @@
   /* Auslastungs-Balken im Panel */
   .auslast-balken { height: 6px; border-radius: 3px; background: #e5e7eb; overflow: hidden; margin-top: 3px; }
   .auslast-balken > div { height: 100%; background: var(--accent); }
+
+  /* ---------- Zoom-Knöpfe ---------- */
+  #zoom-knoepfe {
+    position: absolute; left: 10px; bottom: 118px; z-index: 9;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  #zoom-knoepfe button {
+    width: 44px; height: 44px; border: none; border-radius: 12px;
+    background: var(--flaeche); box-shadow: var(--schatten);
+    font-size: 22px; font-weight: 700; color: var(--text);
+    cursor: pointer; line-height: 1;
+  }
+  #zoom-knoepfe button:active { background: #e5e7eb; }
 
   /* ---------- Bau-/Abriss-Bestätigung ---------- */
   #bestaetigung {
@@ -253,6 +275,12 @@
 <!-- Baumenü (wird per JavaScript gefüllt) -->
 <div id="baumenue"></div>
 
+<!-- Zoom-Knöpfe (praktisch auf dem Handy) -->
+<div id="zoom-knoepfe">
+  <button id="k-plus" title="Hineinzoomen">＋</button>
+  <button id="k-minus" title="Herauszoomen">−</button>
+</div>
+
 <!-- Bestätigung vor dem Bauen/Abreißen (gegen Vertipper) -->
 <div id="bestaetigung">
   <span id="bestaetigung-text"></span>
@@ -363,6 +391,35 @@ const WAREN_EMOJI = { gold: '💰', holz: '🪵', werkzeuge: '⚒️', ziegel: '
   nahrung: '🍞', wolle: '🧶', stoffe: '🧵', getreide: '🌾', mehl: '🥣',
   zuckerrohr: '🎋', alkohol: '🥃', tabakblaetter: '🍂', tabak: '🚬',
   gewuerze: '🌶️', kleidung: '👕', schmuck: '💍' };
+// Dynamischer Markt: jeder Kauf treibt den Preis einer Ware nach oben,
+// jeder Verkauf drückt ihn – und zwar für ALLE Spieler. Wer dieselben
+// Waren braucht wie die Konkurrenz, zahlt also drauf. Mit der Zeit
+// pendeln die Preise langsam zum Normalwert zurück.
+const markt = {};   // Preisfaktor je Ware (1 = Normalpreis)
+
+function kaufpreis(ware)     { return Math.max(1, Math.round(PREISE[ware].kauf * markt[ware])); }
+function verkaufspreis(ware) { return Math.max(1, Math.round(PREISE[ware].verkauf * markt[ware])); }
+
+// Führt einen Handel für einen beliebigen Spieler aus (auch die KI).
+// menge > 0 = kaufen, menge < 0 = verkaufen. Liefert false bei Geldmangel.
+function handelAusfuehren(sp, ware, menge) {
+  const R = sp.res;
+  if (menge > 0) {
+    const kosten = kaufpreis(ware) * menge;
+    if (R.gold < kosten) return false;
+    R.gold -= kosten;
+    R[ware] += menge;
+    markt[ware] = Math.min(3, markt[ware] * (1 + 0.006 * menge));    // Nachfrage → teurer
+  } else {
+    const anzahl = Math.min(-menge, Math.floor(R[ware]));
+    if (anzahl <= 0) return false;
+    R[ware] -= anzahl;
+    R.gold += verkaufspreis(ware) * anzahl;
+    markt[ware] = Math.max(0.5, markt[ware] * (1 - 0.004 * anzahl)); // Überangebot → billiger
+  }
+  return true;
+}
+
 const WAREN_NAME = { holz: 'Holz', werkzeuge: 'Werkzeuge', ziegel: 'Ziegel',
   nahrung: 'Nahrung', wolle: 'Wolle', stoffe: 'Stoffe', getreide: 'Getreide',
   mehl: 'Mehl', zuckerrohr: 'Zuckerrohr', alkohol: 'Alkohol',
@@ -557,12 +614,17 @@ const GEB_INFO = {
   theater:         { produziert: 'Kultur (Radius 9)' },
 };
 
-// Reihenfolge im Baumenü (nach Freischaltstufe sortiert)
-const MENUE_REIHENFOLGE = ['kontor', 'marktplatz', 'wohnhaus', 'holzfaeller',
-  'fischer', 'jagd', 'schaffarm', 'weberei', 'zuckerrohr', 'brennerei', 'kapelle',
-  'ziegelei', 'schmiede', 'getreidefarm', 'muehle', 'baeckerei', 'schule',
-  'rinderfarm', 'tabakplantage', 'tabakladen', 'gewuerzplantage', 'badehaus',
-  'schneiderei', 'goldschmiede', 'theater'];
+// Das Baumenü ist in Gruppen sortiert
+const MENUE_GRUPPEN = [
+  { titel: 'Siedlung',
+    typen: ['kontor', 'marktplatz', 'wohnhaus', 'kapelle', 'schule', 'badehaus', 'theater'] },
+  { titel: 'Rohstoffe',
+    typen: ['holzfaeller', 'fischer', 'jagd', 'ziegelei', 'schmiede'] },
+  { titel: 'Anbau',
+    typen: ['schaffarm', 'getreidefarm', 'zuckerrohr', 'tabakplantage', 'gewuerzplantage', 'rinderfarm'] },
+  { titel: 'Verarbeitung',
+    typen: ['weberei', 'muehle', 'baeckerei', 'brennerei', 'tabakladen', 'schneiderei', 'goldschmiede'] },
+];
 
 /* ---------- 2. SPIELZUSTAND ---------------------------------- */
 
@@ -1119,17 +1181,13 @@ function kiTick(sp, dt) {
   const R = sp.res;
   if (R.gold < 0) return;   // pleite: erst einmal sparen
 
-  // Einkaufen: fehlende Waren im Handel besorgen (gleiche Preise wie du)
+  // Einkaufen: fehlende Waren am gemeinsamen Markt besorgen –
+  // das treibt die Preise auch für dich!
   for (const [ware, abStufe] of Object.entries(KI_EINKAUF)) {
-    if (sp.maxStufe >= abStufe && R[ware] < 12 && R.gold > 1200) {
-      R.gold -= PREISE[ware].kauf * 10;
-      R[ware] += 10;
-    }
+    if (sp.maxStufe >= abStufe && R[ware] < 12 && R.gold > 1200)
+      handelAusfuehren(sp, ware, 10);
   }
-  if (R.werkzeuge < 3 && R.gold > 1200) {
-    R.gold -= PREISE.werkzeuge.kauf * 10;
-    R.werkzeuge += 10;
-  }
+  if (R.werkzeuge < 3 && R.gold > 1200) handelAusfuehren(sp, 'werkzeuge', 10);
 
   // Bauen: nächster Punkt auf dem Plan, danach freies Wachstum
   let typ = sp.plan ? sp.plan[sp.planIdx] : undefined;
@@ -1371,6 +1429,10 @@ function simSchritt(dt) {
   for (const sp of spieler) sp.res.gold += steuernJe[sp.id] - unterhaltJe[sp.id];
   const rate = dt > 0 ? (steuernJe[0] - unterhaltJe[0]) / dt : 0;
   state.goldRate = state.goldRate * 0.95 + rate * 0.05;
+
+  // --- Marktpreise pendeln langsam zum Normalwert zurück ---
+  for (const ware of Object.keys(markt))
+    markt[ware] += (1 - markt[ware]) * 0.01 * dt;
 
   // --- Die KI-Spieler ziehen ---
   for (const sp of spieler) if (sp.ki) kiTick(sp, dt);
@@ -1750,6 +1812,12 @@ function zeigerEnde(e) {
 leinwand.addEventListener('pointerup', zeigerEnde);
 leinwand.addEventListener('pointercancel', zeigerEnde);
 
+// ➕/➖-Knöpfe: Zoomen auf die Bildschirmmitte (gut für Touch)
+document.getElementById('k-plus').addEventListener('click', () =>
+  zoomAuf(leinwand.clientWidth / 2, leinwand.clientHeight / 2, 1.35));
+document.getElementById('k-minus').addEventListener('click', () =>
+  zoomAuf(leinwand.clientWidth / 2, leinwand.clientHeight / 2, 1 / 1.35));
+
 // Mausrad: Zoomen auf den Mauszeiger
 leinwand.addEventListener('wheel', e => {
   e.preventDefault();
@@ -1832,16 +1900,25 @@ function menueBauen() {
   // Zeiger-Werkzeug (Auswählen)
   menue.appendChild(bauKnopf('zeiger', '👆', 'Auswählen', 'Gebäude anklicken für Details'));
 
-  for (const typ of MENUE_REIHENFOLGE) {
-    // Das Kontor gibt es nur einmal – danach verschwindet der Knopf
-    if (typ === 'kontor' && state.kontorGebaut) continue;
-    const def = GEBAEUDE[typ];
-    const kostenText = Object.entries(def.kosten)
-      .map(([ware, menge]) => `${WAREN_EMOJI[ware]}${menge}`).join(' ') || 'gratis';
-    const knopf = bauKnopf(typ, def.emoji, def.name, def.beschr + ' – Kosten: ' + kostenText);
-    knopf.dataset.kosten = kostenText;
-    knopf.querySelector('.kosten').textContent = kostenText;
-    menue.appendChild(knopf);
+  for (const gruppe of MENUE_GRUPPEN) {
+    const kasten = document.createElement('div');
+    kasten.className = 'bau-gruppe';
+    kasten.innerHTML = `<span class="gruppe-titel">${gruppe.titel}</span>`;
+    const reihe = document.createElement('div');
+    reihe.className = 'gruppe-knoepfe';
+    for (const typ of gruppe.typen) {
+      // Das Kontor gibt es nur einmal – danach verschwindet der Knopf
+      if (typ === 'kontor' && state.kontorGebaut) continue;
+      const def = GEBAEUDE[typ];
+      const kostenText = Object.entries(def.kosten)
+        .map(([ware, menge]) => `${WAREN_EMOJI[ware]}${menge}`).join(' ') || 'gratis';
+      const knopf = bauKnopf(typ, def.emoji, def.name, def.beschr + ' – Kosten: ' + kostenText);
+      knopf.dataset.kosten = kostenText;
+      knopf.querySelector('.kosten').textContent = kostenText;
+      reihe.appendChild(knopf);
+    }
+    kasten.appendChild(reihe);
+    menue.appendChild(kasten);
   }
 
   // Abriss-Werkzeug
@@ -1922,19 +1999,9 @@ $('b-nein').addEventListener('click', () => {
 
 // --- Handel am Kontor: Waren gegen Gold kaufen und verkaufen ---
 function handel(ware, menge) {
-  const preis = PREISE[ware];
-  if (!preis) return;
-  if (menge > 0) {                       // kaufen
-    const kosten = preis.kauf * menge;
-    if (res.gold < kosten) { melden('Zu wenig Gold zum Kaufen'); return; }
-    res.gold -= kosten;
-    res[ware] += menge;
-  } else {                               // verkaufen (nur, was da ist)
-    const anzahl = Math.min(-menge, Math.floor(res[ware]));
-    if (anzahl <= 0) { melden('Nichts zum Verkaufen da'); return; }
-    res[ware] -= anzahl;
-    res.gold += preis.verkauf * anzahl;
-  }
+  if (!PREISE[ware]) return;
+  if (!handelAusfuehren(spieler[0], ware, menge))
+    melden(menge > 0 ? 'Zu wenig Gold zum Kaufen' : 'Nichts zum Verkaufen da');
   uiAktualisieren();
 }
 
@@ -2055,14 +2122,17 @@ function panelZeigen() {
 
   // Handel: nur am eigenen Kontor – kaufen ist teurer als verkaufen
   if (geb.typ === 'kontor' && geb.spieler === 0) {
-    html += '<hr><b style="font-size:12px">⚖️ Handel (je 10 Stück)</b>';
+    html += '<hr><b style="font-size:12px">⚖️ Handel (je 10 Stück)</b>' +
+      '<div class="beschr" style="margin:2px 0 4px">Preise folgen der Nachfrage – auch die Konkurrenz kauft hier ein! ▲ teuer · ▼ günstig</div>';
     for (const ware of Object.keys(PREISE)) {
-      const p = PREISE[ware];
+      const f = markt[ware];
+      const trend = f > 1.15 ? ' <span style="color:#dc2626">▲</span>'
+                  : f < 0.87 ? ' <span style="color:#2563eb">▼</span>' : '';
       html += `<div class="handel-zeile">
-        <span>${WAREN_EMOJI[ware]} ${Math.floor(res[ware])}</span>
+        <span>${WAREN_EMOJI[ware]} ${Math.floor(res[ware])}${trend}</span>
         <span>
-          <button class="handel-verkauf" onclick="handel('${ware}',-10)">−10 · +${p.verkauf * 10}💰</button>
-          <button class="handel-kauf" onclick="handel('${ware}',10)">+10 · −${p.kauf * 10}💰</button>
+          <button class="handel-verkauf" onclick="handel('${ware}',-10)">−10 · +${verkaufspreis(ware) * 10}💰</button>
+          <button class="handel-kauf" onclick="handel('${ware}',10)">+10 · −${kaufpreis(ware) * 10}💰</button>
         </span></div>`;
     }
   }
@@ -2239,6 +2309,7 @@ function schleife(jetzt) {
 }
 
 // --- Los geht's ---
+for (const ware of Object.keys(PREISE)) markt[ware] = 1;
 weltErzeugen();
 schiffStart();
 menueBauen();
