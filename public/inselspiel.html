@@ -109,6 +109,7 @@
   .bau-knopf:hover { background: #f3f4f6; }
   .bau-knopf.aktiv { border-color: var(--accent); background: #f0fdf4; }
   .bau-knopf:disabled { opacity: 0.42; cursor: not-allowed; }
+  .bau-knopf.gesperrt { opacity: 0.42; }
   .bau-knopf .symbol { font-size: 22px; line-height: 1.15; }
   .bau-knopf .name   { font-size: 10.5px; font-weight: 600; }
   .bau-knopf .kosten { font-size: 9.5px; color: var(--text-leise); }
@@ -215,6 +216,19 @@
     box-shadow: var(--schatten); padding: 8px 16px;
     font-size: 13.5px; font-weight: 700; z-index: 12; display: none;
   }
+  /* Pulsierende Warnung, wenn den Einwohnern etwas fehlt */
+  #mangel-warnung {
+    position: absolute; top: 62px; left: 50%; transform: translateX(-50%);
+    background: #fef2f2; color: var(--rot); border-radius: 10px;
+    padding: 8px 16px; font-size: 13.5px; font-weight: 700;
+    z-index: 11; display: none; text-align: center;
+    max-width: calc(100vw - 24px);
+    animation: mangel-puls 1.2s ease-in-out infinite;
+  }
+  @keyframes mangel-puls {
+    0%, 100% { box-shadow: 0 4px 18px rgba(220, 38, 38, 0.25); }
+    50%      { box-shadow: 0 0 0 7px rgba(220, 38, 38, 0.22); }
+  }
 
   /* ---------- Großes Overlay (Sieg / Niederlage) ---------- */
   #overlay {
@@ -271,6 +285,7 @@
 <!-- Hinweis zu Spielbeginn -->
 <div id="hinweis">⛵ Tippe aufs Wasser, um zu segeln. Such dir eine Insel aus und baue dort dein Kontor an der Küste!</div>
 <div id="bankrott-warnung"></div>
+<div id="mangel-warnung"></div>
 
 <!-- Baumenü (wird per JavaScript gefüllt) -->
 <div id="baumenue"></div>
@@ -1632,8 +1647,17 @@ function zeichnen() {
     ctx.lineWidth = 1.2;
     ctx.stroke();
 
-    // Bedürfnis-Punkt an jedem Wohnhaus: grün = zufrieden, rot = nicht
+    // Bedürfnis-Punkt an jedem Wohnhaus: grün = zufrieden, rot = nicht.
+    // Unzufriedene Häuser senden zusätzlich einen pulsierenden Ring aus.
     if (geb.typ === 'wohnhaus') {
+      if (!geb.zufrieden) {
+        const puls = (performance.now() % 1100) / 1100;
+        ctx.beginPath();
+        ctx.arc(px + bw - 7, py + 7, 4.5 + puls * 10, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(220,38,38,${(1 - puls) * 0.9})`;
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      }
       ctx.beginPath();
       ctx.arc(px + bw - 7, py + 7, 4.5, 0, Math.PI * 2);
       ctx.fillStyle = geb.zufrieden ? '#16a34a' : '#dc2626';
@@ -1932,8 +1956,34 @@ function bauKnopf(werkzeug, symbol, name, tipp) {
   b.dataset.werkzeug = werkzeug;
   b.title = tipp;
   b.innerHTML = `<span class="symbol">${symbol}</span><span class="name">${name}</span><span class="kosten"></span>`;
-  b.addEventListener('click', () => werkzeugWaehlen(werkzeug));
+  b.addEventListener('click', () => bauKnopfKlick(werkzeug));
   return b;
+}
+
+// Klick auf einen Bauknopf: Wenn das Gebäude (noch) nicht gebaut werden
+// kann, wird der Grund als Meldung angezeigt – wichtig auf dem Handy,
+// wo es keine Maus-Tooltips gibt.
+function bauKnopfKlick(werkzeug) {
+  const def = GEBAEUDE[werkzeug];
+  if (def) {
+    if (!state.kontorGebaut && werkzeug !== 'kontor') {
+      melden('⚓ Baue zuerst dein Kontor an der Küste!');
+      return;
+    }
+    if (spieler[0].maxStufe < def.abStufe) {
+      melden(`🔒 ${def.name}: wird erst freigeschaltet, wenn ein Haus zu ${STUFEN[def.abStufe].name}n aufgestiegen ist`);
+      return;
+    }
+    if (!kostenReichen(werkzeug)) {
+      const fehlt = Object.entries(def.kosten)
+        .filter(([ware, menge]) => res[ware] < menge)
+        .map(([ware, menge]) => `${WAREN_EMOJI[ware]} ${Math.ceil(menge - res[ware])}`)
+        .join(', ');
+      melden(`${def.name}: es fehlt ${fehlt} – produzieren oder im Kontor kaufen`);
+      return;
+    }
+  }
+  werkzeugWaehlen(werkzeug);
 }
 
 function werkzeugWaehlen(werkzeug) {
@@ -2010,10 +2060,12 @@ function menueAktualisieren() {
     const w = b.dataset.werkzeug;
     b.classList.toggle('aktiv', w === state.werkzeug);
     if (GEBAEUDE[w]) {
-      // Gebäude sind erst ab einer bestimmten Bevölkerungsstufe freigeschaltet
+      // Nicht baubar = ausgegraut, aber weiterhin antippbar (der Klick
+      // erklärt dann den Grund – siehe bauKnopfKlick)
       const gesperrt = spieler[0].maxStufe < GEBAEUDE[w].abStufe;
-      b.disabled = state.kontorGebaut ? (gesperrt || !kostenReichen(w))
-                                      : (w !== 'kontor');
+      const inaktiv = state.kontorGebaut ? (gesperrt || !kostenReichen(w))
+                                         : (w !== 'kontor');
+      b.classList.toggle('gesperrt', inaktiv);
       const kostenFeld = b.querySelector('.kosten');
       if (kostenFeld) kostenFeld.textContent = gesperrt
         ? '🔒 ab ' + STUFEN[GEBAEUDE[w].abStufe].name
@@ -2050,14 +2102,60 @@ function uiAktualisieren() {
 
   // Bankrott-Warnung mit Countdown
   const warnung = $('bankrott-warnung');
-  if (res.gold < 0 && !state.vorbei) {
+  const pleite = res.gold < 0 && !state.vorbei;
+  if (pleite) {
     warnung.style.display = 'block';
     warnung.textContent = '⚠️ Kasse leer! Bankrott in ' +
       Math.ceil(SIM.pleiteDauer - state.pleiteZeit) + ' s – Unterhalt senken oder Steuern steigern!';
   } else warnung.style.display = 'none';
 
+  // Pulsierende Mangel-Warnung: welche Waren fehlen den Einwohnern?
+  const mangelWaren = Object.keys(state.mangel || {});
+  const mangelLeiste = $('mangel-warnung');
+  if (mangelWaren.length && (state.einwohner || 0) > 0 && !pleite) {
+    mangelLeiste.style.display = 'block';
+    mangelLeiste.innerHTML = '🚨 Mangel an ' +
+      mangelWaren.map(w => `${WAREN_EMOJI[w]} ${WAREN_NAME[w]}`).join(', ') +
+      '! Produktion ausbauen oder im Kontor zukaufen.';
+  } else mangelLeiste.style.display = 'none';
+
   menueAktualisieren();
   if (state.auswahl) panelZeigen();
+}
+
+// Eingangswaren der Verarbeitungs-Betriebe (für die Auslastungs-Erklärung)
+const VERARBEITER_REIN = { weberei: 'wolle', brennerei: 'zuckerrohr',
+  muehle: 'getreide', baeckerei: 'mehl', tabakladen: 'tabakblaetter',
+  schneiderei: 'stoffe' };
+
+// Erklärt in Worten, woraus sich die Auslastung eines Betriebs ergibt
+function auslastungGrund(geb) {
+  const def = GEBAEUDE[geb.typ];
+  const z = zentrum(geb);
+  const lager = spieler[geb.spieler].res;
+  switch (geb.typ) {
+    case 'fischer':
+      return `${wasserImUmkreis(z.x, z.y, def.radius)} von 6 nötigen Wasserfeldern im Umkreis`;
+    case 'jagd':
+      return `Waldbestand im Umkreis: ${baeumeImUmkreis(z.x, z.y, def.radius).toFixed(1)} von 5 nötig`;
+    case 'holzfaeller':
+      return `Waldbestand im Umkreis: ${baeumeImUmkreis(z.x, z.y, def.radius).toFixed(1)} von 4 nötig (Bäume wachsen langsam nach)`;
+    case 'schaffarm': case 'getreidefarm': case 'zuckerrohr':
+    case 'tabakplantage': case 'gewuerzplantage': case 'rinderfarm':
+      return `${weideImUmkreis(z.x, z.y, def.radius)} von 10 nötigen freien Feldern im Umkreis (bebaute Felder zählen nicht)`;
+    case 'ziegelei': case 'goldschmiede':
+      return steinKachelImUmkreis(z.x, z.y, def.radius)
+        ? 'Gesteinsvorkommen in Reichweite – volle Leistung'
+        : 'Kein Gestein mehr in Reichweite – Produktion steht!';
+    case 'schmiede':
+      return (steinKachelImUmkreis(z.x, z.y, def.radius) ? 'Gestein vorhanden' : 'Kein Gestein in Reichweite!') +
+             `, Holz im Lager: ${Math.floor(lager.holz)}`;
+    default: {
+      const rein = VERARBEITER_REIN[geb.typ];
+      if (rein) return `Läuft nur, solange ${WAREN_EMOJI[rein]} ${WAREN_NAME[rein]} im Lager ist (${Math.floor(lager[rein])} vorrätig)`;
+      return '';
+    }
+  }
 }
 
 // Info-Panel für das ausgewählte Gebäude
@@ -2112,6 +2210,8 @@ function panelZeigen() {
     const prozent = Math.round(geb.eff * 100);
     html += `<div class="zeile"><span>Auslastung</span><span>${prozent} %</span></div>`;
     html += `<div class="auslast-balken"><div style="width:${prozent}%"></div></div>`;
+    const grund = auslastungGrund(geb);
+    if (grund) html += `<div class="beschr" style="margin-top:5px">${grund}</div>`;
     html += `<div class="zeile" style="margin-top:6px"><span>Produktionstakt</span><span>alle ${def.dauer} s</span></div>`;
     html += `<div class="zeile"><span>Unterhalt</span><span>${(def.unterhalt * 60).toFixed(0)} 💰/min</span></div>`;
   } else {
@@ -2122,17 +2222,20 @@ function panelZeigen() {
 
   // Handel: nur am eigenen Kontor – kaufen ist teurer als verkaufen
   if (geb.typ === 'kontor' && geb.spieler === 0) {
-    html += '<hr><b style="font-size:12px">⚖️ Handel (je 10 Stück)</b>' +
-      '<div class="beschr" style="margin:2px 0 4px">Preise folgen der Nachfrage – auch die Konkurrenz kauft hier ein! ▲ teuer · ▼ günstig</div>';
+    html += '<hr><b style="font-size:12px">⚖️ Handel</b>' +
+      '<div class="beschr" style="margin:2px 0 4px">Preise je Stück (Kauf/Verkauf) folgen der Nachfrage – auch die Konkurrenz kauft hier ein! ▲ teuer · ▼ günstig</div>';
     for (const ware of Object.keys(PREISE)) {
       const f = markt[ware];
       const trend = f > 1.15 ? ' <span style="color:#dc2626">▲</span>'
                   : f < 0.87 ? ' <span style="color:#2563eb">▼</span>' : '';
       html += `<div class="handel-zeile">
-        <span>${WAREN_EMOJI[ware]} ${Math.floor(res[ware])}${trend}</span>
+        <span>${WAREN_EMOJI[ware]} <b>${Math.floor(res[ware])}</b>${trend}
+          <small style="color:var(--text-leise)">${kaufpreis(ware)}/${verkaufspreis(ware)}💰</small></span>
         <span>
-          <button class="handel-verkauf" onclick="handel('${ware}',-10)">−10 · +${verkaufspreis(ware) * 10}💰</button>
-          <button class="handel-kauf" onclick="handel('${ware}',10)">+10 · −${kaufpreis(ware) * 10}💰</button>
+          <button class="handel-verkauf" title="50 verkaufen (+${verkaufspreis(ware) * 50}💰)" onclick="handel('${ware}',-50)">−50</button>
+          <button class="handel-verkauf" title="10 verkaufen (+${verkaufspreis(ware) * 10}💰)" onclick="handel('${ware}',-10)">−10</button>
+          <button class="handel-kauf" title="10 kaufen (−${kaufpreis(ware) * 10}💰)" onclick="handel('${ware}',10)">+10</button>
+          <button class="handel-kauf" title="50 kaufen (−${kaufpreis(ware) * 50}💰)" onclick="handel('${ware}',50)">+50</button>
         </span></div>`;
     }
   }
