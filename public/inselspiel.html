@@ -185,6 +185,13 @@
   }
   .handel-kauf    { background: #eef7f0; color: var(--accent-dunkel); }
   .handel-verkauf { background: #f3f4f6; color: var(--text); }
+  .auto-zeile { display: flex; gap: 4px; padding: 0 0 7px 2px; }
+  .auto-zeile button {
+    border: none; border-radius: 6px; padding: 3px 7px; cursor: pointer;
+    font-family: inherit; font-size: 10px; font-weight: 600;
+    background: #f3f4f6; color: var(--text-leise);
+  }
+  .auto-zeile button.auto-an { background: #f0fdf4; color: var(--accent-dunkel); }
 
   /* ---------- Meldungen (Toast) & Hinweise ---------- */
   #toast {
@@ -433,6 +440,23 @@ function handelAusfuehren(sp, ware, menge) {
     markt[ware] = Math.max(0.5, markt[ware] * (1 - 0.004 * anzahl)); // Überangebot → billiger
   }
   return true;
+}
+
+// Auto-Handel: je Ware eine Nachkauf-Untergrenze und eine
+// Verkaufs-Obergrenze (null = aus). Tippen schaltet durch die Stufen.
+const AUTOKAUF_STUFEN    = [null, 5, 10, 25, 50];
+const AUTOVERKAUF_STUFEN = [null, 50, 100, 200];
+const autoHandel = {};   // ware -> { kauf, verkauf }
+
+function autoKaufWechseln(ware) {
+  const i = AUTOKAUF_STUFEN.indexOf(autoHandel[ware].kauf);
+  autoHandel[ware].kauf = AUTOKAUF_STUFEN[(i + 1) % AUTOKAUF_STUFEN.length];
+  panelZeigen();
+}
+function autoVerkaufWechseln(ware) {
+  const i = AUTOVERKAUF_STUFEN.indexOf(autoHandel[ware].verkauf);
+  autoHandel[ware].verkauf = AUTOVERKAUF_STUFEN[(i + 1) % AUTOVERKAUF_STUFEN.length];
+  panelZeigen();
 }
 
 const WAREN_NAME = { holz: 'Holz', werkzeuge: 'Werkzeuge', ziegel: 'Ziegel',
@@ -1449,6 +1473,21 @@ function simSchritt(dt) {
   for (const ware of Object.keys(markt))
     markt[ware] += (1 - markt[ware]) * 0.01 * dt;
 
+  // --- Auto-Handel: dein Lager nach deinen Regeln auffüllen/leeren ---
+  state.autoTimer = (state.autoTimer || 0) + dt;
+  while (state.autoTimer >= 2) {
+    state.autoTimer -= 2;
+    for (const [ware, regel] of Object.entries(autoHandel)) {
+      // Nachkaufen in 10er-Paketen, solange Gold-Polster bleibt
+      if (regel.kauf !== null && res[ware] < regel.kauf &&
+          res.gold > kaufpreis(ware) * 10 + 200)
+        handelAusfuehren(spieler[0], ware, 10);
+      // Überschuss in 10er-Paketen verkaufen
+      if (regel.verkauf !== null && res[ware] > regel.verkauf)
+        handelAusfuehren(spieler[0], ware, -10);
+    }
+  }
+
   // --- Die KI-Spieler ziehen ---
   for (const sp of spieler) if (sp.ki) kiTick(sp, dt);
 
@@ -2223,7 +2262,7 @@ function panelZeigen() {
   // Handel: nur am eigenen Kontor – kaufen ist teurer als verkaufen
   if (geb.typ === 'kontor' && geb.spieler === 0) {
     html += '<hr><b style="font-size:12px">⚖️ Handel</b>' +
-      '<div class="beschr" style="margin:2px 0 4px">Preise je Stück (Kauf/Verkauf) folgen der Nachfrage – auch die Konkurrenz kauft hier ein! ▲ teuer · ▼ günstig</div>';
+      '<div class="beschr" style="margin:2px 0 4px">Preise je Stück (Kauf/Verkauf) folgen der Nachfrage – auch die Konkurrenz kauft hier ein! ▲ teuer · ▼ günstig. Mit den 🔄-Knöpfen handelt dein Kontor automatisch.</div>';
     for (const ware of Object.keys(PREISE)) {
       const f = markt[ware];
       const trend = f > 1.15 ? ' <span style="color:#dc2626">▲</span>'
@@ -2237,6 +2276,15 @@ function panelZeigen() {
           <button class="handel-kauf" title="10 kaufen (−${kaufpreis(ware) * 10}💰)" onclick="handel('${ware}',10)">+10</button>
           <button class="handel-kauf" title="50 kaufen (−${kaufpreis(ware) * 50}💰)" onclick="handel('${ware}',50)">+50</button>
         </span></div>`;
+      const regel = autoHandel[ware];
+      html += `<div class="auto-zeile">
+        <button class="${regel.kauf !== null ? 'auto-an' : ''}" onclick="autoKaufWechseln('${ware}')"
+          title="Kauft automatisch nach, sobald der Bestand unter diese Grenze fällt">
+          🔄 Nachkaufen: ${regel.kauf !== null ? 'unter ' + regel.kauf : 'aus'}</button>
+        <button class="${regel.verkauf !== null ? 'auto-an' : ''}" onclick="autoVerkaufWechseln('${ware}')"
+          title="Verkauft automatisch, sobald der Bestand über dieser Grenze liegt">
+          🔄 Verkaufen: ${regel.verkauf !== null ? 'über ' + regel.verkauf : 'aus'}</button>
+      </div>`;
     }
   }
 
@@ -2412,7 +2460,10 @@ function schleife(jetzt) {
 }
 
 // --- Los geht's ---
-for (const ware of Object.keys(PREISE)) markt[ware] = 1;
+for (const ware of Object.keys(PREISE)) {
+  markt[ware] = 1;
+  autoHandel[ware] = { kauf: null, verkauf: null };
+}
 weltErzeugen();
 schiffStart();
 menueBauen();
