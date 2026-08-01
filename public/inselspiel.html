@@ -345,9 +345,9 @@
 
 /* ---------- 1. KONSTANTEN ------------------------------------ */
 
-const N = 120;  // Kacheln je Seite (120×120-Weltkarte mit vielen Inseln)
+const N = 140;  // Kacheln je Seite (140×140-Weltkarte mit vielen Inseln)
 const T = 40;   // Weltpixel je Kachel (interne Zeichengröße)
-const TP = 28;  // Pixel je Kachel im Terrain-Puffer (kleiner als T, damit
+const TP = 26;  // Pixel je Kachel im Terrain-Puffer (kleiner als T, damit
                 // der Puffer auch auf iPhones unter dem Canvas-Limit bleibt)
 
 // Wirtschafts-Stellschrauben – alle Werte "pro Sekunde" bei 1×-Tempo.
@@ -486,6 +486,11 @@ const GEBAEUDE = {
     kosten: { gold: 50, holz: 3 }, unterhalt: 0,
     beschr: 'Hier leben deine Einwohner:innen und zahlen Steuern. Mit erfüllten Bedürfnissen steigen sie über fünf Stufen bis zu Aristokraten auf.',
   },
+  bruecke: {
+    name: 'Brücke', emoji: '🌉', w: 1, h: 1, farbe: '#c9b18a', abStufe: 0,
+    kosten: { gold: 80, holz: 6 }, unterhalt: 0,
+    beschr: 'Überquert einen Fluss. Märkte und Kontore versorgen Häuser jenseits eines Flusses nur, wenn eine Brücke den Weg kreuzt.',
+  },
   fischer: {
     name: 'Fischerhütte', emoji: '🎣', w: 1, h: 1, farbe: '#a9c3d6', abStufe: 0,
     kosten: { gold: 90, holz: 5, werkzeuge: 2 }, unterhalt: 0.06,
@@ -613,7 +618,7 @@ const GEBAEUDE = {
     name: 'Goldschmiede', emoji: '💍', w: 1, h: 1, farbe: '#e2cf9a', abStufe: 3,
     kosten: { gold: 600, holz: 10, werkzeuge: 5, ziegel: 10 }, unterhalt: 0.22,
     dauer: 9, radius: 5,
-    beschr: 'Fertigt Schmuck aus Edelmetall-Vorkommen der Berge (Bedürfnis der Aristokraten).',
+    beschr: 'Fertigt Schmuck aus Golderz (Bedürfnis der Aristokraten). Golderz gibt es nur auf einer einzigen Insel der Welt – besiedle sie zuerst!',
   },
   theater: {
     name: 'Theater', emoji: '🎭', w: 2, h: 2, farbe: '#e0c9d4', abStufe: 3,
@@ -626,37 +631,38 @@ const GEBAEUDE = {
 // Was jedes Gebäude produziert, verbraucht und wo es stehen muss –
 // wird im Info-Panel angezeigt, damit die Ketten verständlich sind.
 const GEB_INFO = {
-  kontor:          { produziert: 'Marktversorgung + Handel', standort: 'An der Küste, nahe beim Schiff' },
+  kontor:          { produziert: 'Marktversorgung + Handel', standort: 'An der Küste, nahe beim Schiff – weitere Kontore besiedeln neue Inseln' },
+  bruecke:         { produziert: 'Flussübergang für die Marktversorgung', standort: 'Auf einem Fluss' },
   marktplatz:      { produziert: 'Marktversorgung (Radius 9)' },
   wohnhaus:        { verbraucht: '🍞, höhere Stufen auch 🧵 🥃 🚬 🌶️ 👕 💍', produziert: '💰 Steuern' },
-  fischer:         { produziert: '1 🍞 alle 4 s', standort: 'Wasser im Umkreis (R 3)' },
+  fischer:         { produziert: '1 🍞 alle 4 s', standort: 'Meer oder Fluss im Umkreis (R 3)' },
   holzfaeller:     { produziert: '1 🪵 alle 5 s', standort: 'Wald im Umkreis (R 4)' },
   jagd:            { produziert: '1 🍞 alle 5 s', standort: 'Wald im Umkreis (R 5)' },
-  schaffarm:       { produziert: '1 🧶 alle 6 s', standort: 'Freie Weide im Umkreis (R 3)' },
+  schaffarm:       { produziert: '1 🧶 alle 6 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
   weberei:         { produziert: '1 🧵 alle 5 s', verbraucht: '1 🧶 Wolle' },
-  zuckerrohr:      { produziert: '1 🎋 alle 5 s', standort: 'Freie Felder im Umkreis (R 3)' },
+  zuckerrohr:      { produziert: '1 🎋 alle 5 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
   brennerei:       { produziert: '1 🥃 alle 5 s', verbraucht: '1 🎋 Zuckerrohr' },
   kapelle:         { produziert: 'Glaube (Radius 9)' },
   ziegelei:        { produziert: '1 🧱 alle 6 s', verbraucht: 'Gestein', standort: 'Berge im Umkreis (R 5)' },
   schmiede:        { produziert: '1 ⚒️ alle 8 s', verbraucht: '1 🪵 Holz + Gestein', standort: 'Berge im Umkreis (R 5)' },
-  getreidefarm:    { produziert: '1 🌾 alle 5 s', standort: 'Freie Felder im Umkreis (R 3)' },
+  getreidefarm:    { produziert: '1 🌾 alle 5 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
   muehle:          { produziert: '1 🥣 alle 4 s', verbraucht: '1 🌾 Getreide' },
   baeckerei:       { produziert: '2 🍞 alle 4 s', verbraucht: '1 🥣 Mehl' },
   schule:          { produziert: 'Bildung (Radius 9)' },
-  rinderfarm:      { produziert: '2 🍞 alle 7 s', standort: 'Freie Weide im Umkreis (R 3)' },
-  tabakplantage:   { produziert: '1 🍂 alle 5 s', standort: 'Freie Felder im Umkreis (R 3)' },
+  rinderfarm:      { produziert: '2 🍞 alle 7 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
+  tabakplantage:   { produziert: '1 🍂 alle 5 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
   tabakladen:      { produziert: '1 🚬 alle 5 s', verbraucht: '1 🍂 Tabakblätter' },
-  gewuerzplantage: { produziert: '1 🌶️ alle 6 s', standort: 'Freie Felder im Umkreis (R 3)' },
+  gewuerzplantage: { produziert: '1 🌶️ alle 6 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
   badehaus:        { produziert: 'Erholung (Radius 9)' },
   schneiderei:     { produziert: '1 👕 alle 6 s', verbraucht: '1 🧵 Stoffe' },
-  goldschmiede:    { produziert: '1 💍 alle 9 s', verbraucht: 'Gestein', standort: 'Berge im Umkreis (R 5)' },
+  goldschmiede:    { produziert: '1 💍 alle 9 s', verbraucht: 'Golderz', standort: '🪙 Goldvorkommen (R 5) – nur auf der Goldinsel!' },
   theater:         { produziert: 'Kultur (Radius 9)' },
 };
 
 // Das Baumenü ist in Gruppen sortiert
 const MENUE_GRUPPEN = [
   { titel: 'Siedlung',
-    typen: ['kontor', 'marktplatz', 'wohnhaus', 'kapelle', 'schule', 'badehaus', 'theater'] },
+    typen: ['kontor', 'marktplatz', 'wohnhaus', 'bruecke', 'kapelle', 'schule', 'badehaus', 'theater'] },
   { titel: 'Rohstoffe',
     typen: ['holzfaeller', 'fischer', 'jagd', 'ziegelei', 'schmiede'] },
   { titel: 'Anbau',
@@ -773,13 +779,13 @@ function weltErzeugen() {
     const fein = wertRauschen(rnd, 18);   // Details der Küstenlinien
     const waldR = wertRauschen(rnd, 12);  // wo Wald wächst
 
-    // 6–8 Inseln auswürfeln: Mittelpunkt + Radius, mit Wasser dazwischen
+    // 8–10 Inseln auswürfeln: Mittelpunkt + Radius, mit Wasser dazwischen
     const inseln = [];
-    const anzahl = 6 + Math.floor(rnd() * 3);
+    const anzahl = 8 + Math.floor(rnd() * 3);
     for (let i = 0; i < anzahl; i++) {
       for (let probe = 0; probe < 40; probe++) {
         // Die erste Insel ist immer groß – ein guter Startplatz
-        const r = i === 0 ? 18 + rnd() * 5 : 7 + rnd() * 9;
+        const r = i === 0 ? 21 + rnd() * 5 : 8 + rnd() * 9;
         const cx = r + 3 + rnd() * (N - 2 * r - 6);
         const cy = r + 3 + rnd() * (N - 2 * r - 6);
         // Genug Abstand zu den anderen Inseln (freie Seewege)
@@ -809,7 +815,7 @@ function weltErzeugen() {
         else if (hoehe < 0.62) typ = 'gras';
         else                   typ = 'berg';
 
-        const k = { typ, baum: 0, stein: 0, var: rnd() };
+        const k = { typ, baum: 0, stein: 0, golderz: 0, var: rnd() };
         if (typ === 'berg') k.stein = 200 + Math.round(rnd() * 300);
         karte.push(k);
         belegt.push(null);
@@ -833,6 +839,53 @@ function weltErzeugen() {
       if (k.typ === 'gras') {
         const w = waldR(x / (N - 1), y / (N - 1));
         if (w > 0.56) { k.typ = 'wald'; k.baum = Math.min(1, 0.4 + (w - 0.56) * 3); }
+      }
+    }
+
+    // --- Flüsse: schlängeln sich vom Inselinneren hinab zum Meer ---
+    // Zuerst für jede Kachel die Entfernung zum Meer bestimmen
+    const seeDist = new Int16Array(N * N).fill(32767);
+    {
+      const schlange = [];
+      for (let i = 0; i < N * N; i++)
+        if (karte[i].typ === 'wasser') { seeDist[i] = 0; schlange.push(i); }
+      for (let kopf = 0; kopf < schlange.length; kopf++) {
+        const j = schlange[kopf], x = j % N, y = (j / N) | 0;
+        for (const [ax, ay] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const nx = x + ax, ny = y + ay;
+          if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
+          const ni = ny * N + nx;
+          if (seeDist[ni] > seeDist[j] + 1) { seeDist[ni] = seeDist[j] + 1; schlange.push(ni); }
+        }
+      }
+    }
+    // 3–5 Quellen tief im Landesinneren; jeder Lauf fließt bergab zum Meer
+    const flussZahl = 3 + Math.floor(rnd() * 3);
+    for (let f = 0; f < flussZahl; f++) {
+      let quelle = -1;
+      for (let probe = 0; probe < 400; probe++) {
+        const i = (rnd() * N * N) | 0;
+        if (karte[i].typ !== 'wasser' && karte[i].typ !== 'berg' && seeDist[i] >= 6) { quelle = i; break; }
+      }
+      if (quelle < 0) continue;
+      let j = quelle;
+      for (let schritt = 0; schritt < 150; schritt++) {
+        const k = karte[j];
+        if (k.typ === 'wasser') break;   // Mündung erreicht
+        if (k.typ !== 'berg') { k.typ = 'fluss'; k.baum = 0; }
+        const x = j % N, y = (j / N) | 0;
+        let best = -1, bestD = seeDist[j];
+        for (const [ax, ay] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const nx = x + ax, ny = y + ay;
+          if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
+          const ni = ny * N + nx;
+          if (karte[ni].typ === 'fluss') continue;   // nicht zurückfließen
+          if (seeDist[ni] < bestD || (seeDist[ni] === bestD && rnd() < 0.4)) {
+            bestD = seeDist[ni]; best = ni;
+          }
+        }
+        if (best < 0) break;
+        j = best;
       }
     }
 
@@ -864,9 +917,21 @@ function weltErzeugen() {
       flaechen.push({ groesse, berg, wald });
     }
     const land = flaechen.reduce((s, f) => s + f.groesse, 0);
-    const haupt = flaechen.reduce((a, b) => (b.groesse > a.groesse ? b : a), { groesse: 0, berg: 0, wald: 0 });
-    if (flaechen.length < 4 || haupt.groesse < 450 || haupt.berg < 4 ||
-        haupt.wald < 40 || land / (N * N) > 0.40) continue;
+    let hauptIdx = 0;
+    for (let i = 1; i < flaechen.length; i++)
+      if (flaechen[i].groesse > flaechen[hauptIdx].groesse) hauptIdx = i;
+    const haupt = flaechen[hauptIdx];
+    // Kandidaten für die Goldinsel: NICHT die Hauptinsel, aber mit Bergen
+    const goldKandidaten = [];
+    flaechen.forEach((f, i) => { if (i !== hauptIdx && f.berg >= 3) goldKandidaten.push(i); });
+    if (flaechen.length < 5 || haupt.groesse < 600 || haupt.berg < 4 ||
+        haupt.wald < 50 || land / (N * N) > 0.42 || goldKandidaten.length < 1) continue;
+
+    // Genau EINE Insel trägt Golderz – wer Schmuck will, muss dorthin!
+    const goldInsel = goldKandidaten[(rnd() * goldKandidaten.length) | 0];
+    for (let i = 0; i < N * N; i++)
+      if (marke[i] === goldInsel && karte[i].typ === 'berg')
+        karte[i].golderz = 120 + Math.round(rnd() * 180);
 
     // Insel-Kennzeichnung für die KI-Besiedlung aufheben
     inselMarke = marke;
@@ -986,12 +1051,12 @@ function imUmkreis(cx, cy, radius, fn) {
   }
 }
 
-// Liegt Wasser höchstens 2 Kacheln von der Gebäudefläche entfernt?
-function kuesteNah(ax, ay, def) {
+// Liegt Wasser (optional auch ein Fluss) höchstens 2 Kacheln entfernt?
+function kuesteNah(ax, ay, def, auchFluss = false) {
   for (let y = ay - 2; y < ay + def.h + 2; y++) {
     for (let x = ax - 2; x < ax + def.w + 2; x++) {
       const k = kachel(x, y);
-      if (k && k.typ === 'wasser') return true;
+      if (k && (k.typ === 'wasser' || (auchFluss && k.typ === 'fluss'))) return true;
     }
   }
   return false;
@@ -1016,7 +1081,7 @@ function weideImUmkreis(cx, cy, radius) {
 // Wasserkacheln im Umkreis (Fanggründe des Fischers)
 function wasserImUmkreis(cx, cy, radius) {
   let n = 0;
-  imUmkreis(cx, cy, radius, k => { if (k.typ === 'wasser') n++; });
+  imUmkreis(cx, cy, radius, k => { if (k.typ === 'wasser' || k.typ === 'fluss') n++; });
   return n;
 }
 
@@ -1029,13 +1094,40 @@ function steinKachelImUmkreis(cx, cy, radius) {
   return fund;
 }
 
+// Goldvorkommen mit Restbestand im Umkreis finden (nur auf der Goldinsel)
+function goldKachelImUmkreis(cx, cy, radius) {
+  let fund = null;
+  imUmkreis(cx, cy, radius, (k) => {
+    if (k.golderz > 0 && !fund) fund = k;
+  });
+  return fund;
+}
+
+// Verläuft zwischen zwei Punkten ein Fluss ohne Brücke? (Sichtlinie)
+function flussDazwischen(ax, ay, bx, by) {
+  const schritte = Math.ceil(Math.hypot(bx - ax, by - ay) * 2);
+  for (let i = 1; i < schritte; i++) {
+    const x = Math.floor(ax + (bx - ax) * i / schritte);
+    const y = Math.floor(ay + (by - ay) * i / schritte);
+    const k = kachel(x, y);
+    if (k && k.typ === 'fluss') {
+      const b = belegtAuf(x, y);
+      if (!b || b.typ !== 'bruecke') return true;
+    }
+  }
+  return false;
+}
+
 // Ist ein Punkt an einen EIGENEN Marktplatz bzw. das Kontor angebunden?
 function marktAnbindung(cx, cy, sid = 0) {
   for (const g of gebaeude) {
     const def = GEBAEUDE[g.typ];
     if (!def.marktRadius || g.spieler !== sid) continue;
     const z = zentrum(g);
-    if (Math.hypot(z.x - cx, z.y - cy) <= def.marktRadius) return true;
+    if (Math.hypot(z.x - cx, z.y - cy) > def.marktRadius) continue;
+    // Ein Fluss ohne Brücke unterbricht die Versorgung
+    if (flussDazwischen(z.x, z.y, cx, cy)) continue;
+    return true;
   }
   return false;
 }
@@ -1051,6 +1143,39 @@ function gebaeudeInReichweite(typ, cx, cy, sid = 0) {
 }
 
 /* ---------- 5. BAUEN & ABREISSEN ------------------------------ */
+
+// Diese Betriebe legen ihre Felder selbst an: rund um das Gebäude
+// (3×3) werden freie Grasfelder zum Acker bzw. zur Weide.
+// 6 eigene Felder = volle Leistung.
+const FELD_FARMEN = new Set(['schaffarm', 'getreidefarm', 'zuckerrohr',
+  'tabakplantage', 'gewuerzplantage', 'rinderfarm']);
+const FELD_DEKO = {   // Farbe + Symbol der Felder je Farm
+  schaffarm:       ['rgba(226,238,208,0.85)', '🐑'],
+  getreidefarm:    ['rgba(238,222,150,0.85)', '🌾'],
+  zuckerrohr:      ['rgba(210,232,176,0.85)', '🎋'],
+  tabakplantage:   ['rgba(222,204,160,0.85)', '🍂'],
+  gewuerzplantage: ['rgba(230,196,174,0.85)', '🌶️'],
+  rinderfarm:      ['rgba(224,216,190,0.85)', '🐄'],
+};
+
+// Freie Grasfelder im 3×3 rund um den Bauplatz (als Kachel-Indizes)
+function feldPlaetze(typ, ax, ay) {
+  const liste = [];
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    if (!dx && !dy) continue;
+    const x = ax + dx, y = ay + dy;
+    const k = kachel(x, y);
+    if (k && k.typ === 'gras' && !belegtAuf(x, y)) liste.push(y * N + x);
+  }
+  return liste;
+}
+
+// Bei zweitem und weiteren Kontoren fällt eine Ausbaugebühr an
+const KONTOR_AUSBAU = { gold: 1500, holz: 30, werkzeuge: 10 };
+function gebKosten(typ, sid = 0) {
+  if (typ === 'kontor' && spieler[sid].kontor) return KONTOR_AUSBAU;
+  return GEBAEUDE[typ].kosten;
+}
 
 // Der Anker (linke obere Ecke) liegt so, dass der Mauszeiger
 // ungefähr in der Gebäudemitte ist.
@@ -1069,15 +1194,21 @@ function platzOK(typ, ax, ay, sid = 0) {
 
   for (let y = ay; y < ay + def.h; y++) for (let x = ax; x < ax + def.w; x++) {
     const k = kachel(x, y);
-    if (k.typ === 'wasser') return { ok: false, grund: 'Im Wasser kann nicht gebaut werden' };
-    if (k.typ === 'berg')   return { ok: false, grund: 'Auf Bergen kann nicht gebaut werden' };
-    if (belegtAuf(x, y))    return { ok: false, grund: 'Hier steht bereits ein Gebäude' };
+    if (typ === 'bruecke') {
+      if (k.typ !== 'fluss') return { ok: false, grund: 'Brücken stehen auf Flüssen' };
+    } else {
+      if (k.typ === 'wasser') return { ok: false, grund: 'Im Wasser kann nicht gebaut werden' };
+      if (k.typ === 'fluss')  return { ok: false, grund: 'Auf Flüssen kann nur eine Brücke stehen' };
+      if (k.typ === 'berg')   return { ok: false, grund: 'Auf Bergen kann nicht gebaut werden' };
+    }
+    if (belegtAuf(x, y)) return { ok: false, grund: 'Hier steht bereits ein Gebäude' };
   }
 
-  if (typ === 'kontor' && sid === 0 && state.kontorGebaut)
-    return { ok: false, grund: 'Es gibt bereits ein Kontor' };
-  if (def.brauchtKueste && !kuesteNah(ax, ay, def))
-    return { ok: false, grund: 'Muss an der Küste liegen' };
+  if (def.brauchtKueste && !kuesteNah(ax, ay, def, typ === 'fischer'))
+    return { ok: false, grund: typ === 'fischer'
+      ? 'Muss an Küste oder Fluss liegen' : 'Muss an der Küste liegen' };
+  if (FELD_FARMEN.has(typ) && feldPlaetze(typ, ax, ay).length === 0)
+    return { ok: false, grund: 'Braucht freies Grasland rundherum für die Felder (3×3)' };
 
   const cx = ax + def.w / 2, cy = ay + def.h / 2;
   if (typ === 'kontor' && sid === 0 &&
@@ -1087,9 +1218,11 @@ function platzOK(typ, ax, ay, sid = 0) {
     return { ok: false, grund: 'Kein Wald in Reichweite' };
   if (typ === 'jagd' && baeumeImUmkreis(cx, cy, def.radius) < 0.5)
     return { ok: false, grund: 'Kein Wald in Reichweite' };
-  if ((typ === 'schmiede' || typ === 'ziegelei' || typ === 'goldschmiede') &&
+  if ((typ === 'schmiede' || typ === 'ziegelei') &&
       !steinKachelImUmkreis(cx, cy, def.radius))
     return { ok: false, grund: 'Kein Gesteinsvorkommen (Berge) in der Nähe' };
+  if (typ === 'goldschmiede' && !goldKachelImUmkreis(cx, cy, def.radius))
+    return { ok: false, grund: 'Kein Goldvorkommen 🪙 – das gibt es nur auf der Goldinsel!' };
   if (typ === 'wohnhaus' && !marktAnbindung(cx, cy, sid))
     return { ok: false, grund: 'Außerhalb der Reichweite von Marktplatz/Kontor' };
 
@@ -1098,7 +1231,7 @@ function platzOK(typ, ax, ay, sid = 0) {
 
 function kostenReichen(typ, sid = 0) {
   const R = spieler[sid].res;
-  for (const [ware, menge] of Object.entries(GEBAEUDE[typ].kosten))
+  for (const [ware, menge] of Object.entries(gebKosten(typ, sid)))
     if (R[ware] < menge) return false;
   return true;
 }
@@ -1114,7 +1247,7 @@ function platziere(typ, tx, ty, sid = 0) {
 
   const def = GEBAEUDE[typ];
   const R = spieler[sid].res;
-  for (const [ware, menge] of Object.entries(def.kosten)) R[ware] -= menge;
+  for (const [ware, menge] of Object.entries(gebKosten(typ, sid))) R[ware] -= menge;
 
   const geb = {
     id: naechsteId++, typ, x: ax, y: ay, spieler: sid,
@@ -1137,13 +1270,19 @@ function platziere(typ, tx, ty, sid = 0) {
     if (k.baum > 0) { k.baum = 0; kachelSchmutzig(x, y); }
   }
 
-  if (typ === 'kontor') spieler[sid].kontor = geb;
+  // Farmen legen ihre Felder im 3×3 rundherum an (wie im klassischen Vorbild)
+  if (FELD_FARMEN.has(typ)) {
+    geb.felder = feldPlaetze(typ, ax, ay);
+    for (const idx of geb.felder) belegt[idx] = geb;
+  }
+
+  if (typ === 'kontor' && !spieler[sid].kontor) spieler[sid].kontor = geb;
   if (typ === 'kontor' && sid === 0) {
     state.kontorGebaut = true;
     werkzeugWaehlen('zeiger');   // zurück zum Auswahl-Werkzeug (auch Cursor)
     document.getElementById('hinweis').style.display = 'none';
     melden('Kontor errichtet – jetzt Wohnhäuser und Betriebe bauen!');
-    menueBauen(); // Menü neu aufbauen (Kontor verschwindet daraus)
+    menueBauen(); // Menü neu aufbauen (Kontor zeigt jetzt die Ausbaugebühr)
   }
   return true;
 }
@@ -1154,6 +1293,7 @@ function abreissen(geb) {
   for (let y = geb.y; y < geb.y + def.h; y++)
     for (let x = geb.x; x < geb.x + def.w; x++)
       belegt[y * N + x] = null;
+  if (geb.felder) for (const idx of geb.felder) belegt[idx] = null;
   gebaeude = gebaeude.filter(g => g !== geb);
 
   // Die Hälfte der Kosten gibt es zurück
@@ -1342,23 +1482,24 @@ function simSchritt(dt) {
         }
         break;
       }
+      // Farmen ernten von ihren EIGENEN Feldern: 6 Felder = volle Leistung
       case 'schaffarm':
-        sammler(Math.min(1, weideImUmkreis(z.x, z.y, def.radius) / 10), 'wolle');
+        sammler(Math.min(1, (geb.felder || []).length / 6), 'wolle');
         break;
       case 'getreidefarm':
-        sammler(Math.min(1, weideImUmkreis(z.x, z.y, def.radius) / 10), 'getreide');
+        sammler(Math.min(1, (geb.felder || []).length / 6), 'getreide');
         break;
       case 'zuckerrohr':
-        sammler(Math.min(1, weideImUmkreis(z.x, z.y, def.radius) / 10), 'zuckerrohr');
+        sammler(Math.min(1, (geb.felder || []).length / 6), 'zuckerrohr');
         break;
       case 'tabakplantage':
-        sammler(Math.min(1, weideImUmkreis(z.x, z.y, def.radius) / 10), 'tabakblaetter');
+        sammler(Math.min(1, (geb.felder || []).length / 6), 'tabakblaetter');
         break;
       case 'gewuerzplantage':
-        sammler(Math.min(1, weideImUmkreis(z.x, z.y, def.radius) / 10), 'gewuerze');
+        sammler(Math.min(1, (geb.felder || []).length / 6), 'gewuerze');
         break;
       case 'rinderfarm':
-        sammler(Math.min(1, weideImUmkreis(z.x, z.y, def.radius) / 10), 'nahrung', 2);
+        sammler(Math.min(1, (geb.felder || []).length / 6), 'nahrung', 2);
         break;
 
       // --- Verarbeiter: wandeln eine Ware in eine andere um ---
@@ -1392,11 +1533,11 @@ function simSchritt(dt) {
         break;
       }
       case 'goldschmiede': {
-        const stein = steinKachelImUmkreis(z.x, z.y, def.radius);
-        if (stein) {
+        const erz = goldKachelImUmkreis(z.x, z.y, def.radius);
+        if (erz) {
           geb.eff = Math.min(1, geb.eff + dt);
           geb.fortschritt += dt;
-          if (geb.fortschritt >= def.dauer) { geb.fortschritt -= def.dauer; R.schmuck += 1; stein.stein -= 1; }
+          if (geb.fortschritt >= def.dauer) { geb.fortschritt -= def.dauer; R.schmuck += 1; erz.golderz -= 1; }
         } else geb.eff = Math.max(0, geb.eff - dt);
         break;
       }
@@ -1542,6 +1683,7 @@ function kachelHintergrund(x, y) {
 
   let farbe;
   if      (k.typ === 'wasser') farbe = `rgb(${64 + v},${118 + v},${168 + v})`;
+  else if (k.typ === 'fluss')  farbe = `rgb(${88 + v},${142 + v},${192 + v})`;
   else if (k.typ === 'strand') farbe = `rgb(${232 + v},${217 + v},${168 + v})`;
   else if (k.typ === 'berg')   farbe = `rgb(${158 + v},${158 + v},${150 + v})`;
   else if (k.typ === 'wald')   farbe = `rgb(${106 + v},${156 + v},${88 + v})`;
@@ -1577,7 +1719,10 @@ function kachelInhalt(x, y) {
   if (k.typ === 'berg') {
     tctx.font = `${TP * 0.72}px sans-serif`;
     tctx.fillText('⛰️', px + TP / 2, py + TP / 2 + 2);
-    if (k.stein > 0 && k.var > 0.5) {
+    if (k.golderz > 0) {
+      tctx.font = `${TP * 0.32}px sans-serif`;
+      tctx.fillText('🪙', px + TP * 0.72, py + TP * 0.75);
+    } else if (k.stein > 0 && k.var > 0.5) {
       tctx.font = `${TP * 0.28}px sans-serif`;
       tctx.fillText('🪨', px + TP * 0.75, py + TP * 0.78);
     }
@@ -1657,8 +1802,24 @@ function zeichnen() {
     ctx.stroke();
   }
 
-  // --- Gebäude ---
+  // --- Felder der Farmen (liegen unter den Gebäuden) ---
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const geb of gebaeude) {
+    if (!geb.felder || !geb.felder.length) continue;
+    const [farbe, symbol] = FELD_DEKO[geb.typ];
+    ctx.fillStyle = farbe;
+    for (const idx of geb.felder) {
+      const fx = (idx % N) * T, fy = ((idx / N) | 0) * T;
+      ctx.fillRect(fx + 1.5, fy + 1.5, T - 3, T - 3);
+    }
+    ctx.font = `${T * 0.42}px sans-serif`;
+    for (const idx of geb.felder) {
+      const fx = (idx % N) * T, fy = ((idx / N) | 0) * T;
+      ctx.fillText(symbol, fx + T / 2, fy + T / 2 + 1);
+    }
+  }
+
+  // --- Gebäude ---
   for (const geb of gebaeude) {
     const def = GEBAEUDE[geb.typ];
     const px = geb.x * T, py = geb.y * T, bw = def.w * T, bh = def.h * T;
@@ -1733,7 +1894,8 @@ function zeichnen() {
   if (state.auswahl) {
     const def = GEBAEUDE[state.auswahl.typ];
     const radius = def.marktRadius || def.radius;
-    if (radius) kreisZeichnen(zentrum(state.auswahl), radius);
+    if (radius && !FELD_FARMEN.has(state.auswahl.typ))
+      kreisZeichnen(zentrum(state.auswahl), radius);
   }
 
   // --- Bau-Vorschau: schwebende (angetippte) Position oder Mauszeiger ---
@@ -1748,7 +1910,21 @@ function zeichnen() {
       const a = ankerVon(state.werkzeug, t.x, t.y);
       const ok = platzOK(state.werkzeug, a.x, a.y).ok && kostenReichen(state.werkzeug);
       const radius = def.marktRadius || def.radius;
-      if (radius) kreisZeichnen({ x: a.x + def.w / 2, y: a.y + def.h / 2 }, radius);
+      if (radius && !FELD_FARMEN.has(state.werkzeug))
+        kreisZeichnen({ x: a.x + def.w / 2, y: a.y + def.h / 2 }, radius);
+
+      // Bei Farmen: die künftigen Felder im 3×3 einblenden
+      if (FELD_FARMEN.has(state.werkzeug)) {
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          const fx = a.x + dx, fy = a.y + dy;
+          const k = kachel(fx, fy);
+          if (!k) continue;
+          const frei = k.typ === 'gras' && !belegtAuf(fx, fy);
+          ctx.fillStyle = frei ? 'rgba(22,163,74,0.30)' : 'rgba(90,90,90,0.30)';
+          ctx.fillRect(fx * T + 2, fy * T + 2, T - 4, T - 4);
+        }
+      }
 
       rundRect(ctx, a.x * T + 2, a.y * T + 2, def.w * T - 4, def.h * T - 4, 6);
       ctx.fillStyle = ok ? 'rgba(22,163,74,0.35)' : 'rgba(220,38,38,0.35)';
@@ -1760,6 +1936,20 @@ function zeichnen() {
       ctx.globalAlpha = 0.85;
       ctx.fillText(def.emoji, (a.x + def.w / 2) * T, (a.y + def.h / 2) * T);
       ctx.globalAlpha = 1;
+
+      // Voraussichtliche Auslastung direkt an der Vorschau anzeigen
+      const effWert = effVorschau(state.werkzeug, a.x, a.y);
+      if (effWert !== null) {
+        const prozent = Math.round(effWert * 100);
+        const groesse = 15 / Math.sqrt(z);
+        ctx.font = `bold ${groesse}px system-ui, sans-serif`;
+        const tx = (a.x + def.w / 2) * T, ty = a.y * T - groesse * 0.7;
+        ctx.lineWidth = groesse * 0.28;
+        ctx.strokeStyle = 'rgba(17,24,39,0.75)';
+        ctx.strokeText(prozent + ' %', tx, ty);
+        ctx.fillStyle = prozent >= 80 ? '#86efac' : prozent >= 40 ? '#fde68a' : '#fca5a5';
+        ctx.fillText(prozent + ' %', tx, ty);
+      }
     }
   }
 
@@ -1815,7 +2005,7 @@ function kameraBegrenzen() {
 
 function zoomAuf(sx, sy, faktor) {
   const vorher = bildschirmZuWelt(sx, sy);
-  kamera.zoom = Math.min(2.6, Math.max(0.1, kamera.zoom * faktor));
+  kamera.zoom = Math.min(2.6, Math.max(0.07, kamera.zoom * faktor));
   // Der Punkt unter dem Mauszeiger bleibt an Ort und Stelle
   kamera.x = vorher.x - sx / kamera.zoom;
   kamera.y = vorher.y - sy / kamera.zoom;
@@ -1970,10 +2160,9 @@ function menueBauen() {
     const reihe = document.createElement('div');
     reihe.className = 'gruppe-knoepfe';
     for (const typ of gruppe.typen) {
-      // Das Kontor gibt es nur einmal – danach verschwindet der Knopf
-      if (typ === 'kontor' && state.kontorGebaut) continue;
       const def = GEBAEUDE[typ];
-      const kostenText = Object.entries(def.kosten)
+      // Weitere Kontore besiedeln neue Inseln – gegen Ausbaugebühr
+      const kostenText = Object.entries(gebKosten(typ, 0))
         .map(([ware, menge]) => `${WAREN_EMOJI[ware]}${menge}`).join(' ') || 'gratis';
       const knopf = bauKnopf(typ, def.emoji, def.name, def.beschr + ' – Kosten: ' + kostenText);
       knopf.dataset.kosten = kostenText;
@@ -2014,7 +2203,7 @@ function bauKnopfKlick(werkzeug) {
       return;
     }
     if (!kostenReichen(werkzeug)) {
-      const fehlt = Object.entries(def.kosten)
+      const fehlt = Object.entries(gebKosten(werkzeug, 0))
         .filter(([ware, menge]) => res[ware] < menge)
         .map(([ware, menge]) => `${WAREN_EMOJI[ware]} ${Math.ceil(menge - res[ware])}`)
         .join(', ');
@@ -2056,15 +2245,16 @@ function bestaetigungZeigen() {
     const a = ankerVon(v.typ, v.tx, v.ty);
     const pruefung = platzOK(v.typ, a.x, a.y);
     const bezahlbar = kostenReichen(v.typ);
-    const k = def.kosten;
-    const kostenText = [k.gold ? `💰${k.gold}` : '', k.holz ? `🪵${k.holz}` : '',
-      k.werkzeuge ? `⚒️${k.werkzeuge}` : ''].filter(Boolean).join(' ') || 'gratis';
+    const kostenText = Object.entries(gebKosten(v.typ, 0))
+      .map(([ware, menge]) => `${WAREN_EMOJI[ware]}${menge}`).join(' ') || 'gratis';
+    const eff = effVorschau(v.typ, a.x, a.y);
+    const effText = eff !== null ? ` – Auslastung <b>${Math.round(eff * 100)} %</b>` : '';
     if (!pruefung.ok)
       $('bestaetigung-text').innerHTML = `${def.emoji} <span class="grund">${pruefung.grund}</span>`;
     else if (!bezahlbar)
       $('bestaetigung-text').innerHTML = `${def.emoji} <span class="grund">Zu wenig Rohstoffe</span> (${kostenText})`;
     else
-      $('bestaetigung-text').innerHTML = `${def.emoji} <b>${def.name}</b> hier bauen? (${kostenText})`;
+      $('bestaetigung-text').innerHTML = `${def.emoji} <b>${def.name}</b> hier bauen? (${kostenText})${effText}`;
     $('b-ok').textContent = '✓ Bauen';
     $('b-ok').disabled = !(pruefung.ok && bezahlbar);
   }
@@ -2162,6 +2352,24 @@ function uiAktualisieren() {
   if (state.auswahl) panelZeigen();
 }
 
+// Voraussichtliche Auslastung eines Gebäudes an einem Bauplatz
+// (wird an der Bau-Vorschau und in der Bestätigung angezeigt)
+function effVorschau(typ, ax, ay) {
+  const def = GEBAEUDE[typ];
+  const cx = ax + def.w / 2, cy = ay + def.h / 2;
+  if (FELD_FARMEN.has(typ)) return Math.min(1, feldPlaetze(typ, ax, ay).length / 6);
+  switch (typ) {
+    case 'fischer':     return Math.min(1, wasserImUmkreis(cx, cy, def.radius) / 6);
+    case 'jagd':        return Math.min(1, baeumeImUmkreis(cx, cy, def.radius) / 5);
+    case 'holzfaeller': return Math.min(1, baeumeImUmkreis(cx, cy, def.radius) / 4);
+    case 'ziegelei': case 'schmiede':
+      return steinKachelImUmkreis(cx, cy, def.radius) ? 1 : 0;
+    case 'goldschmiede':
+      return goldKachelImUmkreis(cx, cy, def.radius) ? 1 : 0;
+    default: return null;
+  }
+}
+
 // Eingangswaren der Verarbeitungs-Betriebe (für die Auslastungs-Erklärung)
 const VERARBEITER_REIN = { weberei: 'wolle', brennerei: 'zuckerrohr',
   muehle: 'getreide', baeckerei: 'mehl', tabakladen: 'tabakblaetter',
@@ -2174,18 +2382,22 @@ function auslastungGrund(geb) {
   const lager = spieler[geb.spieler].res;
   switch (geb.typ) {
     case 'fischer':
-      return `${wasserImUmkreis(z.x, z.y, def.radius)} von 6 nötigen Wasserfeldern im Umkreis`;
+      return `${wasserImUmkreis(z.x, z.y, def.radius)} von 6 nötigen Wasser-/Flussfeldern im Umkreis`;
     case 'jagd':
       return `Waldbestand im Umkreis: ${baeumeImUmkreis(z.x, z.y, def.radius).toFixed(1)} von 5 nötig`;
     case 'holzfaeller':
       return `Waldbestand im Umkreis: ${baeumeImUmkreis(z.x, z.y, def.radius).toFixed(1)} von 4 nötig (Bäume wachsen langsam nach)`;
     case 'schaffarm': case 'getreidefarm': case 'zuckerrohr':
     case 'tabakplantage': case 'gewuerzplantage': case 'rinderfarm':
-      return `${weideImUmkreis(z.x, z.y, def.radius)} von 10 nötigen freien Feldern im Umkreis (bebaute Felder zählen nicht)`;
-    case 'ziegelei': case 'goldschmiede':
+      return `${(geb.felder || []).length} von 6 eigenen Feldern (3×3) angelegt`;
+    case 'ziegelei':
       return steinKachelImUmkreis(z.x, z.y, def.radius)
         ? 'Gesteinsvorkommen in Reichweite – volle Leistung'
         : 'Kein Gestein mehr in Reichweite – Produktion steht!';
+    case 'goldschmiede':
+      return goldKachelImUmkreis(z.x, z.y, def.radius)
+        ? '🪙 Goldvorkommen in Reichweite – volle Leistung'
+        : 'Kein Golderz mehr in Reichweite – Produktion steht!';
     case 'schmiede':
       return (steinKachelImUmkreis(z.x, z.y, def.radius) ? 'Gestein vorhanden' : 'Kein Gestein in Reichweite!') +
              `, Holz im Lager: ${Math.floor(lager.holz)}`;
