@@ -269,6 +269,7 @@
     transition:border-color .15s,box-shadow .15s,opacity .2s;
   }
   .karte:hover{border-color:#D3CAAF;}
+  .karte:focus-visible{outline:2px solid var(--green);outline-offset:2px;}
   .karte.aktiv{border-color:var(--berry);box-shadow:0 0 0 1px var(--berry),var(--schatten);}
   .karte.aus{display:none;}
   .glasspalte{display:flex;align-items:center;justify-content:center;border-right:1px solid var(--line-soft);position:relative;}
@@ -969,10 +970,14 @@ function baueListe(){
   });
   liste.innerHTML = "";
   sortiert.forEach(w => {
-    const karte = document.createElement("button");
-    karte.type = "button";
+    // Kein <button>, weil darin keine Absätze stehen dürfen – aber mit
+    // Rolle und Tastatur-Bedienung, damit die Karte trotzdem ein Knopf ist.
+    const karte = document.createElement("div");
     karte.className = "karte";
     karte.dataset.id = w.id;
+    karte.setAttribute("role", "button");
+    karte.setAttribute("tabindex", "0");
+    karte.setAttribute("aria-label", `${w.name} – Einzelheiten anzeigen`);
     karte.innerHTML = `
       <div class="glasspalte" style="background:${koerperFarbe(w.koerper)}26">
         <span class="nr">${String(w.nr).padStart(2,"0")}</span>
@@ -993,6 +998,9 @@ function baueListe(){
         <div class="essen"><b>Passt zu</b>${w.essen}</div>
       </div>`;
     karte.addEventListener("click", () => waehle(w.id, true));
+    karte.addEventListener("keydown", (e) => {
+      if(e.key === "Enter" || e.key === " "){ e.preventDefault(); waehle(w.id, true); }
+    });
     liste.appendChild(karte);
   });
   aktualisiereListe();
