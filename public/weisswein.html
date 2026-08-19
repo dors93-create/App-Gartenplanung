@@ -156,8 +156,22 @@
   }
   .yAchse .mitte,.xAchse .mitte{color:var(--green);font-weight:700;letter-spacing:.14em;}
 
+  .plotSpalte{flex:1;min-width:0;}
+  .xAchse{
+    display:flex;justify-content:space-between;margin-top:8px;
+    font-family:"Space Mono",ui-monospace,monospace;font-size:10px;
+    letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+  }
+  /* Namen der Süße-Stufen unter der Achse */
+  .xStufen{position:relative;height:13px;margin-top:5px;}
+  .xStufen span{
+    position:absolute;transform:translateX(-50%);white-space:nowrap;
+    font-size:9.5px;color:#A79E88;letter-spacing:.02em;
+  }
+  .xStufen span:first-child{transform:none;}
+  .xStufen span:last-child{transform:translateX(-100%);}
   .plot{
-    position:relative;flex:1;aspect-ratio:1/1;min-width:0;
+    position:relative;width:100%;aspect-ratio:1/1;min-width:0;
     border:1px solid var(--line);border-radius:12px;overflow:hidden;
     background:
       linear-gradient(135deg,#FCFBF4 0%,#FBF7E9 55%,#F8F0DA 100%);
@@ -211,11 +225,15 @@
   }
   .marke.blass{opacity:.14;}
   .marke.links{transform:translate(calc(-100% - 24px),-50%);}
-  .marke.oben{transform:translate(-50%,-27px);}
-  /* Feine Linie: zeigt die mögliche Süße-Spanne einer Sorte.
-     Erscheint erst, wenn man den Punkt berührt oder auswählt. */
-  .spanneLinie{opacity:0;transition:opacity .2s ease;}
-  .spanneLinie.zeigen{opacity:1;}
+  .marke.mittig{transform:translate(-50%,-50%);}
+  /* Balken hinter dem Punkt: die ganze Süße-Bandbreite einer Sorte.
+     Der Punkt darauf zeigt, wie sie meistens ausgebaut wird. */
+  .spanneBand{
+    position:absolute;pointer-events:none;border-radius:7px;
+    background:rgba(124,47,62,.15);border:1px solid rgba(124,47,62,.13);
+    transition:background .2s ease,border-color .2s ease,opacity .2s ease;
+  }
+  .spanneBand.zeigen{background:rgba(124,47,62,.34);border-color:rgba(124,47,62,.3);}
   @media (max-width:939px){.marke{display:none;}}
 
   /* ---------- Detail-Karte neben der Matrix ---------- */
@@ -300,7 +318,8 @@
   .pkt.an{background:var(--green);}
   .suesse{display:flex;align-items:center;gap:4px;}
   .sw{width:9px;height:9px;border-radius:2px;background:var(--line);transform:rotate(45deg);}
-  .sw.an{background:var(--berry);}
+  .sw.an{background:rgba(124,47,62,.28);}
+  .sw.typisch{background:var(--berry);}
   .suesse .ende{font-size:10px;color:var(--muted);}
 
   .aromen{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:11px;}
@@ -318,6 +337,7 @@
   .probe{width:16px;height:16px;border-radius:4px;background:linear-gradient(135deg,var(--b1),var(--b5));border:1px solid rgba(0,0,0,.1);}
   .probePunkt{width:15px;height:15px;border-radius:50%;background:var(--b3);border:1.5px solid var(--green);}
   .probePunkt.int{border-style:dashed;border-color:var(--green-soft);background:var(--b2);}
+  .probeBand{width:24px;height:9px;border-radius:5px;background:rgba(124,47,62,.2);border:1px solid rgba(124,47,62,.16);}
 
   footer{
     margin-top:36px;padding-top:16px;border-top:1px solid var(--line);
@@ -343,6 +363,7 @@
     .punkt{width:24px;height:24px;margin:-12px 0 0 -12px;font-size:10px;}
     .matrixKasten{padding:11px 11px 10px;}
     .yAchse,.xAchse{font-size:9px!important;letter-spacing:.05em!important;}
+    .xStufen span:nth-child(2),.xStufen span:nth-child(4){display:none;}
     .plotZeile{gap:6px;}
     .quadrant{font-size:8.5px;}
   }
@@ -379,6 +400,7 @@
       </button>
     </div>
     <p class="lede">Ein Kompass durch 16 weiße Rebsorten — von den <b>deutschen Klassikern</b> bis zu den großen internationalen Namen. Unten die <b>Kreuzmatrix</b>: Zwei Eigenschaften auswählen, und jede Sorte findet ihren Platz zwischen trocken und süß, leicht und kräftig, herb und fruchtig. Tippe einen Punkt an, um die Sorte kennenzulernen.</p>
+    <p class="lede" style="margin-top:-14px"><b>Wichtig bei der Süße:</b> Wie süß ein Wein am Ende schmeckt, entscheidet der Erzeuger — fast jede Sorte gibt es trocken <i>und</i> fruchtsüß. Der Punkt zeigt, wie sie meistens ausgebaut wird, der rote Balken dahinter die ganze Bandbreite.</p>
   </header>
 
   <!-- ========== Kreuzmatrix ========== -->
@@ -418,18 +440,19 @@
       <div class="matrixKasten">
         <div class="plotZeile">
           <div class="yAchse" id="yAchseText" aria-hidden="true"></div>
-          <div class="plot" id="plot">
-            <div class="kreuz"><i class="waag"></i><i class="senk"></i></div>
-            <span class="quadrant q-ol" id="qOL"></span>
-            <span class="quadrant q-or" id="qOR"></span>
-            <span class="quadrant q-ul" id="qUL"></span>
-            <span class="quadrant q-ur" id="qUR"></span>
+          <div class="plotSpalte">
+            <div class="plot" id="plot">
+              <div class="kreuz"><i class="waag"></i><i class="senk"></i></div>
+              <span class="quadrant q-ol" id="qOL"></span>
+              <span class="quadrant q-or" id="qOR"></span>
+              <span class="quadrant q-ul" id="qUL"></span>
+              <span class="quadrant q-ur" id="qUR"></span>
+            </div>
+            <div class="xAchse" id="xAchseText" aria-hidden="true"></div>
+            <div class="xStufen" id="xStufen" aria-hidden="true"></div>
           </div>
         </div>
-        <div class="xAchse" id="xAchseText" aria-hidden="true"
-             style="display:flex;justify-content:space-between;margin:8px 0 0 34px;
-                    font-family:'Space Mono',ui-monospace,monospace;font-size:10px;
-                    letter-spacing:.08em;text-transform:uppercase;color:var(--muted);"></div>
+
       </div>
 
       <aside class="detail" id="detail" aria-live="polite">
@@ -439,7 +462,7 @@
             <li>Jeder Punkt ist eine Rebsorte. Die Zahl darin findest du unten auf der passenden Karte wieder.</li>
             <li>Je goldener der Punkt, desto kräftiger der Wein.</li>
             <li>Durchgezogener Rand = deutsche Sorte, gestrichelter Rand = internationale Sorte.</li>
-            <li>Punkt berühren oder antippen: Eine feine rote Linie zeigt, wie weit die Süße dieser Sorte reichen kann.</li>
+            <li>Der rote Balken hinter jedem Punkt ist die Süße-Spanne der Sorte: Wie trocken oder wie süß sie ausgebaut werden kann. Der Punkt darauf zeigt den üblichen Fall.</li>
           </ul>
         </div>
       </aside>
@@ -449,6 +472,7 @@
       <div><span class="probe"></span> Glasfarbe &amp; Füllstand = Körper</div>
       <div><span class="probePunkt"></span> deutsche Rebsorte</div>
       <div><span class="probePunkt int"></span> internationale Sorte</div>
+      <div><span class="probeBand"></span> Balken = mögliche Süße-Spanne</div>
       <div>◆ = Süße&nbsp;·&nbsp;● = Körper</div>
     </div>
   </section>
@@ -493,7 +517,7 @@
 const weine = [
   {
     id:"mueller-thurgau", name:"Müller-Thurgau", syn:"Rivaner", herkunft:"DE", deutsch:true,
-    koerper:1.3, suesse:1.0, suesseSpanne:[0,2], saeure:2.0, frucht:3.4, aroma:2.4,
+    koerper:1.3, suesse:1.5, suesseSpanne:[1,3], saeure:2.0, frucht:3.4, aroma:2.4,
     temp:"8–10 °C",
     aromen:["Apfel","Birne","Muskatnote","floral"],
     essen:"Leichte Vorspeisen, Salate, Zwiebelkuchen",
@@ -502,7 +526,7 @@ const weine = [
   },
   {
     id:"muskateller", name:"Muskateller", syn:"Gelber Muskateller · Muscat", herkunft:"DE / AT", deutsch:true,
-    koerper:1.6, suesse:1.2, suesseSpanne:[0,3], saeure:3.2, frucht:4.4, aroma:5.0,
+    koerper:1.6, suesse:1.7, suesseSpanne:[1,4], saeure:3.2, frucht:4.4, aroma:5.0,
     temp:"8–10 °C",
     aromen:["Muskat","Holunderblüte","Weintraube","Zitrus"],
     essen:"Aperitif, Spargel, asiatische Küche, Ziegenkäse",
@@ -511,7 +535,7 @@ const weine = [
   },
   {
     id:"bacchus", name:"Bacchus", syn:"Silvaner × Riesling × Müller-Thurgau", herkunft:"DE", deutsch:true,
-    koerper:1.8, suesse:1.6, suesseSpanne:[0,3], saeure:2.0, frucht:4.4, aroma:4.2,
+    koerper:1.8, suesse:2.1, suesseSpanne:[1,3], saeure:2.0, frucht:4.4, aroma:4.2,
     temp:"8–10 °C",
     aromen:["Holunder","Muskat","Zitrusblüte","Cassis"],
     essen:"Aperitif, Spargel, milder Käse, Kuchen",
@@ -520,7 +544,7 @@ const weine = [
   },
   {
     id:"kerner", name:"Kerner", syn:"Trollinger × Riesling", herkunft:"DE", deutsch:true,
-    koerper:2.0, suesse:1.2, suesseSpanne:[0,3], saeure:3.8, frucht:3.8, aroma:3.4,
+    koerper:2.0, suesse:1.6, suesseSpanne:[1,4], saeure:3.8, frucht:3.8, aroma:3.4,
     temp:"8–10 °C",
     aromen:["Apfel","Pfirsich","Muskatnote","Zitrus"],
     essen:"Vorspeisen, Fisch, Spargel, leichte asiatische Gerichte",
@@ -529,7 +553,7 @@ const weine = [
   },
   {
     id:"riesling", name:"Riesling", syn:"trocken bis edelsüß", herkunft:"DE", deutsch:true,
-    koerper:2.2, suesse:1.2, suesseSpanne:[0,4], saeure:4.8, frucht:3.6, aroma:3.8,
+    koerper:2.2, suesse:1.3, suesseSpanne:[0,4], saeure:4.8, frucht:3.6, aroma:3.8,
     temp:"8–11 °C",
     aromen:["Limette","Apfel","Pfirsich","Schiefer / Petrol"],
     essen:"Fisch, Geflügel, scharfe & asiatische Gerichte",
@@ -538,7 +562,7 @@ const weine = [
   },
   {
     id:"sauvignon-blanc", name:"Sauvignon Blanc", syn:"Loire · Neuseeland · DE", herkunft:"INT", deutsch:false,
-    koerper:2.4, suesse:0.2, suesseSpanne:[0,1], saeure:4.4, frucht:3.6, aroma:4.6,
+    koerper:2.4, suesse:0.9, suesseSpanne:[0,2], saeure:4.4, frucht:3.6, aroma:4.6,
     temp:"8–10 °C",
     aromen:["Stachelbeere","Gras","Maracuja","Paprika"],
     essen:"Ziegenkäse, Salate, Meeresfrüchte",
@@ -547,7 +571,7 @@ const weine = [
   },
   {
     id:"scheurebe", name:"Scheurebe", syn:"Riesling × Bukettsorte", herkunft:"DE", deutsch:true,
-    koerper:2.5, suesse:1.4, suesseSpanne:[0,4], saeure:4.0, frucht:4.2, aroma:4.6,
+    koerper:2.5, suesse:1.9, suesseSpanne:[1,4], saeure:4.0, frucht:4.2, aroma:4.6,
     temp:"9–11 °C",
     aromen:["Cassis","Grapefruit","Pfirsich"],
     essen:"Würzige Küche, asiatisch, als Aperitif, Dessert",
@@ -556,7 +580,7 @@ const weine = [
   },
   {
     id:"silvaner", name:"Silvaner", syn:"Franken", herkunft:"DE", deutsch:true,
-    koerper:2.6, suesse:0.4, suesseSpanne:[0,2], saeure:3.0, frucht:2.0, aroma:2.0,
+    koerper:2.6, suesse:1.0, suesseSpanne:[0,3], saeure:3.0, frucht:2.0, aroma:2.0,
     temp:"9–11 °C",
     aromen:["grüner Apfel","Heu","Kräuter","erdig"],
     essen:"Spargel, Fisch, helles Fleisch",
@@ -565,7 +589,7 @@ const weine = [
   },
   {
     id:"gruener-veltliner", name:"Grüner Veltliner", syn:"Österreichs Aushängeschild", herkunft:"AT", deutsch:false,
-    koerper:2.6, suesse:0.3, suesseSpanne:[0,2], saeure:3.6, frucht:2.4, aroma:3.0,
+    koerper:2.6, suesse:0.9, suesseSpanne:[0,2], saeure:3.6, frucht:2.4, aroma:3.0,
     temp:"9–11 °C",
     aromen:["weißer Pfeffer","Zitrus","grüne Kräuter"],
     essen:"Wiener Schnitzel, Gemüse, Sushi",
@@ -574,7 +598,7 @@ const weine = [
   },
   {
     id:"albarino", name:"Albariño", syn:"Rías Baixas", herkunft:"ES", deutsch:false,
-    koerper:3.0, suesse:0.3, suesseSpanne:[0,1], saeure:4.0, frucht:3.2, aroma:3.0,
+    koerper:3.0, suesse:0.9, suesseSpanne:[0,2], saeure:4.0, frucht:3.2, aroma:3.0,
     temp:"9–11 °C",
     aromen:["Pfirsich","Zitrus","salzig-mineralisch"],
     essen:"Meeresfrüchte, Muscheln, Tapas",
@@ -583,7 +607,7 @@ const weine = [
   },
   {
     id:"weissburgunder", name:"Weißburgunder", syn:"Pinot Blanc", herkunft:"DE", deutsch:true,
-    koerper:3.2, suesse:0.5, suesseSpanne:[0,2], saeure:3.0, frucht:2.6, aroma:2.2,
+    koerper:3.2, suesse:1.0, suesseSpanne:[0,3], saeure:3.0, frucht:2.6, aroma:2.2,
     temp:"10–12 °C",
     aromen:["Birne","Apfel","Mandel","cremig"],
     essen:"Fisch, Geflügel, Pasta, milder Käse",
@@ -592,7 +616,7 @@ const weine = [
   },
   {
     id:"chenin-blanc", name:"Chenin Blanc", syn:"Loire · Südafrika", herkunft:"FR / ZA", deutsch:false,
-    koerper:3.2, suesse:1.3, suesseSpanne:[0,4], saeure:4.4, frucht:3.2, aroma:3.0,
+    koerper:3.2, suesse:1.6, suesseSpanne:[0,4], saeure:4.4, frucht:3.2, aroma:3.0,
     temp:"10–12 °C",
     aromen:["Quitte","Honig","Kamille","Apfel"],
     essen:"Geflügel, Schwein, würzige Gerichte, Dessert",
@@ -601,7 +625,7 @@ const weine = [
   },
   {
     id:"grauburgunder", name:"Grauburgunder", syn:"Pinot Gris · Pinot Grigio", herkunft:"DE / IT", deutsch:true,
-    koerper:3.9, suesse:0.7, suesseSpanne:[0,3], saeure:2.6, frucht:3.0, aroma:2.6,
+    koerper:3.9, suesse:1.2, suesseSpanne:[0,4], saeure:2.6, frucht:3.0, aroma:2.6,
     temp:"10–12 °C",
     aromen:["Birne","Melone","Nuss","Honig (Barrique: cremig)"],
     essen:"Pasta, Risotto, Geflügel, Schwein",
@@ -610,7 +634,7 @@ const weine = [
   },
   {
     id:"viognier", name:"Viognier", syn:"Condrieu · Rhône", herkunft:"FR", deutsch:false,
-    koerper:4.2, suesse:0.7, suesseSpanne:[0,2], saeure:2.0, frucht:4.2, aroma:4.4,
+    koerper:4.2, suesse:1.1, suesseSpanne:[0,3], saeure:2.0, frucht:4.2, aroma:4.4,
     temp:"11–13 °C",
     aromen:["Aprikose","Pfirsich","Veilchen","floral"],
     essen:"Würzige Küche, Geflügel, cremige Saucen",
@@ -619,7 +643,7 @@ const weine = [
   },
   {
     id:"gewuerztraminer", name:"Gewürztraminer", syn:"Traminer · Elsass", herkunft:"DE / FR", deutsch:true,
-    koerper:4.2, suesse:1.9, suesseSpanne:[1,4], saeure:2.0, frucht:3.8, aroma:5.0,
+    koerper:4.2, suesse:2.3, suesseSpanne:[1,4], saeure:2.0, frucht:3.8, aroma:5.0,
     temp:"10–12 °C",
     aromen:["Litschi","Rose","Gewürze","Honig"],
     essen:"Curry, asiatisch, kräftiger Käse, Gänseleber",
@@ -628,7 +652,7 @@ const weine = [
   },
   {
     id:"chardonnay", name:"Chardonnay", syn:"Burgund · weltweit", herkunft:"INT", deutsch:false,
-    koerper:4.6, suesse:0.4, suesseSpanne:[0,1], saeure:2.8, frucht:2.8, aroma:3.2,
+    koerper:4.6, suesse:0.9, suesseSpanne:[0,2], saeure:2.8, frucht:2.8, aroma:3.2,
     temp:"11–13 °C",
     aromen:["Apfel → Ananas","Butter","Vanille","Toast (Barrique)"],
     essen:"Hummer, Geflügel in Sahne, gegrillter Fisch",
@@ -639,7 +663,9 @@ const weine = [
 
 /* Die wählbaren Achsen der Kreuzmatrix. */
 const achsen = {
-  suesse : {label:"Süße",           min:0, max:3, tief:"knochentrocken", hoch:"süß",        kurzTief:"trocken",  kurzHoch:"süß"},
+  suesse : {label:"Süße",           min:0, max:4, tief:"knochentrocken", hoch:"edelsüß",    kurzTief:"trocken",  kurzHoch:"süß",
+            // Die deutsche Geschmacksleiter – sie beschriftet die Achse
+            stufen:["knochentrocken","trocken","feinherb","lieblich","edelsüß"]},
   koerper: {label:"Körper",         min:1, max:5, tief:"leicht",         hoch:"kräftig",    kurzTief:"leicht",   kurzHoch:"kräftig"},
   saeure : {label:"Säure",          min:1, max:5, tief:"mild",           hoch:"rassig",     kurzTief:"mild",     kurzHoch:"rassig"},
   frucht : {label:"Fruchtigkeit",   min:1, max:5, tief:"herb & mineralisch", hoch:"fruchtig", kurzTief:"herb", kurzHoch:"fruchtig"},
@@ -704,10 +730,17 @@ function punkteReihe(n){
   for(let i=1;i<=5;i++) s+=`<span class="pkt ${i<=Math.round(n)?'an':''}"></span>`;
   return s+'</div>';
 }
-function suesseReihe(spanne){
-  let s='<div class="suesse"><span class="ende">trocken</span>';
-  for(let i=0;i<=4;i++) s+=`<span class="sw ${(i>=spanne[0]&&i<=spanne[1])?'an':''}"></span>`;
-  return s+'<span class="ende">süß</span></div>';
+/* Süße-Leiste: helle Rauten = mögliche Spanne, volle Raute = üblicher Ausbau. */
+function suesseReihe(w){
+  const von = w.suesseSpanne[0], bis = w.suesseSpanne[1];
+  const typisch = Math.round(w.suesse);
+  let s = '<div class="suesse"><span class="ende">trocken</span>';
+  for(let i=0;i<=4;i++){
+    const inSpanne = (i >= von && i <= bis);
+    s += `<span class="sw ${inSpanne ? "an" : ""}${i === typisch ? " typisch" : ""}"
+                title="${achsen.suesse.stufen[i]}"></span>`;
+  }
+  return s + '<span class="ende">süß</span></div>';
 }
 
 /* ---------- Auszeichnungen (DE / Herkunft) ---------- */
@@ -771,13 +804,19 @@ const plot = document.getElementById("plot");
 
 function zeichneMatrix(){
   // alte Punkte, Marken und Spannen-Linien entfernen
-  plot.querySelectorAll(".punkt,.marke,.spanneLinie").forEach(el => el.remove());
+  plot.querySelectorAll(".punkt,.marke,.spanneBand").forEach(el => el.remove());
 
   const aX = achsen[zustand.achseX], aY = achsen[zustand.achseY];
 
   // Achsenbeschriftung
-  document.getElementById("xAchseText").innerHTML =
-    `<span>← ${aX.tief}</span><span class="mitte">${aX.label}</span><span>${aX.hoch} →</span>`;
+  document.getElementById("xAchseText").innerHTML = aX.stufen
+    ? `<span></span><span class="mitte">${aX.label}</span><span></span>`
+    : `<span>← ${aX.tief}</span><span class="mitte">${aX.label}</span><span>${aX.hoch} →</span>`;
+  // Bei der Süße stehen die Stufennamen unter der Achse
+  document.getElementById("xStufen").innerHTML = aX.stufen
+    ? aX.stufen.map((name, i) =>
+        `<span style="left:${i / (aX.stufen.length - 1) * 100}%">${name}</span>`).join("")
+    : "";
   document.getElementById("yAchseText").innerHTML =
     `<span>← ${aY.tief}</span><span class="mitte">${aY.label}</span><span>${aY.hoch} →</span>`;
 
@@ -789,42 +828,73 @@ function zeichneMatrix(){
 
   const positionen = berechnePositionen();
 
-  /* Wohin das Namensschild? Am liebsten rechts neben den Punkt –
-     ist dort schon ein anderer Punkt, weicht es nach links oder oben aus. */
-  positionen.forEach(p => {
-    const nachbarn = positionen.filter(q => q !== p && Math.abs(q.y - p.y) < 5);
-    const rechtsFrei = !nachbarn.some(q => q.x > p.x && q.x - p.x < 24);
-    const linksFrei  = !nachbarn.some(q => q.x < p.x && p.x - q.x < 24);
-    if(p.x <= 60 && rechtsFrei)      p.markenSeite = "";
-    else if(p.x >= 26 && linksFrei)  p.markenSeite = " links";
-    else                             p.markenSeite = " oben";
+  /* Wohin das Namensschild? Der Reihe nach wird rechts, links, oben und
+     unten geprüft – gewählt wird der erste Platz, an dem das Schild weder
+     einen Punkt noch ein schon gesetztes Schild überdeckt. Gerechnet wird
+     in Prozent der Feldbreite, damit es auf jedem Bildschirm passt. */
+  const feldBreite = plot.clientWidth || 620;
+  const inProzent  = (pixel) => pixel / feldBreite * 100;
+  const zeichen    = inProzent(6.6);          // grobe Breite eines Buchstabens
+  const zeilenhoehe= inProzent(17);
+  const luft       = inProzent(17);           // halber Punkt plus Abstand
+  const abstand    = inProzent(23);           // Schild neben dem Punkt
+
+  const belegt = positionen.map(q => ({
+    x1:q.x-luft, x2:q.x+luft, y1:q.y-luft, y2:q.y+luft
+  }));
+  const stoert = (k) => k.x1 < 0 || k.x2 > 100 ||
+    belegt.some(b => k.x1 < b.x2 && k.x2 > b.x1 && k.y1 < b.y2 && k.y2 > b.y1);
+
+  [...positionen].sort((a,b) => a.x - b.x).forEach(p => {
+    const breite = p.wein.name.length * zeichen;
+    const halb   = zeilenhoehe/2;
+    const hoch   = inProzent(21);             // eine Zeile höher/tiefer
+    const rechts = (y) => ({seite:"",        x1:p.x+abstand, x2:p.x+abstand+breite, y});
+    const links  = (y) => ({seite:" links",  x1:p.x-abstand-breite, x2:p.x-abstand,  y});
+    const mittig = (y) => ({seite:" mittig", x1:p.x-breite/2, x2:p.x+breite/2,       y});
+    const plaetze = [
+      rechts(p.y), links(p.y), mittig(p.y-hoch), mittig(p.y+hoch),
+      rechts(p.y-hoch), rechts(p.y+hoch), links(p.y-hoch), links(p.y+hoch),
+      mittig(p.y-2*hoch), mittig(p.y+2*hoch),
+      rechts(p.y-2*hoch), rechts(p.y+2*hoch), links(p.y-2*hoch), links(p.y+2*hoch)
+    ];
+    const frei = plaetze.find(k => !stoert({x1:k.x1, x2:k.x2, y1:k.y-halb, y2:k.y+halb}));
+    // Findet sich gar kein Platz, bleibt das Schild weg – die Nummer im
+    // Punkt genügt, den Namen liefert die Karte darunter.
+    p.markeZeigen  = Boolean(frei);
+    p.markenSeite  = frei ? frei.seite : "";
+    p.markenHoehe  = frei ? frei.y : p.y;
+    if(frei) belegt.push({x1:frei.x1, x2:frei.x2, y1:frei.y-halb, y2:frei.y+halb});
   });
 
   positionen.forEach(p => {
     const w = p.wein;
 
-    // Sorten mit großer Süße-Spanne bekommen eine feine Linie:
-    // sie zeigt, dass es die Sorte auch trockener oder süßer gibt.
-    const breite = w.suesseSpanne[1] - w.suesseSpanne[0];
-    if(breite > 1 && (zustand.achseX === "suesse" || zustand.achseY === "suesse")){
-      const linie = document.createElement("span");
-      linie.className = "spanneLinie";
-      linie.style.cssText = "position:absolute;background:rgba(124,47,62,.25);border-radius:2px;pointer-events:none;";
+    // Liegt die Süße auf einer Achse, bekommt jede Sorte einen Balken:
+    // Er zeigt die ganze Bandbreite (trocken bis süß), der Punkt darauf
+    // den üblichen Ausbau. So sieht man, dass „trocken" nur eine von
+    // mehreren Möglichkeiten ist.
+    if(zustand.achseX === "suesse" || zustand.achseY === "suesse"){
+      const band = document.createElement("span");
+      band.className = "spanneBand";
+      const dicke = feldBreite < 420 ? 10 : 13;   // Balkenstärke in Pixeln
       if(zustand.achseX === "suesse"){
-        const versatz = p.x - p.rohX;
-        const von = begrenze(anteil(w.suesseSpanne[0],"suesse") + versatz, 2, 98);
-        const bis = begrenze(anteil(w.suesseSpanne[1],"suesse") + versatz, 2, 98);
-        linie.style.left = von+"%"; linie.style.width = (bis-von)+"%";
-        linie.style.top = p.y+"%"; linie.style.height = "2px"; linie.style.marginTop = "-1px";
+        const versatz = p.x - p.rohX;         // Punkt ist evtl. ausgewichen
+        const von = begrenze(anteil(w.suesseSpanne[0],"suesse") + versatz, 1, 99);
+        const bis = begrenze(anteil(w.suesseSpanne[1],"suesse") + versatz, 1, 99);
+        band.style.left = von+"%"; band.style.width = (bis-von)+"%";
+        band.style.top = p.y+"%"; band.style.height = dicke+"px";
+        band.style.marginTop = (-dicke/2)+"px";
       }else{
         const versatz = p.y - p.rohY;
-        const von = begrenze(100 - anteil(w.suesseSpanne[1],"suesse") + versatz, 2, 98);
-        const bis = begrenze(100 - anteil(w.suesseSpanne[0],"suesse") + versatz, 2, 98);
-        linie.style.top = von+"%"; linie.style.height = (bis-von)+"%";
-        linie.style.left = p.x+"%"; linie.style.width = "2px"; linie.style.marginLeft = "-1px";
+        const von = begrenze(100 - anteil(w.suesseSpanne[1],"suesse") + versatz, 1, 99);
+        const bis = begrenze(100 - anteil(w.suesseSpanne[0],"suesse") + versatz, 1, 99);
+        band.style.top = von+"%"; band.style.height = (bis-von)+"%";
+        band.style.left = p.x+"%"; band.style.width = dicke+"px";
+        band.style.marginLeft = (-dicke/2)+"px";
       }
-      linie.dataset.id = w.id;
-      plot.appendChild(linie);
+      band.dataset.id = w.id;
+      plot.appendChild(band);
     }
 
     // der Punkt selbst
@@ -844,13 +914,15 @@ function zeichneMatrix(){
     plot.appendChild(knopf);
 
     // Name daneben (nur auf breiten Bildschirmen sichtbar, siehe CSS)
-    const marke = document.createElement("span");
-    marke.className = "marke" + p.markenSeite;
-    marke.style.left = p.x+"%";
-    marke.style.top  = p.y+"%";
-    marke.textContent = w.name;
-    marke.dataset.id = w.id;
-    plot.appendChild(marke);
+    if(p.markeZeigen){
+      const marke = document.createElement("span");
+      marke.className = "marke" + p.markenSeite;
+      marke.style.left = p.x+"%";
+      marke.style.top  = p.markenHoehe+"%";
+      marke.textContent = w.name;
+      marke.dataset.id = w.id;
+      plot.appendChild(marke);
+    }
   });
 
   aktualisiereHervorhebung();
@@ -858,17 +930,17 @@ function zeichneMatrix(){
 
 /* Die Süße-Spanne einer Sorte ein- oder ausblenden. */
 function zeigeSpanne(id, an){
-  const linie = plot.querySelector(`.spanneLinie[data-id="${id}"]`);
-  if(linie) linie.classList.toggle("zeigen", an || id === zustand.auswahl);
+  const band = plot.querySelector(`.spanneBand[data-id="${id}"]`);
+  if(band) band.classList.toggle("zeigen", an || id === zustand.auswahl);
 }
 
 /* Gefilterte Sorten werden blass, die ausgewählte bekommt einen Ring. */
 function aktualisiereHervorhebung(){
-  plot.querySelectorAll(".punkt,.marke,.spanneLinie").forEach(el => {
+  plot.querySelectorAll(".punkt,.marke,.spanneBand").forEach(el => {
     const w = weine.find(x => x.id === el.dataset.id);
     const sichtbar = passt(w);
     el.classList.toggle("blass", !sichtbar);
-    if(el.classList.contains("spanneLinie")){
+    if(el.classList.contains("spanneBand")){
       el.classList.toggle("zeigen", sichtbar && w.id === zustand.auswahl);
     }
     el.classList.toggle("aktiv", el.classList.contains("punkt") && w.id === zustand.auswahl);
@@ -881,7 +953,7 @@ function aktualisiereHervorhebung(){
 /* =================================================================
    Detail-Karte
    ================================================================= */
-const stufenNamen = ["knochentrocken","trocken","halbtrocken","lieblich","edelsüß"];
+const stufenNamen = achsen.suesse.stufen;
 
 /* Ein Balken für die 1-bis-5-Werte (Körper, Säure, Frucht, Duft). */
 function meter(name, wert){
@@ -901,7 +973,7 @@ function zeigeDetail(w){
             <li>Jeder Punkt ist eine Rebsorte. Die Zahl darin findest du unten auf der passenden Karte wieder.</li>
             <li>Je goldener der Punkt, desto kräftiger der Wein.</li>
             <li>Durchgezogener Rand = deutsche Sorte, gestrichelter Rand = internationale Sorte.</li>
-            <li>Punkt berühren oder antippen: Eine feine rote Linie zeigt, wie weit die Süße dieser Sorte reichen kann.</li>
+            <li>Der rote Balken hinter jedem Punkt ist die Süße-Spanne der Sorte: Wie trocken oder wie süß sie ausgebaut werden kann. Der Punkt darauf zeigt den üblichen Fall.</li>
           </ul>
     </div>`;
     return;
@@ -991,7 +1063,7 @@ function baueListe(){
         </div>
         <div class="meta">
           <div class="metaPunkt"><span class="metaLabel">Körper</span>${punkteReihe(w.koerper)}</div>
-          <div class="metaPunkt"><span class="metaLabel">Süße</span>${suesseReihe(w.suesseSpanne)}</div>
+          <div class="metaPunkt"><span class="metaLabel">Süße</span>${suesseReihe(w)}</div>
           <div class="metaPunkt"><span class="metaLabel">Serviert</span><span class="temp">${w.temp}</span></div>
         </div>
         <div class="aromen">${w.aromen.map(a=>`<span class="arom">${a}</span>`).join("")}</div>
