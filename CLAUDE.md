@@ -79,6 +79,13 @@ src/bestand.js        Schritt 3b: amtliche Gebäude automatisch erfassen
 src/style.css         Gestaltung (Design-Tokens, Suchleiste, Panel, Editor)
 public/inselspiel.html  Eigenständiges Insel-Aufbauspiel (Bonus): eine einzelne
                         Datei, läuft auch ohne Server; wird mit veröffentlicht
+public/weisswein.html   Weißwein-Kompass (Bonus): 16 Rebsorten in einer
+                        interaktiven Kreuzmatrix (Süße, Körper, Säure, Frucht,
+                        Duft), Filter nach Herkunft und Essen; ebenfalls eine
+                        einzelne Datei
+public/weisswein-vorschau.png
+                        Vorschaubild, das erscheint, wenn der Link zum
+                        Weißwein-Kompass in einem Chat geteilt wird
 CLAUDE.md             Diese Übersicht
 ```
 

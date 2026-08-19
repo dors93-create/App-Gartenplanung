@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Weißwein-Kompass</title>
+<meta name="description" content="16 weiße Rebsorten in einer interaktiven Kreuzmatrix: von knochentrocken bis süß, von leicht bis kräftig – mit Aromen, Serviertemperatur und Essensempfehlung.">
+<meta name="theme-color" content="#FAF7EF">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 60'%3E%3Cpath d='M11 8c0 15 4 23 9 23s9-8 9-23z' fill='%23DAB84C'/%3E%3Cpath d='M11 8c0 15 4 23 9 23s9-8 9-23' fill='none' stroke='%2326382C' stroke-width='2.4'/%3E%3Cpath d='M20 31v21M12 53h16' stroke='%2326382C' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+
+<!-- Vorschau, wenn der Link in einer Chat-Gruppe geteilt wird -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="Weißwein-Kompass">
+<meta property="og:description" content="16 weiße Rebsorten in einer interaktiven Kreuzmatrix: von trocken bis süß, von leicht bis kräftig – mit Aromen, Serviertemperatur und Essensempfehlung.">
+<meta property="og:url" content="https://dors93-create.github.io/App-Gartenplanung/weisswein.html">
+<meta property="og:image" content="https://dors93-create.github.io/App-Gartenplanung/weisswein-vorschau.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=Hanken+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  /* ============================================================
+     Weißwein-Kompass
+     Eine einzelne, eigenständige HTML-Datei – läuft auch ohne
+     Server, einfach im Browser öffnen.
+     Gestaltung: heller Papierton, Serifen-Überschriften,
+     genau zwei Akzente (Waldgrün + Beerenrot).
+     ============================================================ */
+
+  :root{
+    --paper:#FAF7EF;      /* Hintergrund, warmes Papier */
+    --card:#FFFEFA;       /* Karten */
+    --ink:#22201B;        /* Text */
+    --green:#26382C;      /* dunkles Waldgrün, Hauptakzent */
+    --green-soft:#3C5442;
+    --line:#E4DECB;       /* Linien */
+    --line-soft:#EFEADB;  /* sehr helle Flächen */
+    --muted:#837D6E;      /* Nebentext */
+    --berry:#7C2F3E;      /* Beerenrot, zweiter Akzent (Süße) */
+    /* Goldskala: je kräftiger der Wein, desto goldener das Glas */
+    --b1:#E9E5B4; --b2:#E6DB93; --b3:#E2CB6E; --b4:#DAB84C; --b5:#CFA02F;
+    --radius:15px;
+    --schatten:0 1px 2px rgba(40,30,10,.04), 0 8px 24px rgba(40,30,10,.03);
+  }
+
+  *{box-sizing:border-box;}
+  html{-webkit-text-size-adjust:100%;scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"Hanken Grotesk",system-ui,-apple-system,sans-serif;
+    line-height:1.5;
+    padding:28px 16px 56px;
+  }
+  .poster{max-width:1080px;margin:0 auto;}
+
+  /* ---------- Kopf ---------- */
+  .eyebrow{
+    font-family:"Space Mono",ui-monospace,monospace;
+    text-transform:uppercase;letter-spacing:.28em;font-size:11px;
+    color:var(--green-soft);display:flex;align-items:center;gap:12px;
+  }
+  .eyebrow::after{content:"";flex:1;height:1px;background:var(--line);}
+  h1{
+    font-family:"Fraunces",Georgia,serif;font-weight:400;
+    font-size:clamp(38px,7.2vw,64px);line-height:1.02;letter-spacing:-.01em;
+    margin:.28em 0 .18em;
+  }
+  h1 em{font-style:italic;color:var(--berry);font-weight:500;}
+  .lede{max-width:60ch;color:var(--muted);font-size:15.5px;margin:0 0 20px;}
+  .lede b{color:var(--green);font-weight:600;}
+
+  .kopfzeile{display:flex;flex-wrap:wrap;align-items:flex-end;gap:16px;justify-content:space-between;}
+
+  /* Knöpfe allgemein */
+  .knopf{
+    font-family:"Hanken Grotesk",system-ui,sans-serif;font-size:13.5px;font-weight:600;
+    display:inline-flex;align-items:center;gap:8px;
+    padding:9px 16px;border-radius:999px;cursor:pointer;
+    border:1px solid var(--line);background:var(--card);color:var(--green);
+    box-shadow:var(--schatten);transition:background .15s,border-color .15s,transform .15s;
+  }
+  .knopf:hover{background:var(--line-soft);}
+  .knopf:active{transform:translateY(1px);}
+  .knopf.stark{background:var(--green);color:#F6F3E7;border-color:var(--green);}
+  .knopf.stark:hover{background:#1B2A20;}
+  .knopf svg{flex:none;}
+
+  /* ---------- Abschnitts-Überschrift ---------- */
+  .abschnitt{margin:34px 0 14px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;}
+  .abschnitt h2{
+    font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:26px;
+    letter-spacing:-.01em;margin:0;
+  }
+  .abschnitt p{margin:0;color:var(--muted);font-size:13.5px;flex:1;min-width:200px;}
+
+  /* ---------- Steuerung (Achsen, Filter) ---------- */
+  .steuerung{
+    background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:16px 18px;box-shadow:var(--schatten);margin-bottom:16px;
+  }
+  .reihe{display:flex;flex-wrap:wrap;gap:12px 18px;align-items:center;}
+  .reihe + .reihe{margin-top:14px;padding-top:14px;border-top:1px dashed var(--line);}
+  .feldLabel{
+    font-family:"Space Mono",ui-monospace,monospace;font-size:9.5px;text-transform:uppercase;
+    letter-spacing:.11em;color:var(--muted);font-weight:700;
+  }
+  .achsFeld{display:flex;align-items:center;gap:8px;}
+  select{
+    font-family:"Hanken Grotesk",system-ui,sans-serif;font-size:14px;font-weight:600;
+    color:var(--green);background:var(--line-soft);border:1px solid var(--line);
+    border-radius:10px;padding:8px 30px 8px 12px;cursor:pointer;appearance:none;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4.5 6 8.5 10 4.5' fill='none' stroke='%233C5442' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat:no-repeat;background-position:right 10px center;
+  }
+  .tausch{
+    border:1px solid var(--line);background:var(--card);color:var(--green-soft);
+    width:34px;height:34px;border-radius:10px;cursor:pointer;font-size:15px;line-height:1;
+  }
+  .tausch:hover{background:var(--line-soft);}
+
+  .chips{display:flex;flex-wrap:wrap;gap:7px;}
+  .chip{
+    font-family:"Hanken Grotesk",system-ui,sans-serif;font-size:13px;
+    padding:6px 13px;border-radius:999px;cursor:pointer;
+    border:1px solid var(--line);background:var(--card);color:var(--green-soft);
+    transition:background .15s,color .15s,border-color .15s;
+  }
+  .chip:hover{background:var(--line-soft);}
+  .chip[aria-pressed="true"]{background:var(--green);color:#F6F3E7;border-color:var(--green);}
+  .chip.beere[aria-pressed="true"]{background:var(--berry);border-color:var(--berry);}
+  .treffer{font-size:13px;color:var(--muted);margin-left:auto;}
+  .treffer b{color:var(--green);font-weight:700;}
+
+  /* ---------- Kreuzmatrix ---------- */
+  .matrixLayout{display:grid;grid-template-columns:1fr;gap:16px;}
+  @media (min-width:940px){
+    .matrixLayout{grid-template-columns:minmax(0,1fr) 336px;align-items:start;}
+  }
+
+  .matrixKasten{
+    background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:16px 16px 14px;box-shadow:var(--schatten);
+  }
+  .plotZeile{display:flex;gap:10px;}
+  .yAchse{
+    writing-mode:vertical-rl;transform:rotate(180deg);
+    display:flex;justify-content:space-between;align-items:center;
+    font-family:"Space Mono",ui-monospace,monospace;font-size:10px;
+    letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+    padding:2px 0;flex:none;
+  }
+  .yAchse .mitte,.xAchse .mitte{color:var(--green);font-weight:700;letter-spacing:.14em;}
+
+  .plot{
+    position:relative;flex:1;aspect-ratio:1/1;min-width:0;
+    border:1px solid var(--line);border-radius:12px;overflow:hidden;
+    background:
+      linear-gradient(135deg,#FCFBF4 0%,#FBF7E9 55%,#F8F0DA 100%);
+    touch-action:manipulation;
+  }
+  /* Gitternetz alle 25 %, das Kreuz in der Mitte kräftiger */
+  .plot::before{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background-image:
+      linear-gradient(to right,var(--line-soft) 1px,transparent 1px),
+      linear-gradient(to bottom,var(--line-soft) 1px,transparent 1px);
+    background-size:25% 25%;
+  }
+  .kreuz{position:absolute;inset:0;pointer-events:none;}
+  .kreuz i{position:absolute;background:var(--line);}
+  .kreuz i.waag{left:0;right:0;top:50%;height:1px;}
+  .kreuz i.senk{top:0;bottom:0;left:50%;width:1px;}
+
+  .quadrant{
+    position:absolute;font-family:"Space Mono",ui-monospace,monospace;
+    font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;
+    color:#B6AE97;pointer-events:none;max-width:44%;line-height:1.35;
+  }
+  .q-ol{top:9px;left:11px;}
+  .q-or{top:9px;right:11px;text-align:right;}
+  .q-ul{bottom:9px;left:11px;}
+  .q-ur{bottom:9px;right:11px;text-align:right;}
+
+  /* Ein Punkt = eine Rebsorte */
+  .punkt{
+    position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;
+    border-radius:50%;cursor:pointer;padding:0;
+    display:flex;align-items:center;justify-content:center;
+    font-family:"Space Mono",ui-monospace,monospace;font-size:11px;font-weight:700;
+    color:var(--green);border:1.5px solid var(--green);
+    box-shadow:0 1px 3px rgba(40,30,10,.14);
+    transition:transform .18s ease,opacity .18s ease,box-shadow .18s ease;
+  }
+  .punkt.int{border-style:dashed;border-color:var(--green-soft);}
+  .punkt:hover,.punkt:focus-visible{transform:scale(1.22);z-index:6;outline:none;box-shadow:0 3px 10px rgba(40,30,10,.22);}
+  .punkt.aktiv{
+    transform:scale(1.3);z-index:7;
+    box-shadow:0 0 0 3px var(--paper),0 0 0 5px var(--berry),0 3px 10px rgba(40,30,10,.2);
+  }
+  .punkt.blass{opacity:.16;pointer-events:none;}
+  .marke{
+    position:absolute;transform:translate(24px,-50%);
+    font-size:11.5px;font-weight:600;color:var(--green-soft);white-space:nowrap;
+    pointer-events:none;text-shadow:0 1px 0 #FDFCF6,0 0 6px #FDFCF6;
+    transition:opacity .18s ease;
+  }
+  .marke.blass{opacity:.14;}
+  .marke.links{transform:translate(calc(-100% - 24px),-50%);}
+  .marke.oben{transform:translate(-50%,-27px);}
+  /* Feine Linie: zeigt die mögliche Süße-Spanne einer Sorte.
+     Erscheint erst, wenn man den Punkt berührt oder auswählt. */
+  .spanneLinie{opacity:0;transition:opacity .2s ease;}
+  .spanneLinie.zeigen{opacity:1;}
+  @media (max-width:939px){.marke{display:none;}}
+
+  /* ---------- Detail-Karte neben der Matrix ---------- */
+  .detail{
+    background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px;box-shadow:var(--schatten);position:relative;
+  }
+  @media (min-width:940px){.detail{position:sticky;top:16px;}}
+  .detailLeer{color:var(--muted);font-size:14px;}
+  .detailLeer ul{margin:12px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px;}
+  .detailLeer li{display:flex;gap:9px;align-items:flex-start;font-size:13px;line-height:1.42;}
+  .detailLeer li::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--line);margin-top:6px;}
+  .detailLeer .gross{
+    font-family:"Fraunces",Georgia,serif;font-size:19px;color:var(--ink);
+    display:block;margin-bottom:8px;font-style:italic;
+  }
+  .detailKopf{display:flex;gap:14px;align-items:flex-start;}
+  .detailKopf .glas{flex:none;}
+  .detailName{font-family:"Fraunces",Georgia,serif;font-size:25px;font-weight:600;line-height:1.08;letter-spacing:-.01em;}
+  .detailSyn{font-size:12.5px;color:var(--muted);font-style:italic;margin-top:2px;}
+  .detailNr{
+    font-family:"Space Mono",ui-monospace,monospace;font-size:10px;color:var(--muted);
+    letter-spacing:.1em;
+  }
+  .balken{margin:14px 0 0;display:flex;flex-direction:column;gap:9px;}
+  .balkenZeile{display:grid;grid-template-columns:74px 1fr;align-items:center;gap:10px;}
+  .balkenName{
+    font-family:"Space Mono",ui-monospace,monospace;font-size:9px;text-transform:uppercase;
+    letter-spacing:.1em;color:var(--muted);font-weight:700;
+  }
+  .meter{position:relative;height:8px;border-radius:5px;background:var(--line-soft);border:1px solid var(--line);}
+  .meterFuell{position:absolute;top:0;bottom:0;left:0;border-radius:5px;background:var(--green);}
+  .band{position:absolute;top:0;bottom:0;border-radius:5px;background:rgba(124,47,62,.22);}
+  .pin{position:absolute;top:50%;width:11px;height:11px;margin:-5.5px 0 0 -5.5px;border-radius:50%;background:var(--berry);border:1.5px solid var(--card);}
+  .spanne{font-size:11.5px;color:var(--muted);margin-top:6px;}
+  .detailNotiz{
+    margin:14px 0 0;padding:11px 13px;border-left:2px solid var(--berry);
+    background:var(--line-soft);border-radius:0 10px 10px 0;
+    font-size:13.5px;color:var(--green-soft);font-style:italic;
+  }
+  .detailZeile{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:13px;align-items:center;}
+  .temp{font-family:"Space Mono",ui-monospace,monospace;font-size:13px;color:var(--green);font-weight:700;}
+
+  /* ---------- Sortenkarten ---------- */
+  .liste{display:flex;flex-direction:column;gap:12px;}
+  .karte{
+    display:grid;grid-template-columns:66px 1fr;
+    border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+    background:var(--card);box-shadow:var(--schatten);
+    cursor:pointer;text-align:left;padding:0;font:inherit;color:inherit;
+    transition:border-color .15s,box-shadow .15s,opacity .2s;
+  }
+  .karte:hover{border-color:#D3CAAF;}
+  .karte.aktiv{border-color:var(--berry);box-shadow:0 0 0 1px var(--berry),var(--schatten);}
+  .karte.aus{display:none;}
+  .glasspalte{display:flex;align-items:center;justify-content:center;border-right:1px solid var(--line-soft);position:relative;}
+  .glasspalte .nr{
+    position:absolute;top:7px;left:0;right:0;text-align:center;
+    font-family:"Space Mono",ui-monospace,monospace;font-size:9.5px;color:var(--muted);
+  }
+  .inhalt{padding:15px 18px 16px;min-width:0;}
+  .kopf{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 10px;}
+  .name{font-family:"Fraunces",Georgia,serif;font-size:22px;font-weight:600;letter-spacing:-.01em;line-height:1.1;}
+  .syn{font-size:12.5px;color:var(--muted);font-style:italic;}
+  .marker{margin-left:auto;display:flex;gap:6px;flex-shrink:0;}
+  .tag{
+    font-family:"Space Mono",ui-monospace,monospace;font-size:10px;font-weight:700;
+    letter-spacing:.05em;padding:2px 7px;border-radius:5px;line-height:1.4;
+  }
+  .tag.de{background:var(--green);color:#F4F1E4;}
+  .tag.int{background:transparent;color:var(--muted);border:1px solid var(--line);}
+
+  .meta{display:flex;flex-wrap:wrap;align-items:center;gap:10px 20px;margin:12px 0 11px;}
+  .metaPunkt{display:flex;align-items:center;gap:8px;}
+  .metaLabel{
+    font-family:"Space Mono",ui-monospace,monospace;font-size:9.5px;text-transform:uppercase;
+    letter-spacing:.11em;color:var(--muted);
+  }
+  .punkte{display:flex;gap:3px;}
+  .pkt{width:8px;height:8px;border-radius:50%;background:var(--line);}
+  .pkt.an{background:var(--green);}
+  .suesse{display:flex;align-items:center;gap:4px;}
+  .sw{width:9px;height:9px;border-radius:2px;background:var(--line);transform:rotate(45deg);}
+  .sw.an{background:var(--berry);}
+  .suesse .ende{font-size:10px;color:var(--muted);}
+
+  .aromen{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:11px;}
+  .arom{font-size:12px;padding:3px 9px;border-radius:20px;background:var(--line-soft);color:var(--green-soft);border:1px solid var(--line);}
+  .essen{font-size:13px;color:var(--ink);}
+  .essen b{font-family:"Space Mono",ui-monospace,monospace;font-size:9.5px;text-transform:uppercase;letter-spacing:.11em;color:var(--muted);font-weight:700;margin-right:6px;}
+
+  /* ---------- Legende & Fuß ---------- */
+  .legende{
+    display:flex;flex-wrap:wrap;gap:9px 22px;padding:13px 16px;margin:14px 0 0;
+    border:1px solid var(--line);border-radius:12px;background:var(--line-soft);
+    font-size:12.5px;color:var(--green-soft);
+  }
+  .legende div{display:flex;align-items:center;gap:8px;}
+  .probe{width:16px;height:16px;border-radius:4px;background:linear-gradient(135deg,var(--b1),var(--b5));border:1px solid rgba(0,0,0,.1);}
+  .probePunkt{width:15px;height:15px;border-radius:50%;background:var(--b3);border:1.5px solid var(--green);}
+  .probePunkt.int{border-style:dashed;border-color:var(--green-soft);background:var(--b2);}
+
+  footer{
+    margin-top:36px;padding-top:16px;border-top:1px solid var(--line);
+    font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 18px;justify-content:space-between;
+  }
+  footer .mark{font-family:"Fraunces",Georgia,serif;font-style:italic;}
+
+  /* Kurze Rückmeldung nach „Link kopieren“ */
+  .toast{
+    position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);
+    background:var(--green);color:#F6F3E7;padding:11px 20px;border-radius:999px;
+    font-size:14px;box-shadow:0 8px 24px rgba(40,30,10,.22);
+    opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:50;
+  }
+  .toast.zeigen{opacity:1;transform:translate(-50%,0);}
+
+  @media (max-width:520px){
+    body{padding:22px 13px 48px;}
+    .karte{grid-template-columns:54px 1fr;}
+    .inhalt{padding:14px 14px 15px;}
+    .marker{margin-left:0;width:100%;}
+    .name{font-size:20px;}
+    .punkt{width:24px;height:24px;margin:-12px 0 0 -12px;font-size:10px;}
+    .matrixKasten{padding:11px 11px 10px;}
+    .yAchse,.xAchse{font-size:9px!important;letter-spacing:.05em!important;}
+    .plotZeile{gap:6px;}
+    .quadrant{font-size:8.5px;}
+  }
+
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important;}
+    html{scroll-behavior:auto;}
+  }
+
+  @media print{
+    body{background:#fff;padding:0;}
+    .steuerung,.knopf,.toast,.detail{display:none;}
+    .karte{box-shadow:none;break-inside:avoid;}
+    .matrixLayout{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+<div class="poster">
+
+  <!-- ========== Kopf ========== -->
+  <header>
+    <div class="eyebrow">Weißwein · Rebsorten-Kompass</div>
+    <div class="kopfzeile">
+      <div>
+        <h1>Von <em>leicht &amp; frisch</em><br>bis <em>kräftig &amp; voll</em></h1>
+      </div>
+      <button class="knopf" id="teilenKnopf" type="button">
+        <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M11 5.5a2 2 0 1 0-1.9-2.6L6 4.6a2 2 0 1 0 0 2.8l3.1 1.7a2 2 0 1 0 .7-1.2L6.7 6.2a2 2 0 0 0 0-.4l3.1-1.7c.35.5.7.9 1.2 1.4z"
+                fill="currentColor"/>
+        </svg>
+        Link teilen
+      </button>
+    </div>
+    <p class="lede">Ein Kompass durch 16 weiße Rebsorten — von den <b>deutschen Klassikern</b> bis zu den großen internationalen Namen. Unten die <b>Kreuzmatrix</b>: Zwei Eigenschaften auswählen, und jede Sorte findet ihren Platz zwischen trocken und süß, leicht und kräftig, herb und fruchtig. Tippe einen Punkt an, um die Sorte kennenzulernen.</p>
+  </header>
+
+  <!-- ========== Kreuzmatrix ========== -->
+  <section aria-labelledby="matrixTitel">
+    <div class="abschnitt">
+      <h2 id="matrixTitel">Die Kreuzmatrix</h2>
+      <p>Achsen umstellen, nach Essen filtern — die Punkte wandern mit.</p>
+    </div>
+
+    <div class="steuerung">
+      <div class="reihe">
+        <div class="achsFeld">
+          <span class="feldLabel">Waagerecht</span>
+          <select id="achseX" aria-label="Eigenschaft auf der waagerechten Achse"></select>
+        </div>
+        <button class="tausch" id="tauschKnopf" type="button" title="Achsen tauschen" aria-label="Achsen tauschen">⇄</button>
+        <div class="achsFeld">
+          <span class="feldLabel">Senkrecht</span>
+          <select id="achseY" aria-label="Eigenschaft auf der senkrechten Achse"></select>
+        </div>
+      </div>
+
+      <div class="reihe">
+        <span class="feldLabel">Herkunft</span>
+        <div class="chips" id="herkunftChips" role="group" aria-label="Nach Herkunft filtern"></div>
+        <span class="treffer" id="treffer"></span>
+      </div>
+
+      <div class="reihe">
+        <span class="feldLabel">Passt zu</span>
+        <div class="chips" id="essenChips" role="group" aria-label="Nach Essen filtern"></div>
+        <button class="chip" id="zuruecksetzen" type="button" hidden>Filter zurücksetzen ✕</button>
+      </div>
+    </div>
+
+    <div class="matrixLayout">
+      <div class="matrixKasten">
+        <div class="plotZeile">
+          <div class="yAchse" id="yAchseText" aria-hidden="true"></div>
+          <div class="plot" id="plot">
+            <div class="kreuz"><i class="waag"></i><i class="senk"></i></div>
+            <span class="quadrant q-ol" id="qOL"></span>
+            <span class="quadrant q-or" id="qOR"></span>
+            <span class="quadrant q-ul" id="qUL"></span>
+            <span class="quadrant q-ur" id="qUR"></span>
+          </div>
+        </div>
+        <div class="xAchse" id="xAchseText" aria-hidden="true"
+             style="display:flex;justify-content:space-between;margin:8px 0 0 34px;
+                    font-family:'Space Mono',ui-monospace,monospace;font-size:10px;
+                    letter-spacing:.08em;text-transform:uppercase;color:var(--muted);"></div>
+      </div>
+
+      <aside class="detail" id="detail" aria-live="polite">
+        <div class="detailLeer">
+          <span class="gross">So liest du die Matrix</span>
+          <ul>
+            <li>Jeder Punkt ist eine Rebsorte. Die Zahl darin findest du unten auf der passenden Karte wieder.</li>
+            <li>Je goldener der Punkt, desto kräftiger der Wein.</li>
+            <li>Durchgezogener Rand = deutsche Sorte, gestrichelter Rand = internationale Sorte.</li>
+            <li>Punkt berühren oder antippen: Eine feine rote Linie zeigt, wie weit die Süße dieser Sorte reichen kann.</li>
+          </ul>
+        </div>
+      </aside>
+    </div>
+
+    <div class="legende">
+      <div><span class="probe"></span> Glasfarbe &amp; Füllstand = Körper</div>
+      <div><span class="probePunkt"></span> deutsche Rebsorte</div>
+      <div><span class="probePunkt int"></span> internationale Sorte</div>
+      <div>◆ = Süße&nbsp;·&nbsp;● = Körper</div>
+    </div>
+  </section>
+
+  <!-- ========== Alle Sorten als Karten ========== -->
+  <section aria-labelledby="listeTitel">
+    <div class="abschnitt">
+      <h2 id="listeTitel">Alle Sorten im Detail</h2>
+      <p>Dieselben Filter wirken auch hier.</p>
+      <div class="achsFeld">
+        <span class="feldLabel">Sortiert nach</span>
+        <select id="sortierung" aria-label="Sortierung der Sortenliste">
+          <option value="koerper">Körper</option>
+          <option value="suesse">Süße</option>
+          <option value="saeure">Säure</option>
+          <option value="frucht">Fruchtigkeit</option>
+          <option value="name">Name</option>
+        </select>
+      </div>
+    </div>
+    <div class="liste" id="liste"></div>
+  </section>
+
+  <footer>
+    <span class="mark">Weißwein-Kompass</span>
+    <span>Alle Werte sind Richtwerte — jeder Erzeuger interpretiert seine Sorte eigen. Punkte, die dicht beieinander liegen, rücken für die Lesbarkeit ein kleines Stück auseinander.</span>
+  </footer>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script>
+/* =================================================================
+   Weißwein-Kompass – die Daten und die Interaktion
+   -----------------------------------------------------------------
+   Alle Werte sind Richtwerte auf einer einfachen Skala:
+     koerper, saeure, frucht, aroma : 1 (wenig) bis 5 (viel)
+     suesse                         : 0 (knochentrocken) bis 4 (edelsüß)
+                                      = der übliche Ausbau der Sorte
+     suesseSpanne                   : was es sonst noch gibt (von–bis)
+   ================================================================= */
+
+const weine = [
+  {
+    id:"mueller-thurgau", name:"Müller-Thurgau", syn:"Rivaner", herkunft:"DE", deutsch:true,
+    koerper:1.3, suesse:1.0, suesseSpanne:[0,2], saeure:2.0, frucht:3.4, aroma:2.4,
+    temp:"8–10 °C",
+    aromen:["Apfel","Birne","Muskatnote","floral"],
+    essen:"Leichte Vorspeisen, Salate, Zwiebelkuchen",
+    essenTags:["aperitif","spargel","kaese"],
+    notiz:"Der unkomplizierte Alltagswein: mild, saftig, ohne Ecken – gut für eine Runde, in der jede:r etwas anderes mag."
+  },
+  {
+    id:"muskateller", name:"Muskateller", syn:"Gelber Muskateller · Muscat", herkunft:"DE / AT", deutsch:true,
+    koerper:1.6, suesse:1.2, suesseSpanne:[0,3], saeure:3.2, frucht:4.4, aroma:5.0,
+    temp:"8–10 °C",
+    aromen:["Muskat","Holunderblüte","Weintraube","Zitrus"],
+    essen:"Aperitif, Spargel, asiatische Küche, Ziegenkäse",
+    essenTags:["aperitif","spargel","asiatisch","kaese"],
+    notiz:"Riecht wie eine Handvoll frisch gepflückter Trauben. Wer Wein sonst „zu herb“ findet, fängt hier gern an."
+  },
+  {
+    id:"bacchus", name:"Bacchus", syn:"Silvaner × Riesling × Müller-Thurgau", herkunft:"DE", deutsch:true,
+    koerper:1.8, suesse:1.6, suesseSpanne:[0,3], saeure:2.0, frucht:4.4, aroma:4.2,
+    temp:"8–10 °C",
+    aromen:["Holunder","Muskat","Zitrusblüte","Cassis"],
+    essen:"Aperitif, Spargel, milder Käse, Kuchen",
+    essenTags:["aperitif","spargel","kaese"],
+    notiz:"Ein Duftbolzen fürs kleine Geld – fruchtig, weich, meist mit einem Hauch Restsüße."
+  },
+  {
+    id:"kerner", name:"Kerner", syn:"Trollinger × Riesling", herkunft:"DE", deutsch:true,
+    koerper:2.0, suesse:1.2, suesseSpanne:[0,3], saeure:3.8, frucht:3.8, aroma:3.4,
+    temp:"8–10 °C",
+    aromen:["Apfel","Pfirsich","Muskatnote","Zitrus"],
+    essen:"Vorspeisen, Fisch, Spargel, leichte asiatische Gerichte",
+    essenTags:["aperitif","fisch","spargel","asiatisch"],
+    notiz:"Rieslings unkomplizierter Verwandter: fast so frisch, aber weicher in der Säure."
+  },
+  {
+    id:"riesling", name:"Riesling", syn:"trocken bis edelsüß", herkunft:"DE", deutsch:true,
+    koerper:2.2, suesse:1.2, suesseSpanne:[0,4], saeure:4.8, frucht:3.6, aroma:3.8,
+    temp:"8–11 °C",
+    aromen:["Limette","Apfel","Pfirsich","Schiefer / Petrol"],
+    essen:"Fisch, Geflügel, scharfe & asiatische Gerichte",
+    essenTags:["fisch","gefluegel","asiatisch","dessert"],
+    notiz:"Die deutsche Königin – es gibt sie in jeder Stilrichtung. Was im Glas passiert, verrät das Etikett: trocken, feinherb, Kabinett, Spätlese."
+  },
+  {
+    id:"sauvignon-blanc", name:"Sauvignon Blanc", syn:"Loire · Neuseeland · DE", herkunft:"INT", deutsch:false,
+    koerper:2.4, suesse:0.2, suesseSpanne:[0,1], saeure:4.4, frucht:3.6, aroma:4.6,
+    temp:"8–10 °C",
+    aromen:["Stachelbeere","Gras","Maracuja","Paprika"],
+    essen:"Ziegenkäse, Salate, Meeresfrüchte",
+    essenTags:["aperitif","fisch","spargel","kaese"],
+    notiz:"Sofort erkennbar: grasig, stachelbeerig, knackig. Den mag man entweder sehr – oder gar nicht."
+  },
+  {
+    id:"scheurebe", name:"Scheurebe", syn:"Riesling × Bukettsorte", herkunft:"DE", deutsch:true,
+    koerper:2.5, suesse:1.4, suesseSpanne:[0,4], saeure:4.0, frucht:4.2, aroma:4.6,
+    temp:"9–11 °C",
+    aromen:["Cassis","Grapefruit","Pfirsich"],
+    essen:"Würzige Küche, asiatisch, als Aperitif, Dessert",
+    essenTags:["aperitif","asiatisch","kaese","dessert"],
+    notiz:"Grapefruit im Glas. Die Geheimwaffe zu allem, was nach Curry oder Ingwer duftet."
+  },
+  {
+    id:"silvaner", name:"Silvaner", syn:"Franken", herkunft:"DE", deutsch:true,
+    koerper:2.6, suesse:0.4, suesseSpanne:[0,2], saeure:3.0, frucht:2.0, aroma:2.0,
+    temp:"9–11 °C",
+    aromen:["grüner Apfel","Heu","Kräuter","erdig"],
+    essen:"Spargel, Fisch, helles Fleisch",
+    essenTags:["spargel","fisch","gefluegel"],
+    notiz:"Der stille Begleiter zum Spargel – zurückhaltend, erdig, macht sich nie wichtig."
+  },
+  {
+    id:"gruener-veltliner", name:"Grüner Veltliner", syn:"Österreichs Aushängeschild", herkunft:"AT", deutsch:false,
+    koerper:2.6, suesse:0.3, suesseSpanne:[0,2], saeure:3.6, frucht:2.4, aroma:3.0,
+    temp:"9–11 °C",
+    aromen:["weißer Pfeffer","Zitrus","grüne Kräuter"],
+    essen:"Wiener Schnitzel, Gemüse, Sushi",
+    essenTags:["spargel","fisch","gefluegel"],
+    notiz:"Sein Pfefferchen im Nachhall macht ihn zum Klassiker neben dem Schnitzel."
+  },
+  {
+    id:"albarino", name:"Albariño", syn:"Rías Baixas", herkunft:"ES", deutsch:false,
+    koerper:3.0, suesse:0.3, suesseSpanne:[0,1], saeure:4.0, frucht:3.2, aroma:3.0,
+    temp:"9–11 °C",
+    aromen:["Pfirsich","Zitrus","salzig-mineralisch"],
+    essen:"Meeresfrüchte, Muscheln, Tapas",
+    essenTags:["fisch","aperitif"],
+    notiz:"Schmeckt nach Atlantik: Zitrus, Pfirsich und ein salziger Hauch – wie gemacht für Muscheln."
+  },
+  {
+    id:"weissburgunder", name:"Weißburgunder", syn:"Pinot Blanc", herkunft:"DE", deutsch:true,
+    koerper:3.2, suesse:0.5, suesseSpanne:[0,2], saeure:3.0, frucht:2.6, aroma:2.2,
+    temp:"10–12 °C",
+    aromen:["Birne","Apfel","Mandel","cremig"],
+    essen:"Fisch, Geflügel, Pasta, milder Käse",
+    essenTags:["fisch","gefluegel","pasta","kaese"],
+    notiz:"Der Diplomat: passt fast immer, stört nie, cremig ohne aufdringlich zu sein."
+  },
+  {
+    id:"chenin-blanc", name:"Chenin Blanc", syn:"Loire · Südafrika", herkunft:"FR / ZA", deutsch:false,
+    koerper:3.2, suesse:1.3, suesseSpanne:[0,4], saeure:4.4, frucht:3.2, aroma:3.0,
+    temp:"10–12 °C",
+    aromen:["Quitte","Honig","Kamille","Apfel"],
+    essen:"Geflügel, Schwein, würzige Gerichte, Dessert",
+    essenTags:["gefluegel","asiatisch","kaese","dessert"],
+    notiz:"Das Chamäleon der Loire – knochentrocken bis edelsüß, und immer mit belebender Säure."
+  },
+  {
+    id:"grauburgunder", name:"Grauburgunder", syn:"Pinot Gris · Pinot Grigio", herkunft:"DE / IT", deutsch:true,
+    koerper:3.9, suesse:0.7, suesseSpanne:[0,3], saeure:2.6, frucht:3.0, aroma:2.6,
+    temp:"10–12 °C",
+    aromen:["Birne","Melone","Nuss","Honig (Barrique: cremig)"],
+    essen:"Pasta, Risotto, Geflügel, Schwein",
+    essenTags:["pasta","gefluegel","fisch"],
+    notiz:"Weich, nussig, mit Schmelz. Als italienischer Pinot Grigio meist leichter und frischer."
+  },
+  {
+    id:"viognier", name:"Viognier", syn:"Condrieu · Rhône", herkunft:"FR", deutsch:false,
+    koerper:4.2, suesse:0.7, suesseSpanne:[0,2], saeure:2.0, frucht:4.2, aroma:4.4,
+    temp:"11–13 °C",
+    aromen:["Aprikose","Pfirsich","Veilchen","floral"],
+    essen:"Würzige Küche, Geflügel, cremige Saucen",
+    essenTags:["gefluegel","asiatisch","pasta"],
+    notiz:"Duftet nach Aprikose und Veilchen, schmeckt aber trocken – diese Kombination überrascht fast jeden."
+  },
+  {
+    id:"gewuerztraminer", name:"Gewürztraminer", syn:"Traminer · Elsass", herkunft:"DE / FR", deutsch:true,
+    koerper:4.2, suesse:1.9, suesseSpanne:[1,4], saeure:2.0, frucht:3.8, aroma:5.0,
+    temp:"10–12 °C",
+    aromen:["Litschi","Rose","Gewürze","Honig"],
+    essen:"Curry, asiatisch, kräftiger Käse, Gänseleber",
+    essenTags:["asiatisch","kaese","dessert"],
+    notiz:"Litschi und Rosenblüte, üppig und laut – den riecht man, bevor das Glas am Mund ist."
+  },
+  {
+    id:"chardonnay", name:"Chardonnay", syn:"Burgund · weltweit", herkunft:"INT", deutsch:false,
+    koerper:4.6, suesse:0.4, suesseSpanne:[0,1], saeure:2.8, frucht:2.8, aroma:3.2,
+    temp:"11–13 °C",
+    aromen:["Apfel → Ananas","Butter","Vanille","Toast (Barrique)"],
+    essen:"Hummer, Geflügel in Sahne, gegrillter Fisch",
+    essenTags:["fisch","gefluegel","pasta"],
+    notiz:"Das große Chamäleon: im Stahltank frisch und schlank, im Holzfass buttrig, cremig, mit Vanille."
+  }
+];
+
+/* Die wählbaren Achsen der Kreuzmatrix. */
+const achsen = {
+  suesse : {label:"Süße",           min:0, max:3, tief:"knochentrocken", hoch:"süß",        kurzTief:"trocken",  kurzHoch:"süß"},
+  koerper: {label:"Körper",         min:1, max:5, tief:"leicht",         hoch:"kräftig",    kurzTief:"leicht",   kurzHoch:"kräftig"},
+  saeure : {label:"Säure",          min:1, max:5, tief:"mild",           hoch:"rassig",     kurzTief:"mild",     kurzHoch:"rassig"},
+  frucht : {label:"Fruchtigkeit",   min:1, max:5, tief:"herb & mineralisch", hoch:"fruchtig", kurzTief:"herb", kurzHoch:"fruchtig"},
+  aroma  : {label:"Duft-Intensität",min:1, max:5, tief:"zurückhaltend",  hoch:"aromatisch", kurzTief:"leise",    kurzHoch:"laut"}
+};
+
+/* Die Essens-Schubladen für den Filter. */
+const essenGruppen = [
+  {id:"aperitif",  label:"Aperitif"},
+  {id:"fisch",     label:"Fisch & Meeresfrüchte"},
+  {id:"spargel",   label:"Spargel & Gemüse"},
+  {id:"gefluegel", label:"Geflügel & helles Fleisch"},
+  {id:"pasta",     label:"Pasta & Risotto"},
+  {id:"asiatisch", label:"Asiatisch & Scharfes"},
+  {id:"kaese",     label:"Käse"},
+  {id:"dessert",   label:"Süßes & Dessert"}
+];
+
+/* Feste Nummern: nach Körper aufsteigend, damit die Nummer in der
+   Matrix und auf der Karte immer dieselbe Sorte meint. */
+[...weine].sort((a,b)=>a.koerper-b.koerper).forEach((w,i)=>{ w.nr = i+1; });
+
+/* Der aktuelle Zustand der Seite. */
+const zustand = {
+  achseX:"suesse",
+  achseY:"koerper",
+  herkunft:"alle",
+  essen:new Set(),
+  auswahl:null,
+  sortierung:"koerper"
+};
+
+/* ---------- kleine Helfer ---------- */
+const koerperFarben = ["#E9E5B4","#E9E5B4","#E6DB93","#E2CB6E","#DAB84C","#CFA02F"];
+function koerperFarbe(v){ return koerperFarben[Math.min(5,Math.max(1,Math.round(v)))]; }
+function begrenze(v,min,max){ return Math.min(max,Math.max(min,v)); }
+function anteil(wert,achsId){
+  const a = achsen[achsId];
+  return begrenze((wert - a.min) / (a.max - a.min) * 100, 0, 100);
+}
+
+let glasZaehler = 0;
+/* Ein Weinglas, dessen Füllhöhe und Farbe den Körper zeigen. */
+function glasSVG(koerper, groesse){
+  const stufe = Math.min(5,Math.max(1,Math.round(koerper)));
+  const oben  = 31 - stufe*4.2;           // Füllhöhe im Kelch
+  const id    = "kelch"+(++glasZaehler);
+  const h     = groesse || 60, b = Math.round(h/1.5);
+  return `
+  <svg class="glas" width="${b}" height="${h}" viewBox="0 0 40 60" aria-hidden="true">
+    <defs><clipPath id="${id}"><path d="M11,8 C11,23 15,31 20,31 C25,31 29,23 29,8 Z"/></clipPath></defs>
+    <rect x="6" y="${oben}" width="28" height="26" fill="${koerperFarben[stufe]}" clip-path="url(#${id})"/>
+    <path d="M11,8 C11,23 15,31 20,31 C25,31 29,23 29,8" fill="none" stroke="#26382C" stroke-width="1.4" stroke-linejoin="round"/>
+    <ellipse cx="20" cy="8" rx="9" ry="2.4" fill="none" stroke="#26382C" stroke-width="1.4"/>
+    <line x1="20" y1="31" x2="20" y2="52" stroke="#26382C" stroke-width="1.4"/>
+    <line x1="12" y1="53" x2="28" y2="53" stroke="#26382C" stroke-width="1.4" stroke-linecap="round"/>
+  </svg>`;
+}
+
+function punkteReihe(n){
+  let s='<div class="punkte">';
+  for(let i=1;i<=5;i++) s+=`<span class="pkt ${i<=Math.round(n)?'an':''}"></span>`;
+  return s+'</div>';
+}
+function suesseReihe(spanne){
+  let s='<div class="suesse"><span class="ende">trocken</span>';
+  for(let i=0;i<=4;i++) s+=`<span class="sw ${(i>=spanne[0]&&i<=spanne[1])?'an':''}"></span>`;
+  return s+'<span class="ende">süß</span></div>';
+}
+
+/* ---------- Auszeichnungen (DE / Herkunft) ---------- */
+function tags(w){
+  if(w.deutsch){
+    return '<span class="tag de">DE</span>' +
+           (w.herkunft !== "DE" ? `<span class="tag int">${w.herkunft}</span>` : "");
+  }
+  return `<span class="tag int">${w.herkunft}</span>`;
+}
+
+/* ---------- Filter ---------- */
+function passt(w){
+  if(zustand.herkunft === "de"  && !w.deutsch) return false;
+  if(zustand.herkunft === "int" &&  w.deutsch) return false;
+  if(zustand.essen.size > 0 && !w.essenTags.some(t => zustand.essen.has(t))) return false;
+  return true;
+}
+function filterAktiv(){ return zustand.herkunft !== "alle" || zustand.essen.size > 0; }
+
+/* =================================================================
+   Die Kreuzmatrix
+   ================================================================= */
+
+/* Punkte, die exakt übereinander lägen, schiebt diese Funktion sanft
+   auseinander – sonst verdeckt eine Sorte die andere. */
+function berechnePositionen(){
+  const punkte = weine.map(w => ({
+    wein: w,
+    x: anteil(w[zustand.achseX], zustand.achseX),
+    y: 100 - anteil(w[zustand.achseY], zustand.achseY)
+  }));
+  punkte.forEach(p => { p.rohX = p.x; p.rohY = p.y; });
+
+  const minAbstand = 8.6;                 // in Prozent der Plotbreite
+  for(let runde = 0; runde < 140; runde++){
+    let bewegt = false;
+    for(let i = 0; i < punkte.length; i++){
+      for(let j = i+1; j < punkte.length; j++){
+        const a = punkte[i], b = punkte[j];
+        let dx = b.x - a.x, dy = b.y - a.y;
+        let d  = Math.hypot(dx, dy);
+        if(d < 0.0001){                   // exakt aufeinander: fest vorgegeben trennen
+          dx = 0.35; dy = (i % 2 ? 0.35 : -0.35); d = Math.hypot(dx, dy);
+        }
+        if(d < minAbstand){
+          const schub = ((minAbstand - d) / d) * 0.3;
+          a.x -= dx*schub; a.y -= dy*schub;
+          b.x += dx*schub; b.y += dy*schub;
+          bewegt = true;
+        }
+      }
+    }
+    punkte.forEach(p => { p.x = begrenze(p.x, 5, 95); p.y = begrenze(p.y, 5, 95); });
+    if(!bewegt) break;
+  }
+  return punkte;
+}
+
+const plot = document.getElementById("plot");
+
+function zeichneMatrix(){
+  // alte Punkte, Marken und Spannen-Linien entfernen
+  plot.querySelectorAll(".punkt,.marke,.spanneLinie").forEach(el => el.remove());
+
+  const aX = achsen[zustand.achseX], aY = achsen[zustand.achseY];
+
+  // Achsenbeschriftung
+  document.getElementById("xAchseText").innerHTML =
+    `<span>← ${aX.tief}</span><span class="mitte">${aX.label}</span><span>${aX.hoch} →</span>`;
+  document.getElementById("yAchseText").innerHTML =
+    `<span>← ${aY.tief}</span><span class="mitte">${aY.label}</span><span>${aY.hoch} →</span>`;
+
+  // Beschriftung der vier Felder
+  document.getElementById("qOL").textContent = `${aY.kurzHoch} & ${aX.kurzTief}`;
+  document.getElementById("qOR").textContent = `${aY.kurzHoch} & ${aX.kurzHoch}`;
+  document.getElementById("qUL").textContent = `${aY.kurzTief} & ${aX.kurzTief}`;
+  document.getElementById("qUR").textContent = `${aY.kurzTief} & ${aX.kurzHoch}`;
+
+  const positionen = berechnePositionen();
+
+  /* Wohin das Namensschild? Am liebsten rechts neben den Punkt –
+     ist dort schon ein anderer Punkt, weicht es nach links oder oben aus. */
+  positionen.forEach(p => {
+    const nachbarn = positionen.filter(q => q !== p && Math.abs(q.y - p.y) < 5);
+    const rechtsFrei = !nachbarn.some(q => q.x > p.x && q.x - p.x < 24);
+    const linksFrei  = !nachbarn.some(q => q.x < p.x && p.x - q.x < 24);
+    if(p.x <= 60 && rechtsFrei)      p.markenSeite = "";
+    else if(p.x >= 26 && linksFrei)  p.markenSeite = " links";
+    else                             p.markenSeite = " oben";
+  });
+
+  positionen.forEach(p => {
+    const w = p.wein;
+
+    // Sorten mit großer Süße-Spanne bekommen eine feine Linie:
+    // sie zeigt, dass es die Sorte auch trockener oder süßer gibt.
+    const breite = w.suesseSpanne[1] - w.suesseSpanne[0];
+    if(breite > 1 && (zustand.achseX === "suesse" || zustand.achseY === "suesse")){
+      const linie = document.createElement("span");
+      linie.className = "spanneLinie";
+      linie.style.cssText = "position:absolute;background:rgba(124,47,62,.25);border-radius:2px;pointer-events:none;";
+      if(zustand.achseX === "suesse"){
+        const versatz = p.x - p.rohX;
+        const von = begrenze(anteil(w.suesseSpanne[0],"suesse") + versatz, 2, 98);
+        const bis = begrenze(anteil(w.suesseSpanne[1],"suesse") + versatz, 2, 98);
+        linie.style.left = von+"%"; linie.style.width = (bis-von)+"%";
+        linie.style.top = p.y+"%"; linie.style.height = "2px"; linie.style.marginTop = "-1px";
+      }else{
+        const versatz = p.y - p.rohY;
+        const von = begrenze(100 - anteil(w.suesseSpanne[1],"suesse") + versatz, 2, 98);
+        const bis = begrenze(100 - anteil(w.suesseSpanne[0],"suesse") + versatz, 2, 98);
+        linie.style.top = von+"%"; linie.style.height = (bis-von)+"%";
+        linie.style.left = p.x+"%"; linie.style.width = "2px"; linie.style.marginLeft = "-1px";
+      }
+      linie.dataset.id = w.id;
+      plot.appendChild(linie);
+    }
+
+    // der Punkt selbst
+    const knopf = document.createElement("button");
+    knopf.type = "button";
+    knopf.className = "punkt" + (w.deutsch ? "" : " int");
+    knopf.style.left = p.x+"%";
+    knopf.style.top  = p.y+"%";
+    knopf.style.background = koerperFarbe(w.koerper);
+    knopf.textContent = w.nr;
+    knopf.dataset.id = w.id;
+    knopf.setAttribute("aria-label",
+      `${w.name}: ${aX.label} ${w[zustand.achseX].toFixed(1)}, ${aY.label} ${w[zustand.achseY].toFixed(1)}`);
+    knopf.addEventListener("click", () => waehle(w.id));
+    knopf.addEventListener("pointerenter", () => zeigeSpanne(w.id, true));
+    knopf.addEventListener("pointerleave", () => zeigeSpanne(w.id, false));
+    plot.appendChild(knopf);
+
+    // Name daneben (nur auf breiten Bildschirmen sichtbar, siehe CSS)
+    const marke = document.createElement("span");
+    marke.className = "marke" + p.markenSeite;
+    marke.style.left = p.x+"%";
+    marke.style.top  = p.y+"%";
+    marke.textContent = w.name;
+    marke.dataset.id = w.id;
+    plot.appendChild(marke);
+  });
+
+  aktualisiereHervorhebung();
+}
+
+/* Die Süße-Spanne einer Sorte ein- oder ausblenden. */
+function zeigeSpanne(id, an){
+  const linie = plot.querySelector(`.spanneLinie[data-id="${id}"]`);
+  if(linie) linie.classList.toggle("zeigen", an || id === zustand.auswahl);
+}
+
+/* Gefilterte Sorten werden blass, die ausgewählte bekommt einen Ring. */
+function aktualisiereHervorhebung(){
+  plot.querySelectorAll(".punkt,.marke,.spanneLinie").forEach(el => {
+    const w = weine.find(x => x.id === el.dataset.id);
+    const sichtbar = passt(w);
+    el.classList.toggle("blass", !sichtbar);
+    if(el.classList.contains("spanneLinie")){
+      el.classList.toggle("zeigen", sichtbar && w.id === zustand.auswahl);
+    }
+    el.classList.toggle("aktiv", el.classList.contains("punkt") && w.id === zustand.auswahl);
+  });
+  document.querySelectorAll(".karte").forEach(k => {
+    k.classList.toggle("aktiv", k.dataset.id === zustand.auswahl);
+  });
+}
+
+/* =================================================================
+   Detail-Karte
+   ================================================================= */
+const stufenNamen = ["knochentrocken","trocken","halbtrocken","lieblich","edelsüß"];
+
+/* Ein Balken für die 1-bis-5-Werte (Körper, Säure, Frucht, Duft). */
+function meter(name, wert){
+  const breite = begrenze((wert - 1) / 4 * 100, 0, 100);
+  return `<div class="balkenZeile">
+      <span class="balkenName">${name}</span>
+      <div class="meter"><div class="meterFuell" style="width:${breite}%"></div></div>
+    </div>`;
+}
+
+function zeigeDetail(w){
+  const kasten = document.getElementById("detail");
+  if(!w){
+    kasten.innerHTML = `<div class="detailLeer">
+      <span class="gross">So liest du die Matrix</span>
+          <ul>
+            <li>Jeder Punkt ist eine Rebsorte. Die Zahl darin findest du unten auf der passenden Karte wieder.</li>
+            <li>Je goldener der Punkt, desto kräftiger der Wein.</li>
+            <li>Durchgezogener Rand = deutsche Sorte, gestrichelter Rand = internationale Sorte.</li>
+            <li>Punkt berühren oder antippen: Eine feine rote Linie zeigt, wie weit die Süße dieser Sorte reichen kann.</li>
+          </ul>
+    </div>`;
+    return;
+  }
+  const von = w.suesseSpanne[0], bis = w.suesseSpanne[1];
+  const spanneText = (bis - von) < 1
+    ? `Fast immer ${stufenNamen[Math.round(w.suesse)]} ausgebaut.`
+    : `Meist ${stufenNamen[Math.round(w.suesse)]} — es gibt sie von ${stufenNamen[von]} bis ${stufenNamen[bis]}.`;
+
+  kasten.innerHTML = `
+    <div class="detailKopf">
+      <div class="glas">${glasSVG(w.koerper, 66)}</div>
+      <div style="min-width:0">
+        <div class="detailNr">Nr. ${String(w.nr).padStart(2,"0")}</div>
+        <div class="detailName">${w.name}</div>
+        <div class="detailSyn">${w.syn}</div>
+        <div class="marker" style="margin:7px 0 0">${tags(w)}</div>
+      </div>
+    </div>
+
+    <div class="balken">
+      ${meter("Körper", w.koerper)}
+      ${meter("Säure", w.saeure)}
+      ${meter("Frucht", w.frucht)}
+      ${meter("Duft", w.aroma)}
+      <div class="balkenZeile">
+        <span class="balkenName">Süße</span>
+        <div class="meter">
+          <div class="band" style="left:${von/4*100}%;width:${(bis-von)/4*100}%"></div>
+          <div class="pin" style="left:${w.suesse/4*100}%"></div>
+        </div>
+      </div>
+    </div>
+    <div class="spanne">${spanneText}</div>
+
+    <div class="detailNotiz">${w.notiz}</div>
+
+    <div class="detailZeile">
+      <span class="metaLabel">Serviert</span><span class="temp">${w.temp}</span>
+    </div>
+    <div class="aromen" style="margin-top:11px">${w.aromen.map(a=>`<span class="arom">${a}</span>`).join("")}</div>
+    <div class="essen"><b>Passt zu</b>${w.essen}</div>`;
+}
+
+/* Eine Sorte auswählen (aus der Matrix oder aus der Liste). */
+function waehle(id, ausListe){
+  zustand.auswahl = (zustand.auswahl === id) ? null : id;
+  zeigeDetail(weine.find(w => w.id === zustand.auswahl));
+  aktualisiereHervorhebung();
+  history.replaceState(null, "", zustand.auswahl ? "#"+zustand.auswahl : location.pathname);
+  // Auf schmalen Bildschirmen liegt die Detail-Karte weit oben:
+  // nach einem Tipp auf eine Karte sanft dorthin scrollen.
+  if(ausListe && zustand.auswahl && window.innerWidth < 940){
+    document.getElementById("detail").scrollIntoView({behavior:"smooth", block:"center"});
+  }
+}
+
+/* =================================================================
+   Sortenliste
+   ================================================================= */
+function baueListe(){
+  const liste = document.getElementById("liste");
+  const sortiert = [...weine].sort((a,b) => {
+    if(zustand.sortierung === "name") return a.name.localeCompare(b.name,"de");
+    return b[zustand.sortierung] - a[zustand.sortierung] || a.name.localeCompare(b.name,"de");
+  });
+  liste.innerHTML = "";
+  sortiert.forEach(w => {
+    const karte = document.createElement("button");
+    karte.type = "button";
+    karte.className = "karte";
+    karte.dataset.id = w.id;
+    karte.innerHTML = `
+      <div class="glasspalte" style="background:${koerperFarbe(w.koerper)}26">
+        <span class="nr">${String(w.nr).padStart(2,"0")}</span>
+        ${glasSVG(w.koerper)}
+      </div>
+      <div class="inhalt">
+        <div class="kopf">
+          <span class="name">${w.name}</span>
+          <span class="syn">${w.syn}</span>
+          <span class="marker">${tags(w)}</span>
+        </div>
+        <div class="meta">
+          <div class="metaPunkt"><span class="metaLabel">Körper</span>${punkteReihe(w.koerper)}</div>
+          <div class="metaPunkt"><span class="metaLabel">Süße</span>${suesseReihe(w.suesseSpanne)}</div>
+          <div class="metaPunkt"><span class="metaLabel">Serviert</span><span class="temp">${w.temp}</span></div>
+        </div>
+        <div class="aromen">${w.aromen.map(a=>`<span class="arom">${a}</span>`).join("")}</div>
+        <div class="essen"><b>Passt zu</b>${w.essen}</div>
+      </div>`;
+    karte.addEventListener("click", () => waehle(w.id, true));
+    liste.appendChild(karte);
+  });
+  aktualisiereListe();
+}
+
+/* Blendet in der Liste aus, was nicht zum Filter passt. */
+function aktualisiereListe(){
+  let sichtbar = 0;
+  document.querySelectorAll(".karte").forEach(k => {
+    const w = weine.find(x => x.id === k.dataset.id);
+    const ok = passt(w);
+    k.classList.toggle("aus", !ok);
+    if(ok) sichtbar++;
+  });
+  document.getElementById("treffer").innerHTML =
+    `<b>${sichtbar}</b> von ${weine.length} Sorten` + (filterAktiv() ? " passen" : "");
+  document.getElementById("zuruecksetzen").hidden = !filterAktiv();
+  aktualisiereHervorhebung();
+}
+
+/* =================================================================
+   Bedienelemente
+   ================================================================= */
+const auswahlX = document.getElementById("achseX");
+const auswahlY = document.getElementById("achseY");
+
+Object.entries(achsen).forEach(([id, a]) => {
+  auswahlX.insertAdjacentHTML("beforeend", `<option value="${id}">${a.label}</option>`);
+  auswahlY.insertAdjacentHTML("beforeend", `<option value="${id}">${a.label}</option>`);
+});
+auswahlX.value = zustand.achseX;
+auswahlY.value = zustand.achseY;
+
+/* Beide Achsen dürfen nie dasselbe zeigen – sonst liegen alle Punkte
+   auf einer Diagonalen. Wird eine doppelt gewählt, tauschen sie. */
+auswahlX.addEventListener("change", () => {
+  const alt = zustand.achseX;
+  zustand.achseX = auswahlX.value;
+  if(zustand.achseX === zustand.achseY){ zustand.achseY = alt; auswahlY.value = alt; }
+  zeichneMatrix();
+});
+auswahlY.addEventListener("change", () => {
+  const alt = zustand.achseY;
+  zustand.achseY = auswahlY.value;
+  if(zustand.achseY === zustand.achseX){ zustand.achseX = alt; auswahlX.value = alt; }
+  zeichneMatrix();
+});
+document.getElementById("tauschKnopf").addEventListener("click", () => {
+  [zustand.achseX, zustand.achseY] = [zustand.achseY, zustand.achseX];
+  auswahlX.value = zustand.achseX;
+  auswahlY.value = zustand.achseY;
+  zeichneMatrix();
+});
+
+/* Herkunft */
+const herkunftKnoepfe = [
+  {id:"alle", label:"Alle"},
+  {id:"de",   label:"Deutsche Sorten"},
+  {id:"int",  label:"International"}
+];
+const herkunftBox = document.getElementById("herkunftChips");
+herkunftKnoepfe.forEach(h => {
+  const k = document.createElement("button");
+  k.type = "button"; k.className = "chip"; k.textContent = h.label;
+  k.setAttribute("aria-pressed", String(zustand.herkunft === h.id));
+  k.addEventListener("click", () => {
+    zustand.herkunft = h.id;
+    herkunftBox.querySelectorAll(".chip").forEach((c,i) =>
+      c.setAttribute("aria-pressed", String(herkunftKnoepfe[i].id === h.id)));
+    aktualisiereListe();
+  });
+  herkunftBox.appendChild(k);
+});
+
+/* Passt zu … (mehrere gleichzeitig möglich) */
+const essenBox = document.getElementById("essenChips");
+essenGruppen.forEach(g => {
+  const k = document.createElement("button");
+  k.type = "button"; k.className = "chip beere"; k.textContent = g.label;
+  k.setAttribute("aria-pressed", "false");
+  k.addEventListener("click", () => {
+    if(zustand.essen.has(g.id)) zustand.essen.delete(g.id); else zustand.essen.add(g.id);
+    k.setAttribute("aria-pressed", String(zustand.essen.has(g.id)));
+    aktualisiereListe();
+  });
+  essenBox.appendChild(k);
+});
+
+document.getElementById("zuruecksetzen").addEventListener("click", () => {
+  zustand.herkunft = "alle";
+  zustand.essen.clear();
+  herkunftBox.querySelectorAll(".chip").forEach((c,i) =>
+    c.setAttribute("aria-pressed", String(herkunftKnoepfe[i].id === "alle")));
+  essenBox.querySelectorAll(".chip").forEach(c => c.setAttribute("aria-pressed","false"));
+  aktualisiereListe();
+});
+
+document.getElementById("sortierung").addEventListener("change", (e) => {
+  zustand.sortierung = e.target.value;
+  baueListe();
+});
+
+/* =================================================================
+   Link teilen
+   ================================================================= */
+let toastZeit;
+function toast(text){
+  const t = document.getElementById("toast");
+  t.textContent = text;
+  t.classList.add("zeigen");
+  clearTimeout(toastZeit);
+  toastZeit = setTimeout(() => t.classList.remove("zeigen"), 2600);
+}
+
+document.getElementById("teilenKnopf").addEventListener("click", async () => {
+  const daten = {
+    title: "Weißwein-Kompass",
+    text : "16 weiße Rebsorten in einer interaktiven Kreuzmatrix – von trocken bis süß, von leicht bis kräftig.",
+    url  : location.href
+  };
+  if(navigator.share){
+    try{ await navigator.share(daten); return; }
+    catch(fehler){ if(fehler && fehler.name === "AbortError") return; }
+  }
+  try{
+    await navigator.clipboard.writeText(location.href);
+    toast("Link kopiert – jetzt einfach einfügen");
+  }catch(fehler){
+    toast(location.href);
+  }
+});
+
+/* =================================================================
+   Start
+   ================================================================= */
+baueListe();
+zeichneMatrix();
+
+// Ein Link wie …/weisswein.html#riesling öffnet gleich die passende Sorte.
+const ausLink = location.hash.replace("#","");
+if(weine.some(w => w.id === ausLink)){
+  zustand.auswahl = ausLink;
+  zeigeDetail(weine.find(w => w.id === ausLink));
+  aktualisiereHervorhebung();
+}
+</script>
+</body>
+</html>
