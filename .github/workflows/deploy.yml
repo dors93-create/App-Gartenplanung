@@ -5,9 +5,7 @@ name: Deploy auf GitHub Pages
 on:
   # Bei jedem Push auf den Entwicklungs-Branch automatisch neu veröffentlichen.
   push:
-    branches:
-      - "claude/grunriss-initial-setup-Fawpx"
-      - "claude/kegelpegel-olympiade-scoreboard-2c5upn"
+    branches: ["claude/grunriss-initial-setup-Fawpx"]
   # Erlaubt zusätzlich das manuelle Auslösen über den "Actions"-Tab auf GitHub.
   workflow_dispatch:
 
