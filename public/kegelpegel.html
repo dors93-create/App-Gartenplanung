@@ -175,13 +175,9 @@
     background:linear-gradient(180deg,#FFFFFF 24%,#B9B9C4 100%);
     -webkit-background-clip:text;background-clip:text;color:transparent;
   }
-  .lede{
-    margin:0 auto;max-width:44ch;color:var(--text-mittel);font-size:15px;
-  }
-
   /* Live-Anzeige unter dem Titel */
   .lebenszeichen{
-    display:inline-flex;align-items:center;gap:9px;margin-top:18px;
+    display:inline-flex;align-items:center;gap:9px;margin-top:24px;
     padding:7px 15px 7px 12px;border-radius:99px;
     background:var(--nacht-2);border:1px solid var(--linie);
     font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;
@@ -698,18 +694,14 @@
     </div>
     <p class="augenbraue einzug" style="--i:1">Kegelpegel</p>
     <h1 class="einzug" style="--i:2">Olympiade</h1>
-    <p class="lede einzug" style="--i:3">
-      Zehn Spiele, zwei Teams, 55 Punkte.
-      Hier läuft der Punktestand mit – Spiel für Spiel.
-    </p>
-    <div class="lebenszeichen einzug" id="lebenszeichen" style="--i:4">
+    <div class="lebenszeichen einzug" id="lebenszeichen" style="--i:3">
       <span class="punkt"></span><span id="lebenszeichenText">wird verbunden</span>
     </div>
   </header>
 
   <!-- ---------- Anzeigetafel ---------- -->
   <h2 class="nur-vorlesen">Punktestand</h2>
-  <section class="tafel einzug" style="--i:5">
+  <section class="tafel einzug" style="--i:4">
     <div class="tafel-gitter">
 
       <article class="team rot">
@@ -753,7 +745,7 @@
   <p class="nur-vorlesen" id="vorlesenStand" aria-live="polite"></p>
 
   <!-- ---------- Zahlen auf einen Blick ---------- -->
-  <div class="kacheln einzug" style="--i:6">
+  <div class="kacheln einzug" style="--i:5">
     <div class="kachel">
       <div class="wert"><span id="kGespielt">0</span><small>&thinsp;/&thinsp;<span id="kSpieleGesamt">10</span></small></div>
       <p class="bezeichnung">Spiele entschieden</p>
@@ -773,11 +765,11 @@
   </div>
 
   <!-- ---------- Aufstellung ---------- -->
-  <div class="abschnitt einzug" style="--i:7">
+  <div class="abschnitt einzug" style="--i:6">
     <h2>Aufstellung</h2><span class="strich"></span>
     <span class="zusatz" id="anzahlSpieler">9 Personen</span>
   </div>
-  <section class="aufstellung einzug" style="--i:8">
+  <section class="aufstellung einzug" style="--i:7">
     <div class="kader rot">
       <h3 id="kaderNameRot">Team Rot</h3>
       <span class="anzahl" id="kaderZahlRot">0 Personen</span>
@@ -791,14 +783,14 @@
   </section>
 
   <!-- ---------- Die Spiele ---------- -->
-  <div class="abschnitt einzug" style="--i:9">
+  <div class="abschnitt einzug" style="--i:8">
     <h2>Die Spiele</h2><span class="strich"></span>
     <span class="zusatz" id="freigabeZahl">0 von 10 freigegeben</span>
   </div>
-  <section class="spiele einzug" id="spieleListe" style="--i:10"></section>
+  <section class="spiele einzug" id="spieleListe" style="--i:9"></section>
 
   <!-- ---------- Fusszeile mit Login ---------- -->
-  <footer class="fuss einzug" style="--i:11">
+  <footer class="fuss einzug" style="--i:10">
     <p class="fuss-text">
       Kegelpegel Olympiade · Punkte pro Spiel steigen von 1 bis 10 ·
       insgesamt <b id="fussGesamt">55</b> Punkte
