@@ -86,7 +86,16 @@ public/weisswein.html   Weißwein-Kompass (Bonus): 16 Rebsorten in einer
 public/weisswein-vorschau.png
                         Vorschaubild, das erscheint, wenn der Link zum
                         Weißwein-Kompass in einem Chat geteilt wird
+public/kegelpegel.html  Punktestand der Kegelpegel-Olympiade (Bonus): zwei
+                        Teams, zehn Spiele, Login unten für die Spielleitung.
+                        Ebenfalls eine einzelne Datei; teilt den Stand über
+                        Firebase live mit allen. Anleitung: KEGELPEGEL.md
+public/kegelpegel-banner.jpg
+                        Wappen des Kegelpegel (Kopf der Seite)
+public/kegelpegel-vorschau.png
+                        Vorschaubild für geteilte Links
 CLAUDE.md             Diese Übersicht
+KEGELPEGEL.md         Bedienung und Einrichtung des Olympiade-Punktestands
 ```
 
 ## Veröffentlichung

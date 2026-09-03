@@ -29,3 +29,17 @@ automatisch neu. Zum Beenden im Terminal `Strg + C` drücken.
 ## Mehr Infos
 
 Projektüberblick und Konventionen stehen in [`CLAUDE.md`](./CLAUDE.md).
+
+## Bonus-Seiten
+
+Neben dem Planungstool liegen im Ordner `public/` einzelne, eigenständige
+HTML-Seiten. Sie werden mit veröffentlicht und lassen sich direkt teilen:
+
+| Seite | Link |
+|---|---|
+| Kegelpegel Olympiade – Punktestand | [`/kegelpegel.html`](https://dors93-create.github.io/App-Gartenplanung/kegelpegel.html) |
+| Weißwein-Kompass | [`/weisswein.html`](https://dors93-create.github.io/App-Gartenplanung/weisswein.html) |
+| Insel-Aufbauspiel | [`/inselspiel.html`](https://dors93-create.github.io/App-Gartenplanung/inselspiel.html) |
+
+Zur Olympiade-Seite gehört die Anleitung [`KEGELPEGEL.md`](./KEGELPEGEL.md):
+Bedienung der Verwaltung und die einmalige Einrichtung der Live-Verbindung.
