@@ -864,14 +864,13 @@
    sofort und live. Anleitung: siehe KEGELPEGEL.md im Projekt.
    Einfach die sechs Zeilen aus der Firebase-Konsole einsetzen. */
 const FIREBASE_KONFIG = {
-  // apiKey:            "…",
-  // authDomain:        "…firebaseapp.com",
-  // databaseURL:       "https://….europe-west1.firebasedatabase.app",
-  // projectId:         "…",
-  // storageBucket:     "….appspot.com",
-  // messagingSenderId: "…",
-  // appId:             "…"
+  databaseURL: "https://kegeltour-45451-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId:   "kegeltour-45451"
 };
+
+/* Die Firebase-Bausteine werden von Google geladen. Falls eine Fassung
+   einmal nicht erreichbar ist, wird der Reihe nach die naechste probiert. */
+const FIREBASE_FASSUNGEN = ["10.13.2", "10.12.5", "11.0.2"];
 
 /* --- Zugang zur Verwaltung ----------------------------------
    Hier stehen keine Klartext-Daten, sondern nur ein nicht
@@ -1286,11 +1285,36 @@ function firebaseKonfig(){
   return null;
 }
 
+/* Hat die Datenbank den Zugriff verweigert? Dann fehlen meist nur die Regeln. */
+function istAbgelehnt(fehler){
+  const text = String((fehler && (fehler.code || fehler.message)) || "").toUpperCase();
+  return text.includes("PERMISSION") || text.includes("DENIED");
+}
+
 function statusSetzen(art, text){
   const anzeige = $("lebenszeichen");
   anzeige.classList.remove("live", "fehler");
   if (art) anzeige.classList.add(art);
   $("lebenszeichenText").textContent = text;
+}
+
+/* Die beiden Firebase-Bausteine holen – die erste Fassung, die klappt. */
+async function firebaseLaden(){
+  let letzterFehler = null;
+  for (const fassung of FIREBASE_FASSUNGEN){
+    const pfad = "https://www.gstatic.com/firebasejs/" + fassung + "/";
+    try {
+      const [app, datenbank] = await Promise.all([
+        import(pfad + "firebase-app.js"),
+        import(pfad + "firebase-database.js")
+      ]);
+      return { app, datenbank };
+    } catch (fehler){
+      letzterFehler = fehler;
+      console.warn("Firebase " + fassung + " nicht ladbar, probiere die nächste.", fehler);
+    }
+  }
+  throw letzterFehler || new Error("Firebase-Bausteine nicht erreichbar");
 }
 
 async function liveVerbinden(){
@@ -1301,10 +1325,7 @@ async function liveVerbinden(){
   }
   statusSetzen("", "wird verbunden");
   try {
-    const [app, datenbank] = await Promise.all([
-      import("https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js"),
-      import("https://www.gstatic.com/firebasejs/10.13.2/firebase-database.js")
-    ]);
+    const { app, datenbank } = await firebaseLaden();
     const db    = datenbank.getDatabase(app.initializeApp(konfig));
     const platz = datenbank.ref(db, "kegelpegel/stand");
 
@@ -1321,7 +1342,10 @@ async function liveVerbinden(){
       allesZeichnen();
       if (angemeldet) verwaltungZeichnen();
       statusSetzen("live", "live");
-    }, () => statusSetzen("fehler", "keine Verbindung"));
+    }, (fehler) => {
+      console.warn("Datenbank meldet:", fehler);
+      statusSetzen("fehler", istAbgelehnt(fehler) ? "Regeln noch nicht gesetzt" : "keine Verbindung");
+    });
 
     hochladen = (z) => datenbank.set(platz, JSON.stringify(z));
     statusSetzen("live", "live");
@@ -1342,7 +1366,7 @@ function aendern(){
     if (!hochladen) return;
     hochladen(zustand).catch((f) => {
       console.warn("Hochladen fehlgeschlagen:", f);
-      statusSetzen("fehler", "nicht gespeichert");
+      statusSetzen("fehler", istAbgelehnt(f) ? "Regeln erlauben kein Speichern" : "nicht gespeichert");
     });
   }, 450);
 }
