@@ -672,6 +672,15 @@
 </head>
 <body>
 
+<!-- Ohne JavaScript gibt es keinen Ladeschirm und keine Einblendung –
+     die Seite zeigt dann einfach den zuletzt eingebauten Stand. -->
+<noscript>
+  <style>
+    .ladeschirm{display:none !important;}
+    .einzug{opacity:1 !important;transform:none !important;}
+  </style>
+</noscript>
+
 <!-- ---------- Ladeschirm ---------- -->
 <div class="ladeschirm" id="ladeschirm">
   <img src="kegelpegel-banner.jpg" alt="" width="800" height="868">
@@ -700,7 +709,7 @@
 
   <!-- ---------- Anzeigetafel ---------- -->
   <h2 class="nur-vorlesen">Punktestand</h2>
-  <section class="tafel einzug" style="--i:5" aria-live="polite">
+  <section class="tafel einzug" style="--i:5">
     <div class="tafel-gitter">
 
       <article class="team rot">
@@ -739,6 +748,9 @@
       </p>
     </div>
   </section>
+
+  <!-- Kurzfassung des Punktestands – nur fuer Vorlese-Programme -->
+  <p class="nur-vorlesen" id="vorlesenStand" aria-live="polite"></p>
 
   <!-- ---------- Zahlen auf einen Blick ---------- -->
   <div class="kacheln einzug" style="--i:6">
@@ -1234,11 +1246,27 @@ function spieleZeichnen(){
   }
 }
 
+/* Der gesprochene Zwischenstand wird erst gemeldet, wenn sich eine
+   Weile nichts mehr getan hat – sonst redet das Vorlese-Programm
+   waehrend des Hochzaehlens dauernd dazwischen. */
+let vorleseUhr = null;
+function vorlesenMelden(){
+  clearTimeout(vorleseUhr);
+  vorleseUhr = setTimeout(() => {
+    const p = punktestand();
+    $("vorlesenStand").textContent =
+      `Zwischenstand: ${zustand.teams.rot} ${zahl(p.rot)}, ` +
+      `${zustand.teams.schwarz} ${zahl(p.schwarz)}. ` +
+      `${zahl(p.offen)} von ${zahl(p.gesamt)} Punkten sind noch zu vergeben.`;
+  }, 1200);
+}
+
 function allesZeichnen(){
   tafelZeichnen();
   kachelnZeichnen();
   kaderZeichnen();
   spieleZeichnen();
+  vorlesenMelden();
 }
 
 /* ------------------------------------------------------------
@@ -1701,7 +1729,17 @@ function start(){
   liveVerbinden();
 }
 
-start();
+/* Sollte beim Start etwas schiefgehen, wird die Seite trotzdem
+   sichtbar gemacht – lieber ein halber Punktestand als ein
+   schwarzer Bildschirm. */
+try {
+  start();
+} catch (fehler){
+  console.error("Start fehlgeschlagen:", fehler);
+  document.body.classList.add("bereit");
+  const schirm = $("ladeschirm");
+  if (schirm) { schirm.classList.add("weg"); schirm.style.display = "none"; }
+}
 </script>
 </body>
 </html>
