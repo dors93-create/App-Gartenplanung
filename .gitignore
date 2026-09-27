@@ -9,3 +9,7 @@ dist/
 .DS_Store
 .vscode/
 .idea/
+
+# Persönliche Notizen im Projektordner (z. B. Zusammenfassungen für die Uni) –
+# gehören nicht in das öffentliche Repository
+Automatisierung_*.md
