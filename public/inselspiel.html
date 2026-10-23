@@ -195,7 +195,7 @@
 
   /* ---------- Meldungen (Toast) & Hinweise ---------- */
   #toast {
-    position: absolute; bottom: 152px; left: 50%; transform: translateX(-50%);
+    position: absolute; bottom: 210px; left: 50%; transform: translateX(-50%);
     background: rgba(31, 41, 55, 0.92); color: #fff;
     border-radius: 10px; padding: 8px 16px; font-size: 13px;
     z-index: 20; pointer-events: none; opacity: 0; transition: opacity .25s;
@@ -408,11 +408,12 @@ const PREISE = {
   gewuerze:      { kauf: 8,  verkauf: 3 },
   kleidung:      { kauf: 14, verkauf: 6 },
   schmuck:       { kauf: 20, verkauf: 8 },
+  waffen:        { kauf: 16, verkauf: 6 },
 };
 const WAREN_EMOJI = { gold: '💰', holz: '🪵', werkzeuge: '⚒️', ziegel: '🧱',
   nahrung: '🍞', wolle: '🧶', stoffe: '🧵', getreide: '🌾', mehl: '🥣',
   zuckerrohr: '🎋', alkohol: '🥃', tabakblaetter: '🍂', tabak: '🚬',
-  gewuerze: '🌶️', kleidung: '👕', schmuck: '💍' };
+  gewuerze: '🌶️', kleidung: '👕', schmuck: '💍', waffen: '🗡️' };
 // Dynamischer Markt: jeder Kauf treibt den Preis einer Ware nach oben,
 // jeder Verkauf drückt ihn – und zwar für ALLE Spieler. Wer dieselben
 // Waren braucht wie die Konkurrenz, zahlt also drauf. Mit der Zeit
@@ -463,7 +464,7 @@ const WAREN_NAME = { holz: 'Holz', werkzeuge: 'Werkzeuge', ziegel: 'Ziegel',
   nahrung: 'Nahrung', wolle: 'Wolle', stoffe: 'Stoffe', getreide: 'Getreide',
   mehl: 'Mehl', zuckerrohr: 'Zuckerrohr', alkohol: 'Alkohol',
   tabakblaetter: 'Tabakblätter', tabak: 'Tabakwaren', gewuerze: 'Gewürze',
-  kleidung: 'Kleidung', schmuck: 'Schmuck' };
+  kleidung: 'Kleidung', schmuck: 'Schmuck', waffen: 'Waffen' };
 
 // Gebäudekatalog. Kosten in Gold/Holz/Werkzeugen, Unterhalt in Gold je Sekunde.
 // "dauer" = Sekunden je Produktionszyklus, "radius" = Wirkungs-/Suchradius in Kacheln.
@@ -472,18 +473,18 @@ const GEBAEUDE = {
   kontor: {
     name: 'Kontor', emoji: '⚓', w: 2, h: 2, farbe: '#d9c48a', abStufe: 0,
     kosten: {}, unterhalt: 0,
-    marktRadius: 8, brauchtKueste: true,
+    marktRadius: 8, brauchtKueste: true, hp: 450,
     beschr: 'Dein Handelsstützpunkt. Versorgt Häuser im Umkreis wie ein Marktplatz – anklicken, um Waren zu kaufen und zu verkaufen.',
   },
   marktplatz: {
     name: 'Marktplatz', emoji: '⛲', w: 2, h: 2, farbe: '#e3cfa4', abStufe: 0,
     kosten: { gold: 200, holz: 8, werkzeuge: 3 }, unterhalt: 0.10,
-    marktRadius: 9,
+    marktRadius: 9, hp: 160,
     beschr: 'Versorgt Wohnhäuser im Umkreis. Ohne Marktanbindung wächst kein Haus.',
   },
   wohnhaus: {
     name: 'Wohnhaus', emoji: '🛖', w: 1, h: 1, farbe: '#d8b78e', abStufe: 0,
-    kosten: { gold: 50, holz: 3 }, unterhalt: 0,
+    kosten: { gold: 50, holz: 3 }, unterhalt: 0, hp: 70,
     beschr: 'Hier leben deine Einwohner:innen und zahlen Steuern. Mit erfüllten Bedürfnissen steigen sie über fünf Stufen bis zu Aristokraten auf.',
   },
   bruecke: {
@@ -626,6 +627,54 @@ const GEBAEUDE = {
     radius: 9,
     beschr: 'Kultur und Zerstreuung. Nötig, damit Kaufleute zu Aristokraten aufsteigen.',
   },
+  // ---------- Militär (ab Siedlern bzw. Bürgern) ----------
+  waffenschmiede: {
+    name: 'Waffenschmiede', emoji: '🗡️', w: 1, h: 1, farbe: '#b0a0a0', abStufe: 1,
+    kosten: { gold: 320, holz: 10, werkzeuge: 4 }, unterhalt: 0.16,
+    dauer: 6,
+    beschr: 'Schmiedet Waffen aus Werkzeugen. Waffen braucht man für Soldaten und Kriegsschiffe – oder man verkauft sie teuer.',
+  },
+  wachturm: {
+    name: 'Wachturm', emoji: '🗼', w: 1, h: 1, farbe: '#a8a8a8', abStufe: 1,
+    kosten: { gold: 200, holz: 8, ziegel: 6 }, unterhalt: 0.10,
+    radius: 5, hp: 260, wehr: 14,
+    beschr: 'Beschießt feindliche Truppen in Reichweite und stärkt eigene Verteidiger (+25 %). Billiger als eine Armee – Verteidigung lohnt sich.',
+  },
+  kaserne: {
+    name: 'Kaserne', emoji: '⚔️', w: 2, h: 2, farbe: '#bba98c', abStufe: 2,
+    kosten: { gold: 600, holz: 15, werkzeuge: 5, ziegel: 10 }, unterhalt: 0.25,
+    hp: 220,
+    beschr: 'Hebt Soldaten aus. Jeder Trupp kostet Gold, Waffen – und Einwohner, die dann nicht mehr für dich arbeiten.',
+  },
+  werft: {
+    name: 'Werft', emoji: '🛠️', w: 2, h: 2, farbe: '#9fb4c4', abStufe: 2,
+    kosten: { gold: 800, holz: 25, werkzeuge: 8, ziegel: 10 }, unterhalt: 0.30,
+    brauchtKueste: true, hp: 200,
+    beschr: 'Baut Kriegsschiffe für Seeschlachten und Truppentransporte. Muss an der Küste stehen.',
+  },
+};
+
+// Kosten einer Aushebung bzw. eines Kriegsschiffs
+const TRUPP_KOSTEN  = { gold: 150, waffen: 6 };   // je 10 Mann
+const TRUPP_MANN    = 10;                          // Soldaten je Aushebung
+const TRUPP_EINWOHNER = 10;                        // so viele Einwohner wandern ab
+const SCHIFF_KOSTEN = { gold: 400, holz: 15, waffen: 5 };  // je Kriegsschiff
+
+// Kriegs-Stellschrauben (alle Werte je Sekunde bei 1×-Tempo)
+const KRIEG = {
+  tempoHeer:     1.5,    // Marschgeschwindigkeit in Kacheln/s
+  tempoFlotte:   2.4,    // Segelgeschwindigkeit in Kacheln/s
+  verlustRate:   0.055,  // Abrieb-Faktor im Gefecht
+  schiffWert:    12,     // Kampfkraft eines Kriegsschiffs (in "Mann")
+  belagerung:    9,      // Gebäudeschaden je Sekunde und 10 Mann
+  bombardement:  7,      // Schaden eines Kriegsschiffs je Sekunde
+  turmSchaden:   2.0,    // Wachturm-Beschuss je Sekunde
+  sold:          0.012,  // Gold je Soldat und Sekunde
+  soldSchiff:    0.09,   // Gold je Kriegsschiff und Sekunde
+  moralVerlust:  0.015,  // Moral sinkt im Gefecht
+  gelaendeBonus: 1.3,    // Verteidiger in Wald/am Berg
+  turmBonus:     1.25,   // Verteidiger im Schutz eines Wachturms
+  kiFriede:      240,    // Sekunden, bevor die KI überhaupt angreift
 };
 
 // Was jedes Gebäude produziert, verbraucht und wo es stehen muss –
@@ -657,6 +706,10 @@ const GEB_INFO = {
   schneiderei:     { produziert: '1 👕 alle 6 s', verbraucht: '1 🧵 Stoffe' },
   goldschmiede:    { produziert: '1 💍 alle 9 s', verbraucht: 'Golderz', standort: '🪙 Goldvorkommen (R 5) – nur auf der Goldinsel!' },
   theater:         { produziert: 'Kultur (Radius 9)' },
+  waffenschmiede:  { produziert: '1 🗡️ alle 6 s', verbraucht: '1 ⚒️ Werkzeug' },
+  wachturm:        { produziert: 'Verteidigung (Radius 5)' },
+  kaserne:         { produziert: `Soldaten (${TRUPP_MANN} Mann je Aushebung)`, verbraucht: '💰 🗡️ und Einwohner' },
+  werft:           { produziert: 'Kriegsschiffe', verbraucht: '💰 🪵 🗡️', standort: 'An der Küste' },
 };
 
 // Das Baumenü ist in Gruppen sortiert
@@ -669,6 +722,8 @@ const MENUE_GRUPPEN = [
     typen: ['schaffarm', 'getreidefarm', 'zuckerrohr', 'tabakplantage', 'gewuerzplantage', 'rinderfarm'] },
   { titel: 'Verarbeitung',
     typen: ['weberei', 'muehle', 'baeckerei', 'brennerei', 'tabakladen', 'schneiderei', 'goldschmiede'] },
+  { titel: 'Militär',
+    typen: ['waffenschmiede', 'wachturm', 'kaserne', 'werft'] },
 ];
 
 /* ---------- 2. SPIELZUSTAND ---------------------------------- */
@@ -684,7 +739,7 @@ const KI_PLAN = ['wohnhaus', 'fischer', 'wohnhaus', 'holzfaeller', 'wohnhaus',
 
 // Ab welcher eigenen Höchststufe eine KI diese Ware im Handel einkauft
 const KI_EINKAUF = { nahrung: 0, holz: 0, stoffe: 0, alkohol: 0, ziegel: 1,
-  tabak: 1, gewuerze: 1, kleidung: 2, schmuck: 3 };
+  tabak: 1, gewuerze: 1, waffen: 1, kleidung: 2, schmuck: 3 };
 
 // Alle Spieler: du (Index 0) und drei Konkurrent:innen mit eigener Kasse,
 // eigenen Lagern und eigener Insel. "start" = Spielsekunde der Besiedlung.
@@ -696,10 +751,11 @@ function neuerSpieler(id, name, farbe, ki, start) {
     einwohner: 0, siedlerEw: 0,  // wird in der Simulation gefüllt
     mangel: {}, hunger: false,
     plan: ki ? [...KI_PLAN] : null,   // Bauplan nur für die KI
+    aggression: 0.6 + id * 0.25,      // wie stark die KI aufrüstet
     res: { gold: 10000, holz: 40, werkzeuge: 20, ziegel: 0, nahrung: 40,
            wolle: 0, stoffe: 0, getreide: 0, mehl: 0, zuckerrohr: 0,
            alkohol: 0, tabakblaetter: 0, tabak: 0, gewuerze: 0,
-           kleidung: 0, schmuck: 0 },
+           kleidung: 0, schmuck: 0, waffen: 0 },
   };
 }
 const spieler = [
@@ -721,6 +777,7 @@ const state = {
   werkzeug: 'kontor',     // aktives Werkzeug: 'zeiger', 'abriss' oder Gebäudetyp
   kontorGebaut: false,
   auswahl: null,          // aktuell angeklicktes Gebäude
+  truppAuswahl: null,     // ausgewähltes Heer bzw. ausgewählte Flotte
   pause: false,
   tempo: 1,               // 1, 2 oder 3
   vorbei: false,          // Bankrott
@@ -1251,6 +1308,7 @@ function platziere(typ, tx, ty, sid = 0) {
 
   const geb = {
     id: naechsteId++, typ, x: ax, y: ay, spieler: sid,
+    hp: def.hp || 100, maxHp: def.hp || 100,   // für Belagerungen
     fortschritt: 0,   // Produktionsfortschritt in Sekunden
     eff: 0,           // Auslastung 0..1 (für das Info-Panel)
   };
@@ -1346,6 +1404,75 @@ function kiBauplatz(sp, typ) {
   return beste;
 }
 
+// --- Kriegsführung der KI ---
+// Die KI rüstet erst spät auf und greift dann über See an: Kontore
+// stehen immer an der Küste, also sind sie von Flotten erreichbar.
+function kiFlotte(sp) {
+  return truppen.find(t => t.spieler === sp.id && t.art === 'flotte');
+}
+function kiHeer(sp) {
+  return truppen.find(t => t.spieler === sp.id && t.art === 'heer');
+}
+
+// Wasserfeld in der Nähe eines Gebäudes (Ankerplatz zum Bombardieren)
+function wasserFeldNeben(geb) {
+  const z = zentrum(geb);
+  return freiesFeldNeben(z.x, z.y, seeFrei);
+}
+
+function kiKrieg(sp) {
+  if (!sp.kontor) return;
+  const R = sp.res;
+  const eigene = typ => gebaeude.some(g => g.typ === typ && g.spieler === sp.id);
+
+  // 1. Aufrüsten: erst Waffen und Verteidigung, dann Werft und Kaserne
+  const wunsch = [];
+  if (!eigene('waffenschmiede')) wunsch.push('waffenschmiede');
+  if (!eigene('wachturm')) wunsch.push('wachturm');
+  if (sp.maxStufe >= 2 && !eigene('werft')) wunsch.push('werft');
+  if (sp.maxStufe >= 2 && !eigene('kaserne')) wunsch.push('kaserne');
+  for (const typ of wunsch) {
+    if (sp.maxStufe < GEBAEUDE[typ].abStufe || !kostenReichen(typ, sp.id)) continue;
+    const platz = kiBauplatz(sp, typ);
+    if (platz && platziere(typ, platz.x, platz.y, sp.id)) return;
+  }
+
+  // 2. Heimatschutz: ein Heer in der Nähe des Kontors halten
+  const kaserne = gebaeude.find(g => g.typ === 'kaserne' && g.spieler === sp.id);
+  const heer = kiHeer(sp);
+  if (kaserne && R.gold > 2500 && (!heer || heer.mann < 20 * sp.aggression))
+    ausheben(kaserne);
+
+  // 3. Flotte bauen
+  const werft = gebaeude.find(g => g.typ === 'werft' && g.spieler === sp.id);
+  const flotte = kiFlotte(sp);
+  const sollSchiffe = 3 + Math.round(3 * sp.aggression);
+  if (werft && R.gold > 3000 && (!flotte || flotte.schiffe < sollSchiffe))
+    schiffBauen(werft);
+
+  // 4. Angreifen – erst nach der Friedensfrist und nur mit starker Flotte
+  if (state.spielzeit < KRIEG.kiFriede) return;
+  if (!flotte || flotte.schiffe < sollSchiffe || flotte.pfad.length) return;
+
+  // Ziel: der Führende im Wettlauf (hält das Rennen offen)
+  let ziel = null, bestPunkte = -1;
+  for (const geg of spieler) {
+    if (geg.id === sp.id || !geg.kontor) continue;
+    const punkte = geg.siedlerEw * 2 + geg.einwohner;
+    if (punkte > bestPunkte) { bestPunkte = punkte; ziel = geg; }
+  }
+  if (!ziel) return;
+  const anker = wasserFeldNeben(ziel.kontor);
+  if (!anker) return;
+  const weg = truppWeg(flotte, Math.floor(anker.x), Math.floor(anker.y));
+  if (!weg) return;
+  flotte.pfad = weg;
+  if (ziel.id === 0)
+    melden(`⚠️ ${sp.name} schickt eine Kriegsflotte zu deiner Insel!`, 'ki-angriff-' + sp.id);
+  else
+    melden(`⚔️ ${sp.name} greift ${ziel.name} an!`, 'ki-krieg');
+}
+
 // Ein KI-Zug alle 5 Spielsekunden: einkaufen, dann bauen
 function kiTick(sp, dt) {
   sp.timer += dt;
@@ -1382,6 +1509,371 @@ function kiTick(sp, dt) {
   if (platziere(typ, platz.x, platz.y, sp.id)) {
     if (nachPlan) sp.planIdx++; else sp.extra++;
   }
+
+  // Zum Schluss: aufrüsten und gegebenenfalls angreifen
+  kiKrieg(sp);
+}
+
+
+/* ---------- 5c. KRIEG: HEERE UND FLOTTEN ----------------------- */
+// Truppen sind – anders als Gebäude – nicht kachelgebunden, sondern
+// bewegen sich frei über die Karte (wie das Startschiff). Jede Truppe
+// ist EIN Stapel: ein Heer mit "mann" Soldaten oder eine Flotte mit
+// "schiffe" Kriegsschiffen, die zusätzlich Soldaten an Bord nehmen kann.
+
+let truppen = [];
+
+function neueTruppe(sid, art, x, y) {
+  const t = {
+    id: naechsteId++, spieler: sid, art,   // 'heer' oder 'flotte'
+    mann: 0, schiffe: 0, fracht: 0,        // fracht = Soldaten an Bord
+    moral: 1, x, y, pfad: [], kampf: false,
+  };
+  truppen.push(t);
+  return t;
+}
+
+// Kampfkraft eines Stapels: Flotten rechnen in Schiffen, Heere in Mann
+function staerke(t) {
+  const roh = t.art === 'flotte' ? t.schiffe * KRIEG.schiffWert : t.mann;
+  return roh * t.moral;
+}
+function truppGroesse(t) { return t.art === 'flotte' ? t.schiffe : t.mann; }
+
+// Truppe an einer Kachel finden (für die Auswahl per Fingertipp)
+function truppeBei(x, y, sid = null) {
+  let beste = null, besteD = 1.1;
+  for (const t of truppen) {
+    if (sid !== null && t.spieler !== sid) continue;
+    const d = Math.hypot(t.x - (x + 0.5), t.y - (y + 0.5));
+    if (d < besteD) { beste = t; besteD = d; }
+  }
+  return beste;
+}
+
+// --- Wegfindung: eine Breitensuche für Land und See ---
+function wegSuche(sx, sy, zx, zy, passierbar) {
+  const si = sy * N + sx, zi = zy * N + zx;
+  if (!passierbar(zi)) return null;
+  if (si === zi) return [];
+  const vorher = new Int32Array(N * N).fill(-1);
+  vorher[si] = si;
+  const schlange = [si];
+  for (let kopf = 0; kopf < schlange.length; kopf++) {
+    const j = schlange[kopf];
+    if (j === zi) break;
+    const x = j % N, y = (j / N) | 0;
+    for (const [ax, ay] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + ax, ny = y + ay;
+      if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
+      const ni = ny * N + nx;
+      if (vorher[ni] !== -1 || !passierbar(ni)) continue;
+      vorher[ni] = j;
+      schlange.push(ni);
+    }
+  }
+  if (vorher[zi] === -1) return null;
+  const weg = [];
+  for (let j = zi; j !== si; j = vorher[j])
+    weg.push({ x: (j % N) + 0.5, y: ((j / N) | 0) + 0.5 });
+  weg.reverse();
+  return weg;
+}
+
+// Heere laufen über Land – Flüsse nur über Brücken, Berge gar nicht.
+// Dadurch werden Brücken zu Engstellen, die man verteidigen kann.
+function landFrei(i) {
+  const k = karte[i];
+  if (k.typ === 'wasser' || k.typ === 'berg') return false;
+  if (k.typ === 'fluss') {
+    const b = belegt[i];
+    return !!(b && b.typ === 'bruecke');
+  }
+  return true;
+}
+function seeFrei(i) { return karte[i].typ === 'wasser'; }
+
+function truppWeg(t, zx, zy) {
+  const sx = Math.floor(t.x), sy = Math.floor(t.y);
+  return wegSuche(sx, sy, zx, zy, t.art === 'flotte' ? seeFrei : landFrei);
+}
+
+// --- Aushebung in der Kaserne und Schiffbau in der Werft ---
+// Soldaten kommen aus den Wohnhäusern: Krieg kostet dich Einwohner
+// und damit Punkte im Wettlauf.
+function einwohnerAbziehen(sid, anzahl) {
+  let rest = anzahl;
+  for (const g of gebaeude) {
+    if (rest <= 0) break;
+    if (g.typ !== 'wohnhaus' || g.spieler !== sid) continue;
+    const nimm = Math.min(g.ew - 1, rest);
+    if (nimm > 0) { g.ew -= nimm; rest -= nimm; }
+  }
+  return anzahl - rest;   // tatsächlich eingezogene Einwohner
+}
+
+function ausheben(kaserne) {
+  const sp = spieler[kaserne.spieler], R = sp.res;
+  for (const [ware, menge] of Object.entries(TRUPP_KOSTEN))
+    if (R[ware] < menge) {
+      if (sp.id === 0) melden(`Aushebung: es fehlt ${WAREN_EMOJI[ware]} ${WAREN_NAME[ware] || 'Gold'}`);
+      return false;
+    }
+  if (sp.einwohner < TRUPP_EINWOHNER + 5) {
+    if (sp.id === 0) melden('Zu wenig Einwohner für eine Aushebung');
+    return false;
+  }
+  const gezogen = einwohnerAbziehen(sp.id, TRUPP_EINWOHNER);
+  if (gezogen <= 0) return false;
+  for (const [ware, menge] of Object.entries(TRUPP_KOSTEN)) R[ware] -= menge;
+
+  // An das nächstgelegene eigene Heer in der Nähe anschließen …
+  const z = zentrum(kaserne);
+  const naheTruppe = truppeNahe(sp.id, 'heer', z.x, z.y, 8);
+  if (naheTruppe) {
+    naheTruppe.mann += gezogen;
+    if (sp.id === 0) melden(`⚔️ ${gezogen} Mann ausgehoben – Heer jetzt ${Math.round(naheTruppe.mann)} Mann`);
+    return true;
+  }
+  // … sonst ein neues Heer neben der Kaserne aufstellen
+  const platz = freiesFeldNeben(z.x, z.y, landFrei);
+  if (!platz) { if (sp.id === 0) melden('Kein Platz für das Heer neben der Kaserne'); return false; }
+  const t = neueTruppe(sp.id, 'heer', platz.x, platz.y);
+  t.mann = gezogen;
+  if (sp.id === 0) melden(`⚔️ Neues Heer mit ${gezogen} Mann ausgehoben`);
+  return true;
+}
+
+function schiffBauen(werft) {
+  const sp = spieler[werft.spieler], R = sp.res;
+  for (const [ware, menge] of Object.entries(SCHIFF_KOSTEN))
+    if (R[ware] < menge) {
+      if (sp.id === 0) melden(`Schiffbau: es fehlt ${WAREN_EMOJI[ware]} ${WAREN_NAME[ware] || 'Gold'}`);
+      return false;
+    }
+  const z = zentrum(werft);
+  const platz = freiesFeldNeben(z.x, z.y, seeFrei);
+  if (!platz) { if (sp.id === 0) melden('Kein freies Wasser neben der Werft'); return false; }
+  for (const [ware, menge] of Object.entries(SCHIFF_KOSTEN)) R[ware] -= menge;
+
+  const naheFlotte = truppeNahe(sp.id, 'flotte', z.x, z.y, 10);
+  if (naheFlotte) {
+    naheFlotte.schiffe += 1;
+    if (sp.id === 0) melden(`🚢 Kriegsschiff vom Stapel – Flotte jetzt ${naheFlotte.schiffe} Schiffe`);
+    return true;
+  }
+  const t = neueTruppe(sp.id, 'flotte', platz.x, platz.y);
+  t.schiffe = 1;
+  if (sp.id === 0) melden('🚢 Erstes Kriegsschiff deiner neuen Flotte');
+  return true;
+}
+
+// Nächstgelegenen eigenen Stapel einer Art im Umkreis finden –
+// so wächst der Nachschub, statt viele Einzelstapel zu erzeugen.
+function truppeNahe(sid, art, cx, cy, radius) {
+  let beste = null, besteD = radius;
+  for (const t of truppen) {
+    if (t.spieler !== sid || t.art !== art) continue;
+    const d = Math.hypot(t.x - cx, t.y - cy);
+    if (d < besteD) { beste = t; besteD = d; }
+  }
+  return beste;
+}
+
+// Freies Feld in der Nähe suchen (für neu aufgestellte Truppen)
+function freiesFeldNeben(cx, cy, frei) {
+  for (let r = 1; r <= 6; r++) {
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      const x = Math.floor(cx) + dx, y = Math.floor(cy) + dy;
+      if (x < 0 || y < 0 || x >= N || y >= N) continue;
+      if (frei(y * N + x)) return { x: x + 0.5, y: y + 0.5 };
+    }
+  }
+  return null;
+}
+
+// --- Bewegung: Truppen laufen ihren Weg Punkt für Punkt ab ---
+function truppenUpdate(dt) {
+  for (const t of truppen) {
+    if (t.kampf || !t.pfad.length) continue;   // im Gefecht wird nicht marschiert
+    let strecke = (t.art === 'flotte' ? KRIEG.tempoFlotte : KRIEG.tempoHeer) * dt;
+    while (strecke > 0 && t.pfad.length) {
+      const ziel = t.pfad[0];
+      const dx = ziel.x - t.x, dy = ziel.y - t.y;
+      const d = Math.hypot(dx, dy);
+      if (d <= strecke) {
+        t.x = ziel.x; t.y = ziel.y; t.pfad.shift(); strecke -= d;
+      } else {
+        t.x += dx / d * strecke; t.y += dy / d * strecke; strecke = 0;
+      }
+    }
+  }
+}
+
+// Verteidigungsbonus durch Gelände und eigene Wachtürme
+function gelaendeBonus(t) {
+  let bonus = 1;
+  if (t.art === 'heer') {
+    const k = kachel(Math.floor(t.x), Math.floor(t.y));
+    if (k && (k.typ === 'wald' || k.baum > 0.1)) bonus *= KRIEG.gelaendeBonus;
+  }
+  for (const g of gebaeude) {
+    if (g.typ !== 'wachturm' || g.spieler !== t.spieler) continue;
+    const z = zentrum(g);
+    if (Math.hypot(z.x - t.x, z.y - t.y) <= GEBAEUDE.wachturm.radius) {
+      bonus *= KRIEG.turmBonus;
+      break;
+    }
+  }
+  return bonus;
+}
+
+// Gebäude beschädigen; bei 0 Lebenspunkten fällt es
+function gebaeudeSchaden(geb, schaden, angreifer) {
+  geb.hp -= schaden;
+  if (geb.hp > 0) return;
+  const def = GEBAEUDE[geb.typ];
+  if (geb.typ === 'kontor') {
+    inselErobern(geb, angreifer);
+  } else {
+    if (geb.spieler === 0 || angreifer === 0)
+      melden(`💥 ${def.name} von ${spieler[geb.spieler].name} zerstört!`, 'zerstoert');
+    abreissenStill(geb);
+  }
+}
+
+// Abriss ohne Rückerstattung und ohne Meldung (Kriegsverlust)
+function abreissenStill(geb) {
+  const def = GEBAEUDE[geb.typ];
+  for (let y = geb.y; y < geb.y + def.h; y++)
+    for (let x = geb.x; x < geb.x + def.w; x++)
+      belegt[y * N + x] = null;
+  if (geb.felder) for (const idx of geb.felder) belegt[idx] = null;
+  gebaeude = gebaeude.filter(g => g !== geb);
+  if (state.auswahl === geb) { state.auswahl = null; panelZeigen(); }
+}
+
+// Fällt ein Kontor, wechselt die ganze Insel den Besitzer
+function inselErobern(kontor, sieger) {
+  const verlierer = kontor.spieler;
+  const insel = inselMarke ? inselMarke[kontor.y * N + kontor.x] : -1;
+  let uebernommen = 0;
+  for (const g of gebaeude) {
+    if (g.spieler !== verlierer) continue;
+    if (insel >= 0 && inselMarke[g.y * N + g.x] !== insel) continue;
+    g.spieler = sieger;
+    g.hp = g.maxHp;                       // der neue Herr baut auf
+    if (g.typ === 'wohnhaus') {           // Plünderung: halbe Einwohner, eine Stufe tiefer
+      g.ew = Math.max(1, Math.floor(g.ew / 2));
+      if (g.stufe > 0) { g.stufe--; g.maxEw = STUFEN[g.stufe].maxEw; }
+    }
+    uebernommen++;
+  }
+  // Kontor-Verweise der Beteiligten auffrischen
+  for (const sp of spieler)
+    sp.kontor = gebaeude.find(g => g.typ === 'kontor' && g.spieler === sp.id) || null;
+  state.kontorGebaut = !!spieler[0].kontor;
+
+  melden(`🚩 ${spieler[sieger].name} hat die Insel von ${spieler[verlierer].name} erobert (${uebernommen} Gebäude)!`);
+  if (verlierer === 0 && !spieler[0].kontor && !state.vorbei) niederlageErobert(spieler[sieger]);
+  menueBauen();
+}
+
+/* --- Das Gefecht: beide Seiten verlieren gleichzeitig Kräfte --- */
+function kriegSchritt(dt) {
+  if (!truppen.length) return;
+
+  for (const t of truppen) t.kampf = false;
+
+  // 1. Feindberührung: gleiche Art, weniger als eine Kachel Abstand
+  for (let i = 0; i < truppen.length; i++) {
+    const a = truppen[i];
+    for (let j = i + 1; j < truppen.length; j++) {
+      const b = truppen[j];
+      if (a.spieler === b.spieler || a.art !== b.art) continue;
+      if (Math.hypot(a.x - b.x, a.y - b.y) > 1.2) continue;
+
+      // Abrieb mit kleinem Zufallsanteil – kein Würfeln, sondern
+      // stetiger Verlust, passend zur laufenden Simulation
+      const sA = staerke(a) * gelaendeBonus(a) * (0.9 + Math.random() * 0.2);
+      const sB = staerke(b) * gelaendeBonus(b) * (0.9 + Math.random() * 0.2);
+      const fA = a.art === 'flotte' ? KRIEG.schiffWert : 1;
+      const fB = b.art === 'flotte' ? KRIEG.schiffWert : 1;
+      const verlustA = sB * KRIEG.verlustRate * dt / fA;
+      const verlustB = sA * KRIEG.verlustRate * dt / fB;
+      if (a.art === 'flotte') { a.schiffe -= verlustA; b.schiffe -= verlustB; }
+      else                    { a.mann    -= verlustA; b.mann    -= verlustB; }
+      a.moral = Math.max(0.45, a.moral - KRIEG.moralVerlust * dt);
+      b.moral = Math.max(0.45, b.moral - KRIEG.moralVerlust * dt);
+      a.kampf = b.kampf = true;
+      if (a.spieler === 0 || b.spieler === 0)
+        melden(a.art === 'flotte' ? '🌊 Seeschlacht!' : '⚔️ Schlacht!', 'schlacht');
+    }
+  }
+
+  // 2. Belagerung und Bombardement feindlicher Gebäude
+  for (const t of truppen) {
+    if (t.kampf) continue;
+    let ziel = null, besteD = 1e9;
+    for (const g of gebaeude) {
+      if (g.spieler === t.spieler) continue;
+      const z = zentrum(g);
+      const d = Math.hypot(z.x - t.x, z.y - t.y);
+      const reichweite = (t.art === 'flotte' ? 2.6 : 1.8) + Math.max(GEBAEUDE[g.typ].w, GEBAEUDE[g.typ].h) / 2;
+      if (d > reichweite) continue;
+      // Wehrbauten zuerst, dann das Kontor, dann der Rest
+      const rang = g.typ === 'wachturm' || g.typ === 'kaserne' ? 0
+                 : g.typ === 'kontor' ? 1 : 2;
+      const wert = rang * 100 + d;
+      if (wert < besteD) { ziel = g; besteD = wert; }
+    }
+    if (!ziel) continue;
+    const schaden = t.art === 'flotte'
+      ? t.schiffe * KRIEG.bombardement * dt
+      : (t.mann / 10) * KRIEG.belagerung * dt;
+    t.kampf = true;
+    gebaeudeSchaden(ziel, schaden, t.spieler);
+  }
+
+  // 3. Wachtürme beschießen feindliche Truppen in Reichweite
+  for (const g of gebaeude) {
+    if (g.typ !== 'wachturm') continue;
+    const z = zentrum(g);
+    for (const t of truppen) {
+      if (t.spieler === g.spieler) continue;
+      if (Math.hypot(z.x - t.x, z.y - t.y) > GEBAEUDE.wachturm.radius) continue;
+      if (t.art === 'flotte') t.schiffe -= KRIEG.turmSchaden * dt / KRIEG.schiffWert;
+      else                    t.mann    -= KRIEG.turmSchaden * dt;
+      t.kampf = true;
+    }
+  }
+
+  // 4. Aufgeriebene Stapel entfernen (eine sinkende Flotte reißt ihre Fracht mit)
+  truppen = truppen.filter(t => {
+    if (truppGroesse(t) > 0.5) return true;
+    if (t.spieler === 0)
+      melden(t.art === 'flotte'
+        ? '🌊 Deine Flotte ist versenkt!' : '💀 Dein Heer ist aufgerieben!');
+    else if (t.art === 'flotte' && t.fracht > 0)
+      melden(`🌊 Flotte von ${spieler[t.spieler].name} versenkt – die Truppen an Bord ertrinken!`, 'versenkt');
+    if (state.truppAuswahl === t) state.truppAuswahl = null;
+    return false;
+  });
+
+  // 5. Moral erholt sich außerhalb des Gefechts
+  for (const t of truppen)
+    if (!t.kampf) t.moral = Math.min(1, t.moral + 0.03 * dt);
+}
+
+// Sold: Soldaten und Schiffe kosten laufend Gold
+function soldJeSpieler(sid) {
+  let kosten = 0;
+  for (const t of truppen) {
+    if (t.spieler !== sid) continue;
+    kosten += (t.mann + t.fracht) * KRIEG.sold + t.schiffe * KRIEG.soldSchiff;
+  }
+  return kosten;
 }
 
 /* ---------- 6. SIMULATION ------------------------------------- */
@@ -1509,6 +2001,7 @@ function simSchritt(dt) {
       case 'baeckerei':   verarbeiter('mehl', 'nahrung', 2); break;
       case 'tabakladen':  verarbeiter('tabakblaetter', 'tabak'); break;
       case 'schneiderei': verarbeiter('stoffe', 'kleidung'); break;
+      case 'waffenschmiede': verarbeiter('werkzeuge', 'waffen'); break;
 
       // --- Betriebe am Gestein ---
       case 'ziegelei': {
@@ -1604,6 +2097,11 @@ function simSchritt(dt) {
       }
     }
   }
+
+  // --- Krieg: Sold zahlen, marschieren, kämpfen ---
+  for (const sp of spieler) unterhaltJe[sp.id] += soldJeSpieler(sp.id) * dt;
+  truppenUpdate(dt);
+  kriegSchritt(dt);
 
   // --- Goldbilanz je Spieler ---
   for (const sp of spieler) sp.res.gold += steuernJe[sp.id] - unterhaltJe[sp.id];
@@ -1838,6 +2336,15 @@ function zeichnen() {
     ctx.font = `${Math.min(bw, bh) * 0.58}px sans-serif`;
     ctx.fillText(emoji, px + bw / 2, py + bh / 2 + 1);
 
+    // Lebensbalken, sobald ein Gebäude beschädigt ist
+    if (geb.hp < geb.maxHp) {
+      const anteil = Math.max(0, geb.hp / geb.maxHp);
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(px + 4, py + bh - 8, bw - 8, 4);
+      ctx.fillStyle = anteil > 0.5 ? '#16a34a' : anteil > 0.25 ? '#f59e0b' : '#dc2626';
+      ctx.fillRect(px + 4, py + bh - 8, (bw - 8) * anteil, 4);
+    }
+
     // Besitzer-Fähnchen: farbiger Punkt oben links
     ctx.beginPath();
     ctx.arc(px + 7, py + 7, 4, 0, Math.PI * 2);
@@ -1874,6 +2381,50 @@ function zeichnen() {
       ctx.lineWidth = 3 / Math.sqrt(z);
       ctx.stroke();
     }
+  }
+
+  // --- Heere und Flotten ---
+  for (const t of truppen) {
+    const px = t.x * T, py = t.y * T;
+    const farbe = spieler[t.spieler].farbe;
+    const gr = truppGroesse(t);
+
+    // Im Gefecht pulsiert ein roter Ring um den Stapel
+    if (t.kampf) {
+      const puls = (performance.now() % 900) / 900;
+      ctx.beginPath();
+      ctx.arc(px, py, T * 0.45 + puls * T * 0.45, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(220,38,38,${(1 - puls) * 0.9})`;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+
+    rundRect(ctx, px - T * 0.42, py - T * 0.42, T * 0.84, T * 0.84, 7);
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fill();
+    ctx.strokeStyle = farbe;
+    ctx.lineWidth = state.truppAuswahl === t ? 4 : 2.5;
+    ctx.stroke();
+
+    ctx.font = `${T * 0.4}px sans-serif`;
+    ctx.fillText(t.art === 'flotte' ? '🚢' : '⚔️', px, py - T * 0.1);
+    ctx.font = `bold ${T * 0.3}px system-ui, sans-serif`;
+    ctx.fillStyle = '#1f2937';
+    ctx.fillText(Math.round(gr) + (t.fracht > 0 ? '+' + Math.round(t.fracht) : ''),
+                 px, py + T * 0.24);
+  }
+
+  // Marschziel der ausgewählten Truppe als Linie andeuten
+  if (state.truppAuswahl && state.truppAuswahl.pfad.length) {
+    const tA = state.truppAuswahl, zielP = tA.pfad[tA.pfad.length - 1];
+    ctx.beginPath();
+    ctx.moveTo(tA.x * T, tA.y * T);
+    ctx.lineTo(zielP.x * T, zielP.y * T);
+    ctx.strokeStyle = 'rgba(22,163,74,0.6)';
+    ctx.lineWidth = 2.5 / Math.sqrt(z);
+    ctx.setLineDash([8 / z, 6 / z]);
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
 
   // --- Das Schiff (leicht auf den Wellen schaukelnd) ---
@@ -2090,7 +2641,7 @@ function klickAufKarte(sx, sy) {
 
   // Tipp aufs Wasser: das Schiff segelt dorthin. Mit dem Zeiger-Werkzeug
   // geht das jederzeit, vor dem Kontor-Bau sogar mit jedem Werkzeug.
-  if (t && kachel(t.x, t.y).typ === 'wasser' &&
+  if (t && kachel(t.x, t.y).typ === 'wasser' && !state.truppAuswahl &&
       (state.werkzeug === 'zeiger' || !state.kontorGebaut)) {
     const weg = segelWeg(t.x, t.y);
     if (weg) {
@@ -2102,6 +2653,24 @@ function klickAufKarte(sx, sy) {
   }
 
   if (state.werkzeug === 'zeiger') {
+    // Ist eine eigene Truppe ausgewählt, gilt der Tipp als Befehl
+    if (state.truppAuswahl && t && truppeBei(t.x, t.y, 0) !== state.truppAuswahl) {
+      const plan = befehlPlanen(state.truppAuswahl, t.x, t.y);
+      state.vorschau = { modus: 'befehl', truppe: state.truppAuswahl, plan };
+      bestaetigungZeigen();
+      return;
+    }
+    // Sonst: eigene Truppe auswählen …
+    const eigene = t && truppeBei(t.x, t.y, 0);
+    if (eigene) {
+      state.truppAuswahl = eigene;
+      state.auswahl = null;
+      state.vorschau = null; bestaetigungZeigen();
+      panelZeigen();
+      return;
+    }
+    // … oder wie gewohnt ein Gebäude
+    state.truppAuswahl = null;
     state.auswahl = t ? belegtAuf(t.x, t.y) : null;
     panelZeigen();
   } else if (state.werkzeug === 'abriss') {
@@ -2122,6 +2691,98 @@ function klickAufKarte(sx, sy) {
   }
 }
 
+// --- Befehl für die ausgewählte Truppe planen ---
+// Liefert Beschreibung und Aktion, damit die Bestätigungsleiste vorher
+// zeigt, was passieren wird (kein versehentlicher Angriff).
+function befehlPlanen(t, tx, ty) {
+  const k = kachel(tx, ty);
+  if (!k) return { ok: false, text: 'Außerhalb der Karte' };
+  const gegner = truppeBei(tx, ty);
+  const geb = belegtAuf(tx, ty);
+
+  // Eigene Truppe derselben Art → vereinigen
+  if (gegner && gegner !== t && gegner.spieler === 0 && gegner.art === t.art)
+    return { ok: true, aktion: 'vereinigen', ziel: gegner,
+             text: `Truppen vereinigen (${Math.round(truppGroesse(t))} + ${Math.round(truppGroesse(gegner))})` };
+
+  // Heer auf eigene Flotte → einschiffen
+  if (t.art === 'heer' && gegner && gegner.spieler === 0 && gegner.art === 'flotte') {
+    if (Math.hypot(t.x - gegner.x, t.y - gegner.y) > 2.6)
+      return { ok: false, text: 'Zu weit von der Flotte – erst ans Ufer marschieren' };
+    return { ok: true, aktion: 'einschiffen', ziel: gegner,
+             text: `${Math.round(t.mann)} Mann einschiffen` };
+  }
+
+  // Flotte mit Fracht auf Land → anlanden
+  if (t.art === 'flotte' && k.typ !== 'wasser') {
+    if (t.fracht < 1) return { ok: false, text: 'Keine Truppen an Bord' };
+    if (!landFrei(ty * N + tx)) return { ok: false, text: 'Dort kann niemand an Land gehen' };
+    if (Math.hypot(t.x - (tx + 0.5), t.y - (ty + 0.5)) > 2.6)
+      return { ok: false, text: 'Zu weit von der Küste – näher heransegeln' };
+    return { ok: true, aktion: 'anlanden', tx, ty,
+             text: `${Math.round(t.fracht)} Mann an Land setzen` };
+  }
+
+  // Angriff auf feindliche Truppe gleicher Art
+  if (gegner && gegner.spieler !== 0 && gegner.art === t.art) {
+    const weg = truppWeg(t, Math.floor(gegner.x), Math.floor(gegner.y));
+    if (!weg) return { ok: false, text: 'Dorthin führt kein Weg' };
+    const chance = staerke(t) / (staerke(t) + staerke(gegner));
+    const urteil = chance > 0.65 ? 'gute Aussichten'
+                 : chance > 0.45 ? 'offener Ausgang' : '⚠️ unterlegen!';
+    return { ok: true, aktion: 'marsch', weg,
+             text: `${t.art === 'flotte' ? '🌊 Seeschlacht' : '⚔️ Angriff'} auf ${spieler[gegner.spieler].name}: ` +
+                   `<b>${Math.round(staerke(t))}</b> gegen <b>${Math.round(staerke(gegner))}</b> – ${urteil}` };
+  }
+
+  // Angriff auf ein feindliches Gebäude
+  if (geb && geb.spieler !== 0) {
+    let weg = truppWeg(t, tx, ty);
+    if (!weg) {
+      const f = freiesFeldNeben(tx, ty, t.art === 'flotte' ? seeFrei : landFrei);
+      if (f) weg = truppWeg(t, Math.floor(f.x), Math.floor(f.y));
+    }
+    if (!weg) return { ok: false, text: 'Dorthin führt kein Weg' };
+    return { ok: true, aktion: 'marsch', weg,
+             text: `${geb.typ === 'kontor' ? '🚩 Kontor' : GEBAEUDE[geb.typ].name} von ` +
+                   `${spieler[geb.spieler].name} angreifen` +
+                   (geb.typ === 'kontor' ? ' – bei Erfolg fällt die ganze Insel!' : '') };
+  }
+
+  // Einfacher Marsch bzw. Fahrt
+  const weg = truppWeg(t, tx, ty);
+  if (!weg) return { ok: false, text: t.art === 'flotte'
+    ? 'Dorthin führt kein Seeweg' : 'Dorthin führt kein Landweg (Fluss ohne Brücke?)' };
+  return { ok: true, aktion: 'marsch', weg,
+           text: t.art === 'flotte' ? '🚢 Dorthin segeln' : '⚔️ Dorthin marschieren' };
+}
+
+function befehlAusfuehren(v) {
+  const t = v.truppe, plan = v.plan;
+  if (!truppen.includes(t) || !plan.ok) return;
+  if (plan.aktion === 'marsch') t.pfad = plan.weg;
+  else if (plan.aktion === 'vereinigen') {
+    const z = plan.ziel;
+    if (t.art === 'flotte') { z.schiffe += t.schiffe; z.fracht += t.fracht; }
+    else z.mann += t.mann;
+    truppen = truppen.filter(x => x !== t);
+    state.truppAuswahl = z;
+    melden('Truppen vereinigt');
+  } else if (plan.aktion === 'einschiffen') {
+    plan.ziel.fracht += t.mann;
+    truppen = truppen.filter(x => x !== t);
+    state.truppAuswahl = plan.ziel;
+    melden('⚓ Truppen an Bord – jetzt eine fremde Küste ansteuern');
+  } else if (plan.aktion === 'anlanden') {
+    const neu = neueTruppe(0, 'heer', plan.tx + 0.5, plan.ty + 0.5);
+    neu.mann = t.fracht;
+    neu.moral = t.moral;
+    t.fracht = 0;
+    state.truppAuswahl = neu;
+    melden('🏖️ Truppen sind gelandet!');
+  }
+}
+
 // Tastatur: Pfeile/WASD verschieben, Leertaste pausiert, 1–3 Tempo, Esc Zeiger
 window.addEventListener('keydown', e => {
   const schritt = 90 / kamera.zoom;
@@ -2136,7 +2797,7 @@ window.addEventListener('keydown', e => {
     case '3': tempoSetzen(3); break;
     case 'Escape':
       werkzeugWaehlen('zeiger');
-      state.auswahl = null; panelZeigen();
+      state.auswahl = null; state.truppAuswahl = null; panelZeigen();
       break;
   }
 });
@@ -2235,6 +2896,12 @@ function bestaetigungZeigen() {
   if (!v) { leiste.style.display = 'none'; return; }
   leiste.style.display = 'flex';
 
+  if (v.modus === 'befehl') {
+    $('bestaetigung-text').innerHTML = v.plan.text;
+    $('b-ok').textContent = '✓ Befehl';
+    $('b-ok').disabled = !v.plan.ok;
+    return;
+  }
   if (v.modus === 'abriss') {
     const def = GEBAEUDE[v.geb.typ];
     $('bestaetigung-text').innerHTML = `${def.emoji} <b>${def.name}</b> wirklich abreißen? (50 % zurück)`;
@@ -2263,7 +2930,10 @@ function bestaetigungZeigen() {
 $('b-ok').addEventListener('click', () => {
   const v = state.vorschau;
   if (!v) return;
-  if (v.modus === 'abriss') {
+  if (v.modus === 'befehl') {
+    befehlAusfuehren(v);
+    state.vorschau = null;
+  } else if (v.modus === 'abriss') {
     abreissen(v.geb);
     state.vorschau = null;
   } else if (platziere(v.typ, v.tx, v.ty)) {
@@ -2412,6 +3082,30 @@ function auslastungGrund(geb) {
 // Info-Panel für das ausgewählte Gebäude
 function panelZeigen() {
   const panel = $('info-panel');
+
+  // Zuerst: ist eine Truppe ausgewählt?
+  const tr = state.truppAuswahl;
+  if (tr && truppen.includes(tr)) {
+    panel.style.display = 'block';
+    const istFlotte = tr.art === 'flotte';
+    let h = `<h2><span>${istFlotte ? '🚢' : '⚔️'}</span> ${istFlotte ? 'Flotte' : 'Heer'}</h2>`;
+    h += `<div class="beschr">Tippe auf ein Ziel auf der Karte – die Leiste unten zeigt vorher, was passiert.</div>`;
+    h += `<div class="zeile"><span>${istFlotte ? 'Kriegsschiffe' : 'Soldaten'}</span>` +
+         `<span>${Math.round(truppGroesse(tr))}</span></div>`;
+    if (istFlotte)
+      h += `<div class="zeile"><span>Truppen an Bord</span><span>${Math.round(tr.fracht)}</span></div>`;
+    h += `<div class="zeile"><span>Kampfkraft</span><span>${Math.round(staerke(tr))}</span></div>`;
+    h += `<div class="zeile"><span>Moral</span><span>${Math.round(tr.moral * 100)} %</span></div>`;
+    h += `<div class="auslast-balken"><div style="width:${Math.round(tr.moral * 100)}%"></div></div>`;
+    h += `<div class="zeile" style="margin-top:6px"><span>Sold</span><span>` +
+         `${((tr.mann + tr.fracht) * KRIEG.sold * 60 + tr.schiffe * KRIEG.soldSchiff * 60).toFixed(0)} 💰/min</span></div>`;
+    if (tr.kampf) h += `<div class="beschr" style="color:var(--rot);font-weight:700;margin-top:6px">⚔️ Im Gefecht!</div>`;
+    h += `<button class="abriss-knopf" style="background:#f3f4f6;color:var(--text)" onclick="truppHalt()">✋ Halt</button>`;
+    h += `<button class="abriss-knopf" onclick="truppAufloesen()">🏳️ Auflösen</button>`;
+    $('panel-inhalt').innerHTML = h;
+    return;
+  }
+
   const geb = state.auswahl;
   if (!geb) { panel.style.display = 'none'; return; }
   panel.style.display = 'block';
@@ -2500,6 +3194,23 @@ function panelZeigen() {
     }
   }
 
+  // Zustand des Gebäudes, sobald es beschädigt ist
+  if (geb.hp < geb.maxHp)
+    html += `<div class="zeile"><span>Zustand</span><span style="color:var(--rot)">` +
+            `${Math.max(0, Math.round(geb.hp))} / ${geb.maxHp} 🛡️</span></div>`;
+
+  // Militärgebäude: Truppen ausheben bzw. Schiffe bauen
+  if (geb.spieler === 0 && geb.typ === 'kaserne') {
+    const k = Object.entries(TRUPP_KOSTEN).map(([w, m]) => `${WAREN_EMOJI[w]}${m}`).join(' ');
+    html += `<button class="abriss-knopf" style="background:#f0fdf4;color:var(--accent-dunkel)" ` +
+            `onclick="ausheben(state.auswahl); panelZeigen()">⚔️ ${TRUPP_MANN} Mann ausheben (${k} + 👥${TRUPP_EINWOHNER})</button>`;
+  }
+  if (geb.spieler === 0 && geb.typ === 'werft') {
+    const k = Object.entries(SCHIFF_KOSTEN).map(([w, m]) => `${WAREN_EMOJI[w]}${m}`).join(' ');
+    html += `<button class="abriss-knopf" style="background:#f0fdf4;color:var(--accent-dunkel)" ` +
+            `onclick="schiffBauen(state.auswahl); panelZeigen()">🚢 Kriegsschiff bauen (${k})</button>`;
+  }
+
   if (geb.spieler === 0)
     html += `<button class="abriss-knopf" onclick="abreissenAuswahl()">🧨 Abreißen</button>`;
   $('panel-inhalt').innerHTML = html;
@@ -2508,6 +3219,41 @@ function beduerfnis(name, erfuellt) {
   return `<div class="beduerfnis"><span>${name}</span>` +
          `<span class="${erfuellt ? 'ok' : 'fehlt'}">${erfuellt ? '✓' : '✗'}</span></div>`;
 }
+function truppHalt() {
+  if (state.truppAuswahl) { state.truppAuswahl.pfad = []; melden('Truppe hält an'); }
+}
+function truppAufloesen() {
+  const t = state.truppAuswahl;
+  if (!t) return;
+  // Soldaten kehren als Einwohner zurück – Schiffe werden abgewrackt
+  if (t.art === 'heer' || t.fracht > 0) {
+    let rest = Math.round(t.mann + t.fracht);
+    for (const g of gebaeude) {
+      if (rest <= 0) break;
+      if (g.typ !== 'wohnhaus' || g.spieler !== 0) continue;
+      const platz = Math.min(g.maxEw - g.ew, rest);
+      if (platz > 0) { g.ew += platz; rest -= platz; }
+    }
+  }
+  if (t.art === 'flotte') res.holz += Math.floor(t.schiffe * 4);
+  truppen = truppen.filter(x => x !== t);
+  state.truppAuswahl = null;
+  panelZeigen();
+  melden('Truppe aufgelöst – die Leute kehren heim');
+}
+
+// Niederlage: alle eigenen Kontore verloren
+function niederlageErobert(sieger) {
+  state.vorbei = true;
+  $('overlay').style.display = 'flex';
+  $('overlay-box').innerHTML = `
+    <div class="gross">🏴</div>
+    <h1>Deine Insel ist gefallen!</h1>
+    <p><span style="color:${sieger.farbe}">● ${sieger.name}</span> hat dein letztes Kontor erobert.<br>
+       Erreichte Siedler: <b>${spieler[0].siedlerEw || 0}</b> von ${SIM.zielSiedler}.</p>
+    <button class="knopf-gruen" onclick="location.reload()">Neue Welt</button>`;
+}
+
 function abreissenAuswahl() { if (state.auswahl && state.auswahl.spieler === 0) abreissen(state.auswahl); }
 $('panel-zu').addEventListener('click', () => { state.auswahl = null; panelZeigen(); });
 
