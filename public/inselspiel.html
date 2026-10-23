@@ -193,6 +193,31 @@
   }
   .auto-zeile button.auto-an { background: #f0fdf4; color: var(--accent-dunkel); }
 
+  /* Reiter im Kontor-Panel */
+  .tab-leiste { display: flex; gap: 4px; margin: 8px 0 4px; }
+  .tab-leiste button {
+    flex: 1; border: none; border-radius: 8px; padding: 6px;
+    font-family: inherit; font-size: 12px; font-weight: 700;
+    background: #f3f4f6; color: var(--text-leise); cursor: pointer;
+  }
+  .tab-leiste button.aktiv { background: var(--accent); color: #fff; }
+
+  /* Diplomatie */
+  .diplo-kopf { display: flex; justify-content: space-between; align-items: center;
+                margin-top: 9px; font-size: 12.5px; font-weight: 700; }
+  .diplo-balken { height: 6px; border-radius: 3px; background: #e5e7eb;
+                  overflow: hidden; margin: 3px 0 5px; }
+  .diplo-balken > div { height: 100%; }
+  .diplo-knoepfe { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+  .diplo-knoepfe button {
+    border: none; border-radius: 6px; padding: 4px 7px; cursor: pointer;
+    font-family: inherit; font-size: 10.5px; font-weight: 600;
+    background: #f3f4f6; color: var(--text); flex: 1 1 auto;
+  }
+  .diplo-knoepfe button.gut   { background: #f0fdf4; color: var(--accent-dunkel); }
+  .diplo-knoepfe button.boese { background: #fef2f2; color: var(--rot); }
+  .diplo-knoepfe button.an    { background: var(--rot); color: #fff; }
+
   /* ---------- Meldungen (Toast) & Hinweise ---------- */
   #toast {
     position: absolute; bottom: 210px; left: 50%; transform: translateX(-50%);
@@ -425,19 +450,28 @@ function verkaufspreis(ware) { return Math.max(1, Math.round(PREISE[ware].verkau
 
 // Führt einen Handel für einen beliebigen Spieler aus (auch die KI).
 // menge > 0 = kaufen, menge < 0 = verkaufen. Liefert false bei Geldmangel.
+let handelFehler = '';   // Grund des letzten gescheiterten Handels
 function handelAusfuehren(sp, ware, menge) {
   const R = sp.res;
+  handelFehler = '';
+  // Jeder Handel verbraucht Kontingent – der Markt ist endlich
+  if (sp.kontingent < Math.abs(menge) - 0.001) {
+    handelFehler = 'Handelskontingent erschöpft – es erholt sich laufend';
+    return false;
+  }
   if (menge > 0) {
     const kosten = kaufpreis(ware) * menge;
-    if (R.gold < kosten) return false;
+    if (R.gold < kosten) { handelFehler = 'Zu wenig Gold zum Kaufen'; return false; }
     R.gold -= kosten;
     R[ware] += menge;
+    sp.kontingent -= menge;
     markt[ware] = Math.min(3, markt[ware] * (1 + 0.006 * menge));    // Nachfrage → teurer
   } else {
     const anzahl = Math.min(-menge, Math.floor(R[ware]));
-    if (anzahl <= 0) return false;
+    if (anzahl <= 0) { handelFehler = 'Nichts zum Verkaufen da'; return false; }
     R[ware] -= anzahl;
     R.gold += verkaufspreis(ware) * anzahl;
+    sp.kontingent -= anzahl;
     markt[ware] = Math.max(0.5, markt[ware] * (1 - 0.004 * anzahl)); // Überangebot → billiger
   }
   return true;
@@ -458,6 +492,97 @@ function autoVerkaufWechseln(ware) {
   const i = AUTOVERKAUF_STUFEN.indexOf(autoHandel[ware].verkauf);
   autoHandel[ware].verkauf = AUTOVERKAUF_STUFEN[(i + 1) % AUTOVERKAUF_STUFEN.length];
   panelZeigen();
+}
+
+// --- Handelskontingent ---------------------------------------
+// Der Markt ist endlich: Jeder Spieler kann je Minute nur eine
+// begrenzte Warenmenge umschlagen. Das Kontingent wächst mit der
+// Bevölkerung – wer groß wird, darf mehr handeln, muss aber auch
+// mehr selbst produzieren. Sanktionen kürzen es.
+const HANDEL = {
+  basis:        150,   // Grundkontingent je Spieler
+  jeEinwohner:  1.1,   // Zuwachs je Einwohner
+  jeKontor:     80,    // Zuwachs je Kontor
+  erholung:     60,    // Sekunden bis zur vollen Erholung
+};
+
+// --- Diplomatie ----------------------------------------------
+// Feindschaft 0 (verbündet) bis 100 (erbitterter Krieg). Daraus
+// ergibt sich die Eskalationsstufe – militärische Angriffe sind
+// erst in der höchsten Stufe erlaubt, alles darunter ist Wirtschaft.
+const DIPLO_STUFEN = [
+  { ab:  0, name: 'Bündnis',      emoji: '🤝', farbe: '#16a34a' },
+  { ab: 20, name: 'Frieden',      emoji: '🕊️', farbe: '#15803d' },
+  { ab: 42, name: 'Spannungen',   emoji: '⚡', farbe: '#d97706' },
+  { ab: 64, name: 'Handelskrieg', emoji: '⚖️', farbe: '#ea580c' },
+  { ab: 84, name: 'Krieg',        emoji: '⚔️', farbe: '#dc2626' },
+];
+const KRIEG_AB = 84;          // ab hier sind Angriffe erklärt und erlaubt
+
+const DIPLO = {
+  geschenk:  { name: 'Geschenk senden',    emoji: '🎁', gold: 1500, feind: -18 },
+  frieden:   { name: 'Frieden erkaufen',   emoji: '🕊️', gold: 6000, feind: -45 },
+  bestechen: { name: 'Händler bestechen',  emoji: '💼', gold: 2500, feind: 14, malus: 0.30, dauer: 120 },
+  privileg:  { name: 'Handelsprivileg',    emoji: '📜', gold: 4000, bonus: 0.45, dauer: 120, feindAlle: 6 },
+  embargo:   { name: 'Embargo',            emoji: '⛔', proSekunde: 2.5, feind: 22, malus: 0.25 },
+  krieg:     { name: 'Krieg erklären',     emoji: '⚔️', feindZiel: 88 },
+};
+
+// Feindschaft zwischen je zwei Spielern (symmetrische Matrix)
+let feindschaft = [];
+function feindStufe(a, b) {
+  const w = feindschaft[a][b];
+  let st = DIPLO_STUFEN[0];
+  for (const s of DIPLO_STUFEN) if (w >= s.ab) st = s;
+  return st;
+}
+function imKriegMit(a, b) { return feindschaft[a][b] >= KRIEG_AB; }
+function feindAendern(a, b, delta) {
+  if (a === b) return;
+  const neu = Math.max(0, Math.min(100, feindschaft[a][b] + delta));
+  feindschaft[a][b] = feindschaft[b][a] = neu;
+}
+
+// Befristete Wirtschaftswirkungen (Bestechung, Privileg)
+let diploEffekte = [];
+
+// --- Ausbaustufen ---------------------------------------------
+// Jedes Gebäude lässt sich zweimal ausbauen: mehr Ertrag bzw.
+// größerer Wirkradius, dafür höhere Kosten und mehr Unterhalt.
+const AUSBAU_MAX = 3;
+function ausbauFaktor(geb) { return 1 + 0.5 * ((geb.ausbau || 1) - 1); }
+function wirkRadius(geb) {
+  const def = GEBAEUDE[geb.typ];
+  const basis = def.marktRadius || def.radius || 0;
+  return basis + ((geb.ausbau || 1) - 1) * 2;
+}
+function ausbauKosten(geb) {
+  const stufe = geb.ausbau || 1;
+  // Das Kontor wird gratis gegründet – für seinen Ausbau gilt die
+  // Gebühr eines Zweitkontors als Grundlage.
+  let basis = GEBAEUDE[geb.typ].kosten;
+  if (!Object.keys(basis).length) basis = KONTOR_AUSBAU;
+  const kosten = {};
+  for (const [ware, menge] of Object.entries(basis))
+    kosten[ware] = Math.round(menge * stufe * 1.6);
+  return kosten;
+}
+function ausbauen(geb) {
+  if (!geb || geb.spieler !== 0) return false;
+  if ((geb.ausbau || 1) >= AUSBAU_MAX) { melden('Höchste Ausbaustufe erreicht'); return false; }
+  const kosten = ausbauKosten(geb);
+  for (const [ware, menge] of Object.entries(kosten))
+    if (res[ware] < menge) {
+      melden(`Ausbau: es fehlt ${WAREN_EMOJI[ware]} ${Math.ceil(menge - res[ware])}`);
+      return false;
+    }
+  for (const [ware, menge] of Object.entries(kosten)) res[ware] -= menge;
+  geb.ausbau = (geb.ausbau || 1) + 1;
+  geb.maxHp = Math.round(geb.maxHp * 1.35);
+  geb.hp = geb.maxHp;
+  melden(`⬆️ ${GEBAEUDE[geb.typ].name} auf Stufe ${geb.ausbau} ausgebaut`);
+  panelZeigen();
+  return true;
 }
 
 const WAREN_NAME = { holz: 'Holz', werkzeuge: 'Werkzeuge', ziegel: 'Ziegel',
@@ -750,6 +875,10 @@ function neuerSpieler(id, name, farbe, ki, start) {
     maxStufe: 0,                 // höchste erreichte Bevölkerungsstufe
     einwohner: 0, siedlerEw: 0,  // wird in der Simulation gefüllt
     mangel: {}, hunger: false,
+    kontingent: HANDEL.basis, kontingentMax: HANDEL.basis,
+    handelsMalus: 0, handelsBonus: 0,
+    embargo: [false, false, false, false],   // gegen wen läuft ein Embargo?
+    ueberfallen: false,                      // hat ohne Kriegserklärung angegriffen?
     plan: ki ? [...KI_PLAN] : null,   // Bauplan nur für die KI
     aggression: 0.6 + id * 0.25,      // wie stark die KI aufrüstet
     res: { gold: 10000, holz: 40, werkzeuge: 20, ziegel: 0, nahrung: 40,
@@ -778,6 +907,7 @@ const state = {
   kontorGebaut: false,
   auswahl: null,          // aktuell angeklicktes Gebäude
   truppAuswahl: null,     // ausgewähltes Heer bzw. ausgewählte Flotte
+  kontorTab: 'handel',    // Reiter im Kontor: 'handel' oder 'diplomatie'
   pause: false,
   tempo: 1,               // 1, 2 oder 3
   vorbei: false,          // Bankrott
@@ -1181,7 +1311,7 @@ function marktAnbindung(cx, cy, sid = 0) {
     const def = GEBAEUDE[g.typ];
     if (!def.marktRadius || g.spieler !== sid) continue;
     const z = zentrum(g);
-    if (Math.hypot(z.x - cx, z.y - cy) > def.marktRadius) continue;
+    if (Math.hypot(z.x - cx, z.y - cy) > wirkRadius(g)) continue;
     // Ein Fluss ohne Brücke unterbricht die Versorgung
     if (flussDazwischen(z.x, z.y, cx, cy)) continue;
     return true;
@@ -1194,7 +1324,7 @@ function gebaeudeInReichweite(typ, cx, cy, sid = 0) {
   for (const g of gebaeude) {
     if (g.typ !== typ || g.spieler !== sid) continue;
     const z = zentrum(g);
-    if (Math.hypot(z.x - cx, z.y - cy) <= GEBAEUDE[typ].radius) return true;
+    if (Math.hypot(z.x - cx, z.y - cy) <= wirkRadius(g)) return true;
   }
   return false;
 }
@@ -1309,6 +1439,7 @@ function platziere(typ, tx, ty, sid = 0) {
   const geb = {
     id: naechsteId++, typ, x: ax, y: ay, spieler: sid,
     hp: def.hp || 100, maxHp: def.hp || 100,   // für Belagerungen
+    ausbau: 1,                                 // Ausbaustufe 1–3
     fortschritt: 0,   // Produktionsfortschritt in Sekunden
     eff: 0,           // Auslastung 0..1 (für das Info-Panel)
   };
@@ -1450,11 +1581,7 @@ function kiKrieg(sp) {
   if (werft && R.gold > 3000 && (!flotte || flotte.schiffe < sollSchiffe))
     schiffBauen(werft);
 
-  // 4. Angreifen – erst nach der Friedensfrist und nur mit starker Flotte
-  if (state.spielzeit < KRIEG.kiFriede) return;
-  if (!flotte || flotte.schiffe < sollSchiffe || flotte.pfad.length) return;
-
-  // Ziel: der Führende im Wettlauf (hält das Rennen offen)
+  // 4. Ziel bestimmen: der Führende im Wettlauf (hält das Rennen offen)
   let ziel = null, bestPunkte = -1;
   for (const geg of spieler) {
     if (geg.id === sp.id || !geg.kontor) continue;
@@ -1462,6 +1589,33 @@ function kiKrieg(sp) {
     if (punkte > bestPunkte) { bestPunkte = punkte; ziel = geg; }
   }
   if (!ziel) return;
+  const spannung = feindschaft[sp.id][ziel.id];
+
+  // 5. Wirtschaftskrieg: ab der Handelskriegs-Stufe wird sanktioniert
+  if (spannung >= 64 && R.gold > 9000 && Math.random() < 0.35) {
+    R.gold -= DIPLO.bestechen.gold;
+    diploEffekte.push({ art: 'bestechung', von: sp.id, gegen: ziel.id,
+                        wert: DIPLO.bestechen.malus, bis: state.spielzeit + DIPLO.bestechen.dauer });
+    if (ziel.id === 0) melden(`💼 ${sp.name} besticht die Händler gegen dich!`, 'ki-bestech' + sp.id);
+    return;
+  }
+  if (spannung >= 70 && !sp.embargo[ziel.id] && R.gold > 15000) {
+    sp.embargo[ziel.id] = true;
+    feindAendern(sp.id, ziel.id, DIPLO.embargo.feind);
+    if (ziel.id === 0) melden(`⛔ ${sp.name} verhängt ein Embargo gegen dich!`, 'ki-embargo' + sp.id);
+    return;
+  }
+
+  // 6. Krieg erklären – erst nach der Friedensfrist und mit starker Flotte
+  if (state.spielzeit < KRIEG.kiFriede) return;
+  if (!flotte || flotte.schiffe < sollSchiffe || flotte.pfad.length) return;
+  if (!imKriegMit(sp.id, ziel.id)) {
+    if (spannung < 76) return;                    // noch nicht kriegsbereit
+    feindschaft[sp.id][ziel.id] = feindschaft[ziel.id][sp.id] = DIPLO.krieg.feindZiel;
+    if (ziel.id === 0) melden(`⚔️ ${sp.name} erklärt dir den Krieg!`, 'ki-erklaerung' + sp.id);
+    else melden(`⚔️ ${sp.name} erklärt ${ziel.name} den Krieg`, 'ki-krieg');
+    return;                                        // Angriff erst im nächsten Zug
+  }
   const anker = wasserFeldNeben(ziel.kontor);
   if (!anker) return;
   const weg = truppWeg(flotte, Math.floor(anker.x), Math.floor(anker.y));
@@ -1515,6 +1669,119 @@ function kiTick(sp, dt) {
 }
 
 
+/* ---------- 5b2. DIPLOMATIE UND WIRTSCHAFTSKRIEG --------------- */
+// Vor dem Schwert kommt der Handel: Mit Geschenken, Bestechung,
+// Embargos und Privilegien lässt sich ein Gegner ruinieren, ohne
+// einen einzigen Soldaten auszuheben.
+
+function diploAktion(art, gegen) {
+  const a = DIPLO[art], ich = spieler[0], ziel = spieler[gegen];
+  if (!a || gegen === 0) return false;
+
+  if (art === 'embargo') {            // Umschalter mit laufenden Kosten
+    ich.embargo[gegen] = !ich.embargo[gegen];
+    if (ich.embargo[gegen]) {
+      feindAendern(0, gegen, a.feind);
+      melden(`⛔ Embargo gegen ${ziel.name} verhängt – kostet ${a.proSekunde * 60} 💰/min`);
+    } else melden(`Embargo gegen ${ziel.name} aufgehoben`);
+    panelZeigen();
+    return true;
+  }
+
+  if (art === 'krieg') {
+    if (imKriegMit(0, gegen)) { melden('Ihr seid bereits im Krieg'); return false; }
+    feindschaft[0][gegen] = feindschaft[gegen][0] = a.feindZiel;
+    melden(`⚔️ Du hast ${ziel.name} den Krieg erklärt – jetzt sind Angriffe erlaubt`);
+    panelZeigen();
+    return true;
+  }
+
+  if (a.gold && ich.res.gold < a.gold) {
+    melden(`Dafür fehlen ${Math.ceil(a.gold - ich.res.gold)} 💰`);
+    return false;
+  }
+  if (a.gold) ich.res.gold -= a.gold;
+
+  if (art === 'geschenk') {
+    feindAendern(0, gegen, a.feind);
+    melden(`🎁 Geschenk an ${ziel.name} – die Beziehung entspannt sich`);
+  } else if (art === 'frieden') {
+    feindAendern(0, gegen, a.feind);
+    for (const sp of spieler) if (sp.id !== 0) sp.embargo[0] = false;
+    ich.embargo[gegen] = false;
+    melden(`🕊️ Frieden mit ${ziel.name} erkauft`);
+  } else if (art === 'bestechen') {
+    diploEffekte.push({ art: 'bestechung', von: 0, gegen, wert: a.malus,
+                        bis: state.spielzeit + a.dauer });
+    feindAendern(0, gegen, a.feind);
+    melden(`💼 Die Händler meiden ${ziel.name} – sein Kontingent sinkt`);
+  } else if (art === 'privileg') {
+    diploEffekte.push({ art: 'privileg', von: 0, gegen: -1, wert: a.bonus,
+                        bis: state.spielzeit + a.dauer });
+    for (const sp of spieler) if (sp.id !== 0) feindAendern(0, sp.id, a.feindAlle);
+    melden('📜 Handelsprivileg erworben – dein Kontingent steigt deutlich');
+  }
+  panelZeigen();
+  return true;
+}
+
+// Ein Angriff ohne vorherige Kriegserklärung ist ein Überfall:
+// Er bringt den Überfallenen und alle Nachbarn gegen dich auf.
+function kriegshandlung(angreifer, opfer) {
+  if (angreifer === opfer || imKriegMit(angreifer, opfer)) return;
+  feindschaft[angreifer][opfer] = feindschaft[opfer][angreifer] = 92;
+  for (const sp of spieler)
+    if (sp.id !== angreifer && sp.id !== opfer) feindAendern(angreifer, sp.id, 25);
+  if (angreifer === 0)
+    melden('⚠️ Überfall ohne Kriegserklärung – alle Nachbarn sind empört!');
+  else if (opfer === 0)
+    melden(`⚠️ ${spieler[angreifer].name} überfällt dich ohne Kriegserklärung!`);
+}
+
+// Wirtschaftliche Wirkungen je Simulationsschritt neu berechnen
+function diploSchritt(dt, unterhaltJe) {
+  diploEffekte = diploEffekte.filter(e => e.bis > state.spielzeit);
+  for (const sp of spieler) { sp.handelsMalus = 0; sp.handelsBonus = 0; }
+
+  for (const e of diploEffekte) {
+    if (e.art === 'bestechung') spieler[e.gegen].handelsMalus += e.wert;
+    else if (e.art === 'privileg') {
+      spieler[e.von].handelsBonus += e.wert;
+      for (const sp of spieler) if (sp.id !== e.von) sp.handelsMalus += 0.1;
+    }
+  }
+  // Laufende Embargos: kosten den Verhänger Gold und kürzen das Ziel
+  for (const sp of spieler) {
+    for (let b = 0; b < spieler.length; b++) {
+      if (!sp.embargo[b]) continue;
+      spieler[b].handelsMalus += DIPLO.embargo.malus;
+      unterhaltJe[sp.id] += DIPLO.embargo.proSekunde * dt;
+    }
+  }
+
+  // Kontingent: wächst mit Einwohnern und Kontoren, erholt sich laufend
+  for (const sp of spieler) {
+    const kontore = gebaeude.reduce((n, g) =>
+      n + (g.typ === 'kontor' && g.spieler === sp.id ? 1 : 0), 0);
+    const basis = HANDEL.basis + sp.einwohner * HANDEL.jeEinwohner + kontore * HANDEL.jeKontor;
+    sp.kontingentMax = Math.max(40, Math.round(basis * (1 + sp.handelsBonus - sp.handelsMalus)));
+    sp.kontingent = Math.min(sp.kontingentMax,
+      sp.kontingent + sp.kontingentMax / HANDEL.erholung * dt);
+  }
+
+  // Neid: Wer im Wettlauf führt, wird den anderen unheimlich
+  let fuehrer = spieler[0];
+  for (const sp of spieler)
+    if (sp.siedlerEw * 2 + sp.einwohner > fuehrer.siedlerEw * 2 + fuehrer.einwohner) fuehrer = sp;
+  for (let a = 0; a < spieler.length; a++)
+    for (let b = a + 1; b < spieler.length; b++) {
+      feindAendern(a, b, -0.05 * dt);                       // Zeit heilt Wunden
+      if ((a === fuehrer.id || b === fuehrer.id) && fuehrer.kontor &&
+          fuehrer.einwohner > 40)
+        feindAendern(a, b, 0.18 * dt);                      // … aber Neid wächst
+    }
+}
+
 /* ---------- 5c. KRIEG: HEERE UND FLOTTEN ----------------------- */
 // Truppen sind – anders als Gebäude – nicht kachelgebunden, sondern
 // bewegen sich frei über die Karte (wie das Startschiff). Jede Truppe
@@ -1533,10 +1800,25 @@ function neueTruppe(sid, art, x, y) {
   return t;
 }
 
+// Nachschub: Je weiter eine Truppe von eigenen Märkten und Kontoren
+// entfernt kämpft, desto schwächer ist sie. Dadurch ist Angreifen
+// deutlich teurer als Verteidigen – das Herz der Kriegstaktik.
+function nachschub(t) {
+  let d = Infinity;
+  for (const g of gebaeude) {
+    if (g.spieler !== t.spieler) continue;
+    if (g.typ !== 'kontor' && g.typ !== 'marktplatz') continue;
+    const z = zentrum(g);
+    d = Math.min(d, Math.hypot(z.x - t.x, z.y - t.y));
+  }
+  if (!isFinite(d)) return 0.5;
+  return d <= 10 ? 1 : d <= 18 ? 0.82 : d <= 28 ? 0.68 : 0.55;
+}
+
 // Kampfkraft eines Stapels: Flotten rechnen in Schiffen, Heere in Mann
 function staerke(t) {
   const roh = t.art === 'flotte' ? t.schiffe * KRIEG.schiffWert : t.mann;
-  return roh * t.moral;
+  return roh * t.moral * nachschub(t);
 }
 function truppGroesse(t) { return t.art === 'flotte' ? t.schiffe : t.mann; }
 
@@ -1721,7 +2003,7 @@ function gelaendeBonus(t) {
   for (const g of gebaeude) {
     if (g.typ !== 'wachturm' || g.spieler !== t.spieler) continue;
     const z = zentrum(g);
-    if (Math.hypot(z.x - t.x, z.y - t.y) <= GEBAEUDE.wachturm.radius) {
+    if (Math.hypot(z.x - t.x, z.y - t.y) <= wirkRadius(g)) {
       bonus *= KRIEG.turmBonus;
       break;
     }
@@ -1807,6 +2089,7 @@ function kriegSchritt(dt) {
       a.moral = Math.max(0.45, a.moral - KRIEG.moralVerlust * dt);
       b.moral = Math.max(0.45, b.moral - KRIEG.moralVerlust * dt);
       a.kampf = b.kampf = true;
+      kriegshandlung(a.spieler, b.spieler);
       if (a.spieler === 0 || b.spieler === 0)
         melden(a.art === 'flotte' ? '🌊 Seeschlacht!' : '⚔️ Schlacht!', 'schlacht');
     }
@@ -1833,6 +2116,7 @@ function kriegSchritt(dt) {
       ? t.schiffe * KRIEG.bombardement * dt
       : (t.mann / 10) * KRIEG.belagerung * dt;
     t.kampf = true;
+    kriegshandlung(t.spieler, ziel.spieler);
     gebaeudeSchaden(ziel, schaden, t.spieler);
   }
 
@@ -1842,7 +2126,7 @@ function kriegSchritt(dt) {
     const z = zentrum(g);
     for (const t of truppen) {
       if (t.spieler === g.spieler) continue;
-      if (Math.hypot(z.x - t.x, z.y - t.y) > GEBAEUDE.wachturm.radius) continue;
+      if (Math.hypot(z.x - t.x, z.y - t.y) > wirkRadius(g)) continue;
       if (t.art === 'flotte') t.schiffe -= KRIEG.turmSchaden * dt / KRIEG.schiffWert;
       else                    t.mann    -= KRIEG.turmSchaden * dt;
       t.kampf = true;
@@ -1928,7 +2212,7 @@ function simSchritt(dt) {
     const def = GEBAEUDE[geb.typ];
     const sp = spieler[geb.spieler];
     const R = sp.res;
-    unterhaltJe[geb.spieler] += def.unterhalt * dt;
+    unterhaltJe[geb.spieler] += def.unterhalt * (geb.ausbau || 1) * dt;
     const z = zentrum(geb);
 
     // Kleine Helfer für die zwei Produktions-Bauarten:
@@ -1939,7 +2223,7 @@ function simSchritt(dt) {
       geb.fortschritt += dt * eff;
       if (geb.fortschritt >= def.dauer) {
         geb.fortschritt -= def.dauer;
-        R[ware] += menge;
+        R[ware] += menge * ausbauFaktor(geb);
         return true;
       }
       return false;
@@ -1950,7 +2234,7 @@ function simSchritt(dt) {
         geb.fortschritt += dt;
         if (geb.fortschritt >= def.dauer) {
           geb.fortschritt -= def.dauer;
-          R[rein] -= 1; R[raus] += menge;
+          R[rein] -= 1; R[raus] += menge * ausbauFaktor(geb);
         }
       } else geb.eff = Math.max(0, geb.eff - dt);
     };
@@ -2009,7 +2293,7 @@ function simSchritt(dt) {
         if (stein) {
           geb.eff = Math.min(1, geb.eff + dt);
           geb.fortschritt += dt;
-          if (geb.fortschritt >= def.dauer) { geb.fortschritt -= def.dauer; R.ziegel += 1; stein.stein -= 1; }
+          if (geb.fortschritt >= def.dauer) { geb.fortschritt -= def.dauer; R.ziegel += ausbauFaktor(geb); stein.stein -= 1; }
         } else geb.eff = Math.max(0, geb.eff - dt);
         break;
       }
@@ -2020,7 +2304,7 @@ function simSchritt(dt) {
           geb.fortschritt += dt;
           if (geb.fortschritt >= def.dauer) {
             geb.fortschritt -= def.dauer;
-            R.holz -= 1; R.werkzeuge += 1; stein.stein -= 1;
+            R.holz -= 1; R.werkzeuge += ausbauFaktor(geb); stein.stein -= 1;
           }
         } else geb.eff = Math.max(0, geb.eff - dt);
         break;
@@ -2030,7 +2314,7 @@ function simSchritt(dt) {
         if (erz) {
           geb.eff = Math.min(1, geb.eff + dt);
           geb.fortschritt += dt;
-          if (geb.fortschritt >= def.dauer) { geb.fortschritt -= def.dauer; R.schmuck += 1; erz.golderz -= 1; }
+          if (geb.fortschritt >= def.dauer) { geb.fortschritt -= def.dauer; R.schmuck += ausbauFaktor(geb); erz.golderz -= 1; }
         } else geb.eff = Math.max(0, geb.eff - dt);
         break;
       }
@@ -2097,6 +2381,9 @@ function simSchritt(dt) {
       }
     }
   }
+
+  // --- Wirtschaftskrieg: Sanktionen, Kontingente, Stimmung ---
+  diploSchritt(dt, unterhaltJe);
 
   // --- Krieg: Sold zahlen, marschieren, kämpfen ---
   for (const sp of spieler) unterhaltJe[sp.id] += soldJeSpieler(sp.id) * dt;
@@ -2730,9 +3017,11 @@ function befehlPlanen(t, tx, ty) {
     const chance = staerke(t) / (staerke(t) + staerke(gegner));
     const urteil = chance > 0.65 ? 'gute Aussichten'
                  : chance > 0.45 ? 'offener Ausgang' : '⚠️ unterlegen!';
+    const warnung = imKriegMit(0, gegner.spieler) ? ''
+      : '<br><span class="grund">⚠️ Ohne Kriegserklärung – das bringt alle Nachbarn gegen dich auf!</span>';
     return { ok: true, aktion: 'marsch', weg,
              text: `${t.art === 'flotte' ? '🌊 Seeschlacht' : '⚔️ Angriff'} auf ${spieler[gegner.spieler].name}: ` +
-                   `<b>${Math.round(staerke(t))}</b> gegen <b>${Math.round(staerke(gegner))}</b> – ${urteil}` };
+                   `<b>${Math.round(staerke(t))}</b> gegen <b>${Math.round(staerke(gegner))}</b> – ${urteil}` + warnung };
   }
 
   // Angriff auf ein feindliches Gebäude
@@ -2743,10 +3032,12 @@ function befehlPlanen(t, tx, ty) {
       if (f) weg = truppWeg(t, Math.floor(f.x), Math.floor(f.y));
     }
     if (!weg) return { ok: false, text: 'Dorthin führt kein Weg' };
+    const warnung2 = imKriegMit(0, geb.spieler) ? ''
+      : '<br><span class="grund">⚠️ Ohne Kriegserklärung – das bringt alle Nachbarn gegen dich auf!</span>';
     return { ok: true, aktion: 'marsch', weg,
              text: `${geb.typ === 'kontor' ? '🚩 Kontor' : GEBAEUDE[geb.typ].name} von ` +
                    `${spieler[geb.spieler].name} angreifen` +
-                   (geb.typ === 'kontor' ? ' – bei Erfolg fällt die ganze Insel!' : '') };
+                   (geb.typ === 'kontor' ? ' – bei Erfolg fällt die ganze Insel!' : '') + warnung2 };
   }
 
   // Einfacher Marsch bzw. Fahrt
@@ -2949,8 +3240,7 @@ $('b-nein').addEventListener('click', () => {
 // --- Handel am Kontor: Waren gegen Gold kaufen und verkaufen ---
 function handel(ware, menge) {
   if (!PREISE[ware]) return;
-  if (!handelAusfuehren(spieler[0], ware, menge))
-    melden(menge > 0 ? 'Zu wenig Gold zum Kaufen' : 'Nichts zum Verkaufen da');
+  if (!handelAusfuehren(spieler[0], ware, menge)) melden(handelFehler);
   uiAktualisieren();
 }
 
@@ -3165,8 +3455,27 @@ function panelZeigen() {
     if (def.unterhalt) html += `<div class="zeile"><span>Unterhalt</span><span>${(def.unterhalt * 60).toFixed(0)} 💰/min</span></div>`;
   }
 
-  // Handel: nur am eigenen Kontor – kaufen ist teurer als verkaufen
+  // Reiter-Umschalter am eigenen Kontor
   if (geb.typ === 'kontor' && geb.spieler === 0) {
+    html += `<div class="tab-leiste">` +
+      `<button class="${state.kontorTab === 'handel' ? 'aktiv' : ''}" onclick="kontorTab('handel')">⚖️ Handel</button>` +
+      `<button class="${state.kontorTab === 'diplomatie' ? 'aktiv' : ''}" onclick="kontorTab('diplomatie')">🏛️ Diplomatie</button>` +
+      `</div>`;
+  }
+
+  // Handel: nur am eigenen Kontor – kaufen ist teurer als verkaufen
+  if (geb.typ === 'kontor' && geb.spieler === 0 && state.kontorTab === 'handel') {
+    // Handelskontingent: der Markt ist endlich
+    const ich = spieler[0];
+    const anteil = Math.round(ich.kontingent / Math.max(1, ich.kontingentMax) * 100);
+    html += `<hr><div class="zeile"><span>📦 Handelskontingent</span>` +
+            `<span>${Math.floor(ich.kontingent)} / ${ich.kontingentMax}</span></div>`;
+    html += `<div class="auslast-balken"><div style="width:${anteil}%"></div></div>`;
+    html += `<div class="beschr" style="margin-top:4px">Wächst mit deiner Bevölkerung und jedem Kontor. ` +
+            (ich.handelsMalus > 0 ? `<b style="color:var(--rot)">Sanktionen: −${Math.round(ich.handelsMalus * 100)} %</b> ` : '') +
+            (ich.handelsBonus > 0 ? `<b style="color:var(--accent-dunkel)">Privileg: +${Math.round(ich.handelsBonus * 100)} %</b>` : '') +
+            `</div>`;
+
     html += '<hr><b style="font-size:12px">⚖️ Handel</b>' +
       '<div class="beschr" style="margin:2px 0 4px">Preise je Stück (Kauf/Verkauf) folgen der Nachfrage – auch die Konkurrenz kauft hier ein! ▲ teuer · ▼ günstig. Mit den 🔄-Knöpfen handelt dein Kontor automatisch.</div>';
     for (const ware of Object.keys(PREISE)) {
@@ -3194,6 +3503,19 @@ function panelZeigen() {
     }
   }
 
+  // Ausbaustufe und Ausbau-Knopf
+  const stufeJetzt = geb.ausbau || 1;
+  html += `<div class="zeile"><span>Ausbaustufe</span><span>` +
+          '★'.repeat(stufeJetzt) + '☆'.repeat(AUSBAU_MAX - stufeJetzt) +
+          (stufeJetzt > 1 ? ` (Ertrag ×${ausbauFaktor(geb).toFixed(1).replace('.', ',')})` : '') +
+          `</span></div>`;
+  if (geb.spieler === 0 && stufeJetzt < AUSBAU_MAX) {
+    const k = Object.entries(ausbauKosten(geb))
+      .map(([ware, menge]) => `${WAREN_EMOJI[ware]}${menge}`).join(' ');
+    html += `<button class="abriss-knopf" style="background:#eef2ff;color:#4338ca" ` +
+            `onclick="ausbauen(state.auswahl)">⬆️ Auf Stufe ${stufeJetzt + 1} ausbauen (${k})</button>`;
+  }
+
   // Zustand des Gebäudes, sobald es beschädigt ist
   if (geb.hp < geb.maxHp)
     html += `<div class="zeile"><span>Zustand</span><span style="color:var(--rot)">` +
@@ -3211,6 +3533,31 @@ function panelZeigen() {
             `onclick="schiffBauen(state.auswahl); panelZeigen()">🚢 Kriegsschiff bauen (${k})</button>`;
   }
 
+  // --- Diplomatie: nur am eigenen Kontor ---
+  if (geb.typ === 'kontor' && geb.spieler === 0 && state.kontorTab === 'diplomatie') {
+    html += `<div class="beschr" style="margin:2px 0 6px">Wirtschaft schlägt Schwert: Bestechung und Embargos kürzen das Handelskontingent des Gegners. Militärische Angriffe sind erst nach einer Kriegserklärung erlaubt.</div>`;
+    html += `<div class="diplo-knoepfe"><button class="gut" onclick="diploAktion('privileg',1)">` +
+            `📜 Handelsprivileg (${DIPLO.privileg.gold}💰) +${Math.round(DIPLO.privileg.bonus * 100)} %</button></div>`;
+    if (!spieler.some(g => g.id !== 0 && g.kontor))
+      html += `<div class="beschr" style="margin-top:8px">Noch ist keine Konkurrenz gelandet. Sobald jemand eine Insel besiedelt, kannst du hier verhandeln, sanktionieren – oder den Krieg erklären.</div>`;
+    for (const geg of spieler) {
+      if (geg.id === 0 || !geg.kontor) continue;
+      const w = feindschaft[0][geg.id], st = feindStufe(0, geg.id);
+      html += `<div class="diplo-kopf"><span style="color:${geg.farbe}">● ${geg.name}</span>` +
+              `<span style="color:${st.farbe}">${st.emoji} ${st.name}</span></div>`;
+      html += `<div class="diplo-balken"><div style="width:${w}%;background:${st.farbe}"></div></div>`;
+      html += `<div class="diplo-knoepfe">` +
+        `<button class="gut" onclick="diploAktion('geschenk',${geg.id})">🎁 ${DIPLO.geschenk.gold}💰</button>` +
+        `<button onclick="diploAktion('bestechen',${geg.id})">💼 Bestechen ${DIPLO.bestechen.gold}💰</button>` +
+        `<button class="${spieler[0].embargo[geg.id] ? 'an' : ''}" onclick="diploAktion('embargo',${geg.id})">` +
+          `⛔ Embargo${spieler[0].embargo[geg.id] ? ' läuft' : ''}</button>` +
+        (imKriegMit(0, geg.id)
+          ? `<button class="gut" onclick="diploAktion('frieden',${geg.id})">🕊️ Frieden ${DIPLO.frieden.gold}💰</button>`
+          : `<button class="boese" onclick="diploAktion('krieg',${geg.id})">⚔️ Krieg erklären</button>`) +
+        `</div>`;
+    }
+  }
+
   if (geb.spieler === 0)
     html += `<button class="abriss-knopf" onclick="abreissenAuswahl()">🧨 Abreißen</button>`;
   $('panel-inhalt').innerHTML = html;
@@ -3219,6 +3566,8 @@ function beduerfnis(name, erfuellt) {
   return `<div class="beduerfnis"><span>${name}</span>` +
          `<span class="${erfuellt ? 'ok' : 'fehlt'}">${erfuellt ? '✓' : '✗'}</span></div>`;
 }
+function kontorTab(name) { state.kontorTab = name; panelZeigen(); }
+
 function truppHalt() {
   if (state.truppAuswahl) { state.truppAuswahl.pfad = []; melden('Truppe hält an'); }
 }
@@ -3422,6 +3771,8 @@ for (const ware of Object.keys(PREISE)) {
   markt[ware] = 1;
   autoHandel[ware] = { kauf: null, verkauf: null };
 }
+// Alle starten im Frieden (leichte Grundspannung zwischen Konkurrenten)
+feindschaft = spieler.map((_, a) => spieler.map((_, b) => (a === b ? 0 : 25)));
 weltErzeugen();
 schiffStart();
 menueBauen();
