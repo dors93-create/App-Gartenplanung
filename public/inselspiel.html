@@ -587,6 +587,7 @@ function ausbauWirkung(geb, stufe) {
     const miete = (1 + 0.25 * (stufe - 1)).toFixed(2).replace('.', ',');
     return `${ew} Einwohner · Miete ×${miete}`;
   }
+  if (geb.typ === 'kaserne') return `${KASERNE_KAPAZITAET * stufe} Soldaten`;
   if (def.dauer) return `Ertrag ×${(1 + 0.8 * (stufe - 1)).toFixed(1).replace('.', ',')}`;
   const basis = def.marktRadius || def.radius;
   if (basis) return `Radius ${basis + (stufe - 1) * 2} Felder`;
@@ -609,21 +610,28 @@ function ausbauKosten(geb) {
   return kosten;
 }
 function ausbauen(geb) {
-  if (!geb || geb.spieler !== 0) return false;
-  if ((geb.ausbau || 1) >= AUSBAU_MAX) { melden('Höchste Ausbaustufe erreicht'); return false; }
+  if (!geb) return false;
+  const R = spieler[geb.spieler].res;
+  const ich = geb.spieler === 0;   // nur für dich gibt es Meldungen
+  if ((geb.ausbau || 1) >= AUSBAU_MAX) {
+    if (ich) melden('Höchste Ausbaustufe erreicht');
+    return false;
+  }
   const kosten = ausbauKosten(geb);
   for (const [ware, menge] of Object.entries(kosten))
-    if (res[ware] < menge) {
-      melden(`Ausbau: es fehlt ${WAREN_EMOJI[ware]} ${Math.ceil(menge - res[ware])}`);
+    if (R[ware] < menge) {
+      if (ich) melden(`Ausbau: es fehlt ${WAREN_EMOJI[ware]} ${Math.ceil(menge - R[ware])}`);
       return false;
     }
-  for (const [ware, menge] of Object.entries(kosten)) res[ware] -= menge;
+  for (const [ware, menge] of Object.entries(kosten)) R[ware] -= menge;
   geb.ausbau = (geb.ausbau || 1) + 1;
   if (geb.typ === 'wohnhaus') geb.maxEw = hausMaxEw(geb);
   geb.maxHp = Math.round(geb.maxHp * 1.35);
   geb.hp = geb.maxHp;
-  melden(`⬆️ ${GEBAEUDE[geb.typ].name} auf Stufe ${geb.ausbau} ausgebaut`);
-  panelZeigen();
+  if (ich) {
+    melden(`⬆️ ${GEBAEUDE[geb.typ].name} auf Stufe ${geb.ausbau} ausgebaut`);
+    panelZeigen();
+  }
   return true;
 }
 
@@ -811,7 +819,7 @@ const GEBAEUDE = {
     name: 'Kaserne', emoji: '⚔️', w: 2, h: 2, farbe: '#bba98c', abStufe: 2,
     kosten: { gold: 600, holz: 15, werkzeuge: 5, ziegel: 10 }, unterhalt: 0.25,
     hp: 220,
-    beschr: 'Hebt Soldaten aus. Jeder Trupp kostet Gold, Waffen – und Einwohner, die dann nicht mehr für dich arbeiten.',
+    beschr: 'Hebt Soldaten aus. Jeder Trupp kostet Gold, Waffen – und Einwohner, die dann nicht mehr für dich arbeiten. Die Ausbaustufe bestimmt, wie viele Soldaten du überhaupt unterhalten kannst.',
   },
   werft: {
     name: 'Werft', emoji: '🛠️', w: 2, h: 2, farbe: '#9fb4c4', abStufe: 2,
@@ -822,6 +830,7 @@ const GEBAEUDE = {
 };
 
 // Kosten einer Aushebung bzw. eines Kriegsschiffs
+const KASERNE_KAPAZITAET = 30;   // Soldaten je Ausbaustufe einer Kaserne
 const TRUPP_KOSTEN  = { gold: 150, waffen: 6 };   // je 10 Mann
 const TRUPP_MANN    = 10;                          // Soldaten je Aushebung
 const TRUPP_EINWOHNER = 10;                        // so viele Einwohner wandern ab
@@ -1687,6 +1696,22 @@ function platziere(typ, tx, ty, sid = 0) {
     for (const idx of geb.felder) belegt[idx] = geb;
   }
 
+  // Ein Kontor auf einer bereits besiedelten Insel sorgt für Ärger
+  if (typ === 'kontor' && inselMarke) {
+    const insel = inselMarke[ay * N + ax];
+    if (insel >= 0) for (const andere of spieler) {
+      if (andere.id === sid) continue;
+      const wohntDort = gebaeude.some(g => g.typ === 'kontor' && g.spieler === andere.id &&
+                                           inselMarke[g.y * N + g.x] === insel);
+      if (!wohntDort) continue;
+      feindAendern(sid, andere.id, 22);
+      if (sid === 0)
+        melden(`⚡ ${andere.name} duldet dein Kontor auf seiner Insel nur widerwillig – die Spannungen steigen`);
+      else if (andere.id === 0)
+        melden(`⚡ ${spieler[sid].name} setzt sich auf deine Insel – das sorgt für Spannungen`);
+    }
+  }
+
   if (typ === 'kontor' && !spieler[sid].kontor) spieler[sid].kontor = geb;
   if (typ === 'kontor' && sid === 0) {
     state.kontorGebaut = true;
@@ -1757,6 +1782,23 @@ function kiBauplatz(sp, typ) {
   return beste;
 }
 
+// Die KI baut ihre Gebäude aus, sobald sie Gold übrig hat –
+// bevorzugt Produktionsstätten und Wohnhäuser, dort wirkt es am meisten.
+function kiAusbauen(sp) {
+  if (sp.res.gold < 15000) return false;
+  let ziel = null, bester = 1e9;
+  for (const g of gebaeude) {
+    if (g.spieler !== sp.id) continue;
+    const stufe = g.ausbau || 1;
+    if (stufe >= AUSBAU_MAX) continue;
+    // Niedrige Stufen zuerst; Produktion und Wohnraum vor dem Rest
+    const rang = (GEBAEUDE[g.typ].dauer || g.typ === 'wohnhaus') ? 0 : 1;
+    const wert = stufe * 10 + rang;
+    if (wert < bester) { bester = wert; ziel = g; }
+  }
+  return ziel ? ausbauen(ziel) : false;
+}
+
 // --- Kriegsführung der KI ---
 // Die KI rüstet erst spät auf und greift dann über See an: Kontore
 // stehen immer an der Küste, also sind sie von Flotten erreichbar.
@@ -1793,7 +1835,9 @@ function kiKrieg(sp) {
   // 2. Heimatschutz: ein Heer in der Nähe des Kontors halten
   const kaserne = gebaeude.find(g => g.typ === 'kaserne' && g.spieler === sp.id);
   const heer = kiHeer(sp);
-  if (kaserne && R.gold > 2500 && (!heer || heer.mann < 20 * sp.aggression))
+  if (kaserne && R.gold > 2500 &&
+      soldatenAktuell(sp.id) < soldatenKapazitaet(sp.id) &&
+      (!heer || heer.mann < 20 * sp.aggression))
     ausheben(kaserne);
 
   // 3. Flotte bauen
@@ -1886,7 +1930,8 @@ function kiTick(sp, dt) {
     if (nachPlan) sp.planIdx++; else sp.extra++;
   }
 
-  // Zum Schluss: aufrüsten und gegebenenfalls angreifen
+  // Zum Schluss: ausbauen, aufrüsten und gegebenenfalls angreifen
+  kiAusbauen(sp);
   kiKrieg(sp);
 }
 
@@ -2145,8 +2190,30 @@ function einwohnerAbziehen(sid, anzahl) {
   return anzahl - rest;   // tatsächlich eingezogene Einwohner
 }
 
+// Wie viele Soldaten darf ein Spieler unterhalten? Jede Ausbaustufe
+// jeder Kaserne schafft Platz für weitere Mannschaften.
+function soldatenKapazitaet(sid) {
+  let k = 0;
+  for (const g of gebaeude)
+    if (g.typ === 'kaserne' && g.spieler === sid) k += KASERNE_KAPAZITAET * (g.ausbau || 1);
+  return k;
+}
+function soldatenAktuell(sid) {
+  let n = 0;
+  for (const t of truppen)
+    if (t.spieler === sid) n += t.mann + t.fracht;
+  return Math.round(n);
+}
+
 function ausheben(kaserne) {
   const sp = spieler[kaserne.spieler], R = sp.res;
+  // Kapazität der Kasernen beachten
+  const kap = soldatenKapazitaet(sp.id);
+  if (soldatenAktuell(sp.id) + TRUPP_MANN > kap) {
+    if (sp.id === 0)
+      melden(`⚔️ Deine Kasernen fassen nur ${kap} Soldaten – Kaserne ausbauen oder eine zweite bauen`);
+    return false;
+  }
   for (const [ware, menge] of Object.entries(TRUPP_KOSTEN))
     if (R[ware] < menge) {
       if (sp.id === 0) melden(`Aushebung: es fehlt ${WAREN_EMOJI[ware]} ${WAREN_NAME[ware] || 'Gold'}`);
@@ -3196,9 +3263,14 @@ function klickAufKarte(sx, sy) {
   if (state.vorbei) return;
   const t = bildschirmZuKachel(sx, sy);
 
-  // Tipp aufs Wasser: das Schiff segelt dorthin. Mit dem Zeiger-Werkzeug
-  // geht das jederzeit, vor dem Kontor-Bau sogar mit jedem Werkzeug.
-  if (t && kachel(t.x, t.y).typ === 'wasser' && !state.truppAuswahl &&
+  // Liegt dort eine eigene Truppe (z. B. eine Flotte auf dem Wasser),
+  // hat sie Vorrang vor dem Handelsschiff – sonst würde beim Tippen
+  // auf die eigenen Kriegsschiffe immer das Handelsschiff lossegeln.
+  const truppeDort = t && truppeBei(t.x, t.y, 0);
+
+  // Tipp aufs Wasser: das Handelsschiff segelt dorthin. Mit dem
+  // Zeiger-Werkzeug geht das jederzeit, vor dem Kontor-Bau mit jedem.
+  if (t && kachel(t.x, t.y).typ === 'wasser' && !state.truppAuswahl && !truppeDort &&
       (state.werkzeug === 'zeiger' || !state.kontorGebaut)) {
     const weg = segelWeg(t.x, t.y);
     if (weg) {
@@ -3848,6 +3920,10 @@ function panelZeigen() {
 
   // Militärgebäude: Truppen ausheben bzw. Schiffe bauen
   if (geb.spieler === 0 && geb.typ === 'kaserne') {
+    const kap = soldatenKapazitaet(0), jetzt = soldatenAktuell(0);
+    html += `<div class="zeile"><span>Soldaten</span><span>${jetzt} / ${kap}</span></div>`;
+    html += `<div class="auslast-balken"><div style="width:${Math.min(100, kap ? jetzt / kap * 100 : 0)}%"></div></div>`;
+    html += `<div class="beschr" style="margin-top:4px">Jede Ausbaustufe schafft Platz für ${KASERNE_KAPAZITAET} weitere Soldaten.</div>`;
     const k = Object.entries(TRUPP_KOSTEN).map(([w, m]) => `${WAREN_EMOJI[w]}${m}`).join(' ');
     html += `<button class="abriss-knopf" style="background:#f0fdf4;color:var(--accent-dunkel)" ` +
             `onclick="ausheben(state.auswahl); panelZeigen()">⚔️ ${TRUPP_MANN} Mann ausheben (${k} + 👥${TRUPP_EINWOHNER})</button>`;
