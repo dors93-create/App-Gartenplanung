@@ -197,8 +197,8 @@
   }
   .handel-zeile > span:last-child { display: flex; gap: 4px; flex: none; }
   .handel-zeile button {
-    border: none; border-radius: 6px; padding: 4px 6px; cursor: pointer;
-    font-family: inherit; font-size: 10.5px; font-weight: 600; white-space: nowrap;
+    border: none; border-radius: 5px; padding: 4px 4px; cursor: pointer;
+    font-family: inherit; font-size: 9.5px; font-weight: 700; white-space: nowrap;
   }
   .handel-kauf    { background: #eef7f0; color: var(--accent-dunkel); }
   .handel-verkauf { background: #f3f4f6; color: var(--text); }
@@ -326,6 +326,8 @@
   <button class="knopf" id="k-tempo3" title="Dreifache Geschwindigkeit (Taste 3)">3×</button>
   <button class="knopf" id="k-musik" title="Musik ein/aus">🎵</button>
   <button class="knopf" id="k-mitte" title="Zum Kontor bzw. Schiff springen">🧭</button>
+  <button class="knopf" id="k-speichern" title="Spielstand speichern">💾</button>
+  <button class="knopf" id="k-laden" title="Gespeicherten Spielstand laden">📂</button>
 </div>
 
 <!-- Punktestand des Wettrennens -->
@@ -496,8 +498,8 @@ function handelAusfuehren(sp, ware, menge) {
 
 // Auto-Handel: je Ware eine Nachkauf-Untergrenze und eine
 // Verkaufs-Obergrenze (null = aus). Tippen schaltet durch die Stufen.
-const AUTOKAUF_STUFEN    = [null, 5, 10, 25, 50];
-const AUTOVERKAUF_STUFEN = [null, 50, 100, 200];
+const AUTOKAUF_STUFEN    = [null, 5, 10, 25, 50, 100, 200];
+const AUTOVERKAUF_STUFEN = [null, 50, 100, 200, 400];
 const autoHandel = {};   // ware -> { kauf, verkauf }
 
 function autoKaufWechseln(ware) {
@@ -518,7 +520,7 @@ function autoVerkaufWechseln(ware) {
 // mehr selbst produzieren. Sanktionen kürzen es.
 const HANDEL = {
   basis:        150,   // Grundkontingent je Spieler
-  jeEinwohner:  1.1,   // Zuwachs je Einwohner
+  jeEinwohner:  1.4,   // Zuwachs je Einwohner
   jeKontor:     80,    // Zuwachs je Kontor
   erholung:     60,    // Sekunden bis zur vollen Erholung
 };
@@ -566,8 +568,30 @@ let diploEffekte = [];
 // --- Ausbaustufen ---------------------------------------------
 // Jedes Gebäude lässt sich zweimal ausbauen: mehr Ertrag bzw.
 // größerer Wirkradius, dafür höhere Kosten und mehr Unterhalt.
-const AUSBAU_MAX = 3;
-function ausbauFaktor(geb) { return 1 + 0.5 * ((geb.ausbau || 1) - 1); }
+const AUSBAU_MAX = 6;
+// Produktion: Stufe 1 → ×1, Stufe 6 → ×5
+function ausbauFaktor(geb) { return 1 + 0.8 * ((geb.ausbau || 1) - 1); }
+
+// Wohnhäuser: Jede Ausbaustufe schafft 30 % mehr Wohnraum …
+function hausMaxEw(geb) {
+  return Math.round(STUFEN[geb.stufe].maxEw * (1 + 0.3 * ((geb.ausbau || 1) - 1)));
+}
+// … und bringt 25 % mehr Miete je Einwohner (Stufe 6 = 2,25-fach)
+function mietFaktor(geb) { return 1 + 0.25 * ((geb.ausbau || 1) - 1); }
+
+// Was bringt eine bestimmte Ausbaustufe bei diesem Gebäude?
+function ausbauWirkung(geb, stufe) {
+  const def = GEBAEUDE[geb.typ];
+  if (geb.typ === 'wohnhaus') {
+    const ew = Math.round(STUFEN[geb.stufe].maxEw * (1 + 0.3 * (stufe - 1)));
+    const miete = (1 + 0.25 * (stufe - 1)).toFixed(2).replace('.', ',');
+    return `${ew} Einwohner · Miete ×${miete}`;
+  }
+  if (def.dauer) return `Ertrag ×${(1 + 0.8 * (stufe - 1)).toFixed(1).replace('.', ',')}`;
+  const basis = def.marktRadius || def.radius;
+  if (basis) return `Radius ${basis + (stufe - 1) * 2} Felder`;
+  return 'stabiler im Krieg';
+}
 function wirkRadius(geb) {
   const def = GEBAEUDE[geb.typ];
   const basis = def.marktRadius || def.radius || 0;
@@ -595,6 +619,7 @@ function ausbauen(geb) {
     }
   for (const [ware, menge] of Object.entries(kosten)) res[ware] -= menge;
   geb.ausbau = (geb.ausbau || 1) + 1;
+  if (geb.typ === 'wohnhaus') geb.maxEw = hausMaxEw(geb);
   geb.maxHp = Math.round(geb.maxHp * 1.35);
   geb.hp = geb.maxHp;
   melden(`⬆️ ${GEBAEUDE[geb.typ].name} auf Stufe ${geb.ausbau} ausgebaut`);
@@ -801,6 +826,13 @@ const TRUPP_KOSTEN  = { gold: 150, waffen: 6 };   // je 10 Mann
 const TRUPP_MANN    = 10;                          // Soldaten je Aushebung
 const TRUPP_EINWOHNER = 10;                        // so viele Einwohner wandern ab
 const SCHIFF_KOSTEN = { gold: 400, holz: 15, waffen: 5 };  // je Kriegsschiff
+
+// Kanonen: Aufrüstung einer Flotte an der eigenen Werft.
+// Jede Stufe macht die Flotte im Seegefecht und beim Beschuss stärker.
+const KANONEN_KOSTEN = { gold: 600, waffen: 10, werkzeuge: 6 };
+const KANONEN_MAX = 3;
+const KANONEN_SEEBONUS = 0.30;   // je Stufe +30 % Kampfkraft auf See
+const KANONEN_BESCHUSS = 0.40;   // je Stufe +40 % Schaden an Gebäuden
 
 // Kriegs-Stellschrauben (alle Werte je Sekunde bei 1×-Tempo)
 const KRIEG = {
@@ -1229,6 +1261,179 @@ function kachel(x, y) {
 function belegtAuf(x, y) {
   if (x < 0 || y < 0 || x >= N || y >= N) return null;
   return belegt[y * N + x];
+}
+
+
+/* ---------- 3c. SPIELSTAND SPEICHERN UND LADEN ---------------- */
+// Der Stand liegt im Browser (localStorage) – ohne Server, ohne Konto.
+// Die Karte wird platzsparend als Zahlenfelder abgelegt, damit der
+// Stand auch bei 140×140 Kacheln bequem hineinpasst.
+
+const STAND_SCHLUESSEL = 'inselgruender-stand-v1';
+const KACHEL_TYPEN = ['wasser', 'strand', 'gras', 'wald', 'berg', 'fluss'];
+
+// Inseln neu durchnummerieren (nach dem Laden nötig)
+function inselnMarkieren() {
+  const marke = new Int16Array(N * N).fill(-1);
+  const groessen = [];
+  for (let start = 0; start < N * N; start++) {
+    if (karte[start].typ === 'wasser' || marke[start] !== -1) continue;
+    const stapel = [start];
+    marke[start] = groessen.length;
+    let groesse = 0;
+    while (stapel.length) {
+      const j = stapel.pop();
+      groesse++;
+      const x = j % N, y = (j / N) | 0;
+      for (const [ax, ay] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + ax, ny = y + ay;
+        if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
+        const ni = ny * N + nx;
+        if (karte[ni].typ !== 'wasser' && marke[ni] === -1) {
+          marke[ni] = groessen.length;
+          stapel.push(ni);
+        }
+      }
+    }
+    groessen.push(groesse);
+  }
+  inselMarke = marke;
+  inselGroessen = groessen;
+}
+
+function standSammeln() {
+  // Karte als vier kompakte Zahlenfelder
+  const typen = [], baeume = [], steine = [], erze = [], varianten = [];
+  for (const k of karte) {
+    typen.push(KACHEL_TYPEN.indexOf(k.typ));
+    baeume.push(Math.round(k.baum * 100));
+    steine.push(k.stein | 0);
+    erze.push(k.golderz | 0);
+    varianten.push(Math.round(k.var * 255));
+  }
+  return {
+    fassung: 1,
+    zeit: Date.now(),
+    spielzeit: state.spielzeit,
+    karte: { typen, baeume, steine, erze, varianten },
+    gebaeude: gebaeude.map(g => ({
+      typ: g.typ, x: g.x, y: g.y, spieler: g.spieler,
+      hp: g.hp, maxHp: g.maxHp, ausbau: g.ausbau,
+      eff: g.eff, fortschritt: g.fortschritt,
+      stufe: g.stufe, ew: g.ew, maxEw: g.maxEw,
+      zufrieden: g.zufrieden, hungerZeit: g.hungerZeit,
+      wachsZeit: g.wachsZeit, aufstiegZeit: g.aufstiegZeit,
+      felder: g.felder,
+    })),
+    truppen: truppen.map(t => ({
+      spieler: t.spieler, art: t.art, mann: t.mann, schiffe: t.schiffe,
+      fracht: t.fracht, kanonen: t.kanonen, moral: t.moral,
+      x: t.x, y: t.y, pfad: t.pfad,
+    })),
+    spieler: spieler.map(sp => ({
+      res: sp.res, maxStufe: sp.maxStufe, planIdx: sp.planIdx, extra: sp.extra,
+      kontingent: sp.kontingent, kontingentMax: sp.kontingentMax,
+      embargo: sp.embargo, aggression: sp.aggression, timer: sp.timer,
+    })),
+    feindschaft, diploEffekte, markt, autoHandel,
+    schiff: { x: schiff.x, y: schiff.y, pfad: schiff.pfad },
+    kontorGebaut: state.kontorGebaut,
+    gewonnen: state.gewonnen, rennenVorbei: state.rennenVorbei,
+  };
+}
+
+function spielSpeichern(still) {
+  try {
+    localStorage.setItem(STAND_SCHLUESSEL, JSON.stringify(standSammeln()));
+    if (!still) melden('💾 Spielstand gespeichert');
+    return true;
+  } catch (e) {
+    if (!still) melden('Speichern fehlgeschlagen – Speicher voll?');
+    return false;
+  }
+}
+
+function standVorhanden() {
+  try { return !!localStorage.getItem(STAND_SCHLUESSEL); } catch (e) { return false; }
+}
+
+function spielLaden(still) {
+  let d;
+  try { d = JSON.parse(localStorage.getItem(STAND_SCHLUESSEL)); } catch (e) { d = null; }
+  if (!d || d.fassung !== 1) { if (!still) melden('Kein passender Spielstand gefunden'); return false; }
+
+  // Karte zurückbauen
+  karte = [];
+  belegt = new Array(N * N).fill(null);
+  for (let i = 0; i < N * N; i++) {
+    karte.push({
+      typ: KACHEL_TYPEN[d.karte.typen[i]] || 'wasser',
+      baum: d.karte.baeume[i] / 100,
+      stein: d.karte.steine[i],
+      golderz: d.karte.erze[i],
+      var: d.karte.varianten[i] / 255,
+    });
+  }
+  inselnMarkieren();
+
+  // Gebäude
+  gebaeude = [];
+  naechsteId = 1;
+  for (const g of d.gebaeude) {
+    const def = GEBAEUDE[g.typ];
+    if (!def) continue;
+    const neu = Object.assign({}, g, { id: naechsteId++ });
+    gebaeude.push(neu);
+    for (let y = neu.y; y < neu.y + def.h; y++)
+      for (let x = neu.x; x < neu.x + def.w; x++)
+        if (x >= 0 && y >= 0 && x < N && y < N) belegt[y * N + x] = neu;
+    if (neu.felder) for (const idx of neu.felder) belegt[idx] = neu;
+  }
+
+  // Truppen
+  truppen = [];
+  for (const t of d.truppen)
+    truppen.push(Object.assign({ id: naechsteId++, kampf: false }, t));
+
+  // Spieler
+  d.spieler.forEach((gesp, i) => {
+    if (!spieler[i]) return;
+    Object.assign(spieler[i].res, gesp.res);
+    Object.assign(spieler[i], {
+      maxStufe: gesp.maxStufe, planIdx: gesp.planIdx, extra: gesp.extra,
+      kontingent: gesp.kontingent, kontingentMax: gesp.kontingentMax,
+      embargo: gesp.embargo, aggression: gesp.aggression, timer: gesp.timer,
+    });
+    spieler[i].kontor = gebaeude.find(g => g.typ === 'kontor' && g.spieler === i) || null;
+  });
+
+  feindschaft = d.feindschaft;
+  diploEffekte = d.diploEffekte || [];
+  Object.assign(markt, d.markt);
+  Object.assign(autoHandel, d.autoHandel);
+  schiff.x = d.schiff.x; schiff.y = d.schiff.y; schiff.pfad = d.schiff.pfad || [];
+
+  state.spielzeit = d.spielzeit || 0;
+  state.kontorGebaut = !!d.kontorGebaut;
+  state.gewonnen = !!d.gewonnen;
+  state.rennenVorbei = !!d.rennenVorbei;
+  state.vorbei = false;
+  state.auswahl = null; state.truppAuswahl = null; state.vorschau = null;
+  state.terrainAlt = true;
+
+  $('overlay').style.display = 'none';
+  $('hinweis').style.display = state.kontorGebaut ? 'none' : 'block';
+  bestaetigungZeigen();
+  menueBauen();
+  werkzeugWaehlen(state.kontorGebaut ? 'zeiger' : 'kontor');
+  zentrieren();
+  uiAktualisieren();
+  if (!still) melden('📂 Spielstand geladen');
+  return true;
+}
+
+function standLoeschen() {
+  try { localStorage.removeItem(STAND_SCHLUESSEL); } catch (e) {}
 }
 
 /* ---------- 4. HILFSFUNKTIONEN ------------------------------- */
@@ -1811,6 +2016,7 @@ function neueTruppe(sid, art, x, y) {
   const t = {
     id: naechsteId++, spieler: sid, art,   // 'heer' oder 'flotte'
     mann: 0, schiffe: 0, fracht: 0,        // fracht = Soldaten an Bord
+    kanonen: 0,                            // Ausbaustufe der Schiffsgeschütze
     moral: 1, x, y, pfad: [], kampf: false,
   };
   truppen.push(t);
@@ -1834,8 +2040,36 @@ function nachschub(t) {
 
 // Kampfkraft eines Stapels: Flotten rechnen in Schiffen, Heere in Mann
 function staerke(t) {
+  const kanonen = t.art === 'flotte' ? 1 + KANONEN_SEEBONUS * (t.kanonen || 0) : 1;
   const roh = t.art === 'flotte' ? t.schiffe * KRIEG.schiffWert : t.mann;
-  return roh * t.moral * nachschub(t);
+  return roh * kanonen * t.moral * nachschub(t);
+}
+
+// Eigene Werft in Reichweite einer Flotte (zum Nachrüsten nötig)
+function werftNahe(t) {
+  for (const g of gebaeude) {
+    if (g.typ !== 'werft' || g.spieler !== t.spieler) continue;
+    const z = zentrum(g);
+    if (Math.hypot(z.x - t.x, z.y - t.y) <= 6) return g;
+  }
+  return null;
+}
+
+// Kanonen einer Flotte nachrüsten – nur direkt bei der eigenen Werft
+function kanonenNachruesten(t) {
+  if (!t || t.art !== 'flotte' || t.spieler !== 0) return false;
+  if ((t.kanonen || 0) >= KANONEN_MAX) { melden('Die Flotte ist voll bestückt'); return false; }
+  if (!werftNahe(t)) { melden('🛠️ Zum Nachrüsten muss die Flotte bei deiner Werft liegen'); return false; }
+  for (const [ware, menge] of Object.entries(KANONEN_KOSTEN))
+    if (res[ware] < menge) {
+      melden(`Kanonen: es fehlt ${WAREN_EMOJI[ware]} ${Math.ceil(menge - res[ware])}`);
+      return false;
+    }
+  for (const [ware, menge] of Object.entries(KANONEN_KOSTEN)) res[ware] -= menge;
+  t.kanonen = (t.kanonen || 0) + 1;
+  melden(`🔫 Kanonen auf Stufe ${t.kanonen} – die Flotte schlägt härter zu`);
+  panelZeigen();
+  return true;
 }
 function truppGroesse(t) { return t.art === 'flotte' ? t.schiffe : t.mann; }
 
@@ -1986,7 +2220,7 @@ function freiesFeldNeben(cx, cy, frei) {
       if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
       const x = Math.floor(cx) + dx, y = Math.floor(cy) + dy;
       if (x < 0 || y < 0 || x >= N || y >= N) continue;
-      if (frei(y * N + x)) return { x: x + 0.5, y: y + 0.5 };
+      if (frei(y * N + x) && !belegt[y * N + x]) return { x: x + 0.5, y: y + 0.5 };
     }
   }
   return null;
@@ -1995,8 +2229,13 @@ function freiesFeldNeben(cx, cy, frei) {
 // --- Bewegung: Truppen laufen ihren Weg Punkt für Punkt ab ---
 function truppenUpdate(dt) {
   for (const t of truppen) {
-    if (t.kampf || !t.pfad.length) continue;   // im Gefecht wird nicht marschiert
-    let strecke = (t.art === 'flotte' ? KRIEG.tempoFlotte : KRIEG.tempoHeer) * dt;
+    if (!t.pfad.length) continue;
+    // Im Gefecht geht es nur halb so schnell voran – Rückzug ist
+    // möglich, aber teuer. (Früher stand die Truppe ganz still und
+    // ließ sich nicht mehr wegbewegen.)
+    const tempo = (t.art === 'flotte' ? KRIEG.tempoFlotte : KRIEG.tempoHeer)
+                * (t.kampf ? 0.5 : 1);
+    let strecke = tempo * dt;
     while (strecke > 0 && t.pfad.length) {
       const ziel = t.pfad[0];
       const dx = ziel.x - t.x, dy = ziel.y - t.y;
@@ -2065,7 +2304,7 @@ function inselErobern(kontor, sieger) {
     g.hp = g.maxHp;                       // der neue Herr baut auf
     if (g.typ === 'wohnhaus') {           // Plünderung: halbe Einwohner, eine Stufe tiefer
       g.ew = Math.max(1, Math.floor(g.ew / 2));
-      if (g.stufe > 0) { g.stufe--; g.maxEw = STUFEN[g.stufe].maxEw; }
+      if (g.stufe > 0) { g.stufe--; g.maxEw = hausMaxEw(g); }
     }
     uebernommen++;
   }
@@ -2091,6 +2330,9 @@ function kriegSchritt(dt) {
     for (let j = i + 1; j < truppen.length; j++) {
       const b = truppen[j];
       if (a.spieler === b.spieler || a.art !== b.art) continue;
+      // Ohne Kriegserklärung wird nicht gekämpft – man zieht
+      // friedlich aneinander vorbei
+      if (!imKriegMit(a.spieler, b.spieler)) continue;
       if (Math.hypot(a.x - b.x, a.y - b.y) > 1.2) continue;
 
       // Abrieb mit kleinem Zufallsanteil – kein Würfeln, sondern
@@ -2106,7 +2348,6 @@ function kriegSchritt(dt) {
       a.moral = Math.max(0.45, a.moral - KRIEG.moralVerlust * dt);
       b.moral = Math.max(0.45, b.moral - KRIEG.moralVerlust * dt);
       a.kampf = b.kampf = true;
-      kriegshandlung(a.spieler, b.spieler);
       if (a.spieler === 0 || b.spieler === 0)
         melden(a.art === 'flotte' ? '🌊 Seeschlacht!' : '⚔️ Schlacht!', 'schlacht');
     }
@@ -2118,6 +2359,7 @@ function kriegSchritt(dt) {
     let ziel = null, besteD = 1e9;
     for (const g of gebaeude) {
       if (g.spieler === t.spieler) continue;
+      if (!imKriegMit(t.spieler, g.spieler)) continue;   // kein Krieg, kein Beschuss
       const z = zentrum(g);
       const d = Math.hypot(z.x - t.x, z.y - t.y);
       const reichweite = (t.art === 'flotte' ? 2.6 : 1.8) + Math.max(GEBAEUDE[g.typ].w, GEBAEUDE[g.typ].h) / 2;
@@ -2130,10 +2372,9 @@ function kriegSchritt(dt) {
     }
     if (!ziel) continue;
     const schaden = t.art === 'flotte'
-      ? t.schiffe * KRIEG.bombardement * dt
+      ? t.schiffe * KRIEG.bombardement * (1 + KANONEN_BESCHUSS * (t.kanonen || 0)) * dt
       : (t.mann / 10) * KRIEG.belagerung * dt;
     t.kampf = true;
-    kriegshandlung(t.spieler, ziel.spieler);
     gebaeudeSchaden(ziel, schaden, t.spieler);
   }
 
@@ -2143,6 +2384,7 @@ function kriegSchritt(dt) {
     const z = zentrum(g);
     for (const t of truppen) {
       if (t.spieler === g.spieler) continue;
+      if (!imKriegMit(t.spieler, g.spieler)) continue;   // nur im Krieg
       if (Math.hypot(z.x - t.x, z.y - t.y) > wirkRadius(g)) continue;
       if (t.art === 'flotte') t.schiffe -= KRIEG.turmSchaden * dt / KRIEG.schiffWert;
       else                    t.mann    -= KRIEG.turmSchaden * dt;
@@ -2347,7 +2589,8 @@ function simSchritt(dt) {
         geb.zufrieden = markt && warenOK;
 
         // Steuern: Unzufriedene zahlen nur die Hälfte
-        steuernJe[geb.spieler] += geb.ew * st.steuer * (geb.zufrieden ? 1 : 0.5) * dt;
+        steuernJe[geb.spieler] +=
+          geb.ew * st.steuer * mietFaktor(geb) * (geb.zufrieden ? 1 : 0.5) * dt;
 
         // Hunger: nach einer Weile ziehen Leute weg
         if (sp.hunger) {
@@ -2384,7 +2627,8 @@ function simSchritt(dt) {
               if (naechste.material)   // Baumaterial wird verbaut
                 for (const [ware, menge] of Object.entries(naechste.material))
                   R[ware] -= menge;
-              geb.stufe++; geb.maxEw = naechste.maxEw; geb.aufstiegZeit = 0;
+              geb.stufe++; geb.aufstiegZeit = 0;
+              geb.maxEw = hausMaxEw(geb);
               const warNeu = geb.stufe > sp.maxStufe;
               sp.maxStufe = Math.max(sp.maxStufe, geb.stufe);
               if (geb.spieler === 0) {
@@ -2716,6 +2960,15 @@ function zeichnen() {
     ctx.fillStyle = '#1f2937';
     ctx.fillText(Math.round(gr) + (t.fracht > 0 ? '+' + Math.round(t.fracht) : ''),
                  px, py + T * 0.24);
+    // Kanonen als kleine Punkte am oberen Rand des Stapels
+    if (t.kanonen > 0) {
+      ctx.fillStyle = '#b45309';
+      for (let i = 0; i < t.kanonen; i++) {
+        ctx.beginPath();
+        ctx.arc(px - T * 0.2 + i * T * 0.14, py - T * 0.33, T * 0.05, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   }
 
   // Marschziel der ausgewählten Truppe als Linie andeuten
@@ -2964,6 +3217,11 @@ function klickAufKarte(sx, sy) {
       bestaetigungZeigen();
       return;
     }
+    // Nochmal auf die gewählte Truppe tippen: Auswahl aufheben
+    if (state.truppAuswahl && t && truppeBei(t.x, t.y, 0) === state.truppAuswahl) {
+      truppAbwaehlen();
+      return;
+    }
     // Sonst: eigene Truppe auswählen …
     const eigene = t && truppeBei(t.x, t.y, 0);
     if (eigene) {
@@ -3017,14 +3275,23 @@ function befehlPlanen(t, tx, ty) {
              text: `${Math.round(t.mann)} Mann einschiffen` };
   }
 
-  // Flotte mit Fracht auf Land → anlanden
-  if (t.art === 'flotte' && k.typ !== 'wasser') {
-    if (t.fracht < 1) return { ok: false, text: 'Keine Truppen an Bord' };
-    if (!landFrei(ty * N + tx)) return { ok: false, text: 'Dort kann niemand an Land gehen' };
-    if (Math.hypot(t.x - (tx + 0.5), t.y - (ty + 0.5)) > 2.6)
-      return { ok: false, text: 'Zu weit von der Küste – näher heransegeln' };
-    return { ok: true, aktion: 'anlanden', tx, ty,
-             text: `${Math.round(t.fracht)} Mann an Land setzen` };
+  // Flotte auf Land getippt – aber ein feindliches Gebäude dort hat
+  // Vorrang (dann wird bombardiert, siehe weiter unten)
+  if (t.art === 'flotte' && k.typ !== 'wasser' && !(geb && geb.spieler !== 0)) {
+    // Mit Truppen an Bord und nah genug: anlanden
+    if (t.fracht >= 1 && landFrei(ty * N + tx) &&
+        Math.hypot(t.x - (tx + 0.5), t.y - (ty + 0.5)) <= 2.6)
+      return { ok: true, aktion: 'anlanden', tx, ty,
+               text: `🏖️ ${Math.round(t.fracht)} Mann an Land setzen` };
+    // Sonst: vor diese Küste segeln (nächstes freies Wasser ansteuern)
+    const hafen = freiesFeldNeben(tx + 0.5, ty + 0.5, seeFrei);
+    if (!hafen) return { ok: false, text: 'Dort kommt kein Schiff hin' };
+    const seeweg = truppWeg(t, Math.floor(hafen.x), Math.floor(hafen.y));
+    if (!seeweg) return { ok: false, text: 'Dorthin führt kein Seeweg' };
+    return { ok: true, aktion: 'marsch', weg: seeweg,
+             text: t.fracht >= 1
+               ? `🚢 Vor die Küste segeln – dort dann erneut auf Land tippen zum Anlanden`
+               : '🚢 Vor diese Küste segeln' };
   }
 
   // Angriff auf feindliche Truppe gleicher Art
@@ -3036,7 +3303,7 @@ function befehlPlanen(t, tx, ty) {
                  : chance > 0.45 ? 'offener Ausgang' : '⚠️ unterlegen!';
     const warnung = imKriegMit(0, gegner.spieler) ? ''
       : '<br><span class="grund">⚠️ Ohne Kriegserklärung – das bringt alle Nachbarn gegen dich auf!</span>';
-    return { ok: true, aktion: 'marsch', weg,
+    return { ok: true, aktion: 'marsch', weg, gegen: gegner.spieler,
              text: `${t.art === 'flotte' ? '🌊 Seeschlacht' : '⚔️ Angriff'} auf ${spieler[gegner.spieler].name}: ` +
                    `<b>${Math.round(staerke(t))}</b> gegen <b>${Math.round(staerke(gegner))}</b> – ${urteil}` + warnung };
   }
@@ -3051,7 +3318,7 @@ function befehlPlanen(t, tx, ty) {
     if (!weg) return { ok: false, text: 'Dorthin führt kein Weg' };
     const warnung2 = imKriegMit(0, geb.spieler) ? ''
       : '<br><span class="grund">⚠️ Ohne Kriegserklärung – das bringt alle Nachbarn gegen dich auf!</span>';
-    return { ok: true, aktion: 'marsch', weg,
+    return { ok: true, aktion: 'marsch', weg, gegen: geb.spieler,
              text: `${geb.typ === 'kontor' ? '🚩 Kontor' : GEBAEUDE[geb.typ].name} von ` +
                    `${spieler[geb.spieler].name} angreifen` +
                    (geb.typ === 'kontor' ? ' – bei Erfolg fällt die ganze Insel!' : '') + warnung2 };
@@ -3068,10 +3335,20 @@ function befehlPlanen(t, tx, ty) {
 function befehlAusfuehren(v) {
   const t = v.truppe, plan = v.plan;
   if (!truppen.includes(t) || !plan.ok) return;
-  if (plan.aktion === 'marsch') t.pfad = plan.weg;
+  if (plan.aktion === 'marsch') {
+    // Ein bewusster Angriffsbefehl eröffnet den Krieg – ohne
+    // Erklärung gilt er als Überfall (die Leiste hat gewarnt)
+    if (plan.gegen !== undefined && !imKriegMit(0, plan.gegen))
+      kriegshandlung(0, plan.gegen);
+    t.pfad = plan.weg;
+  }
   else if (plan.aktion === 'vereinigen') {
     const z = plan.ziel;
-    if (t.art === 'flotte') { z.schiffe += t.schiffe; z.fracht += t.fracht; }
+    if (t.art === 'flotte') {
+      z.kanonen = Math.round(((z.kanonen || 0) * z.schiffe + (t.kanonen || 0) * t.schiffe) /
+                             Math.max(1, z.schiffe + t.schiffe));
+      z.schiffe += t.schiffe; z.fracht += t.fracht;
+    }
     else z.mann += t.mann;
     truppen = truppen.filter(x => x !== t);
     state.truppAuswahl = z;
@@ -3396,18 +3673,43 @@ function panelZeigen() {
     panel.style.display = 'block';
     const istFlotte = tr.art === 'flotte';
     let h = `<h2><span>${istFlotte ? '🚢' : '⚔️'}</span> ${istFlotte ? 'Flotte' : 'Heer'}</h2>`;
-    h += `<div class="beschr">Tippe auf ein Ziel auf der Karte – die Leiste unten zeigt vorher, was passiert.</div>`;
+    h += `<div class="beschr">Tippe auf ein Ziel auf der Karte – die Leiste unten zeigt vorher, was passiert. ` +
+         (istFlotte
+           ? 'Auf Wasser tippen = fahren, auf ein feindliches Gebäude = beschießen. Truppen an Bord setzt du ab, indem du nah an der Küste auf das Land tippst.'
+           : 'Tippe auf eine eigene Flotte am Ufer, um das Heer einzuschiffen.') +
+         `</div>`;
     h += `<div class="zeile"><span>${istFlotte ? 'Kriegsschiffe' : 'Soldaten'}</span>` +
          `<span>${Math.round(truppGroesse(tr))}</span></div>`;
-    if (istFlotte)
+    if (istFlotte) {
       h += `<div class="zeile"><span>Truppen an Bord</span><span>${Math.round(tr.fracht)}</span></div>`;
+      const k = tr.kanonen || 0;
+      h += `<div class="zeile"><span>Kanonen</span><span>` +
+           '🔫'.repeat(k) + '·'.repeat(KANONEN_MAX - k) +
+           (k ? ` (+${Math.round(KANONEN_SEEBONUS * k * 100)} % See)` : '') + `</span></div>`;
+    }
     h += `<div class="zeile"><span>Kampfkraft</span><span>${Math.round(staerke(tr))}</span></div>`;
     h += `<div class="zeile"><span>Moral</span><span>${Math.round(tr.moral * 100)} %</span></div>`;
     h += `<div class="auslast-balken"><div style="width:${Math.round(tr.moral * 100)}%"></div></div>`;
-    h += `<div class="zeile" style="margin-top:6px"><span>Sold</span><span>` +
+    // Nachschub erklärt, warum eine Truppe fern der Heimat schwächer ist
+    const nach = Math.round(nachschub(tr) * 100);
+    h += `<div class="zeile" style="margin-top:6px"><span>Nachschub</span>` +
+         `<span style="color:${nach >= 100 ? 'var(--accent-dunkel)' : nach >= 80 ? 'var(--text)' : 'var(--rot)'}">${nach} %</span></div>`;
+    if (nach < 100)
+      h += `<div class="beschr">Weit weg von eigenen Kontoren und Märkten kämpft es sich schlechter. Ein Marktplatz oder Kontor in der Nähe hilft.</div>`;
+    h += `<div class="zeile"><span>Sold</span><span>` +
          `${((tr.mann + tr.fracht) * KRIEG.sold * 60 + tr.schiffe * KRIEG.soldSchiff * 60).toFixed(0)} 💰/min</span></div>`;
     if (tr.kampf) h += `<div class="beschr" style="color:var(--rot);font-weight:700;margin-top:6px">⚔️ Im Gefecht!</div>`;
+
+    if (istFlotte && (tr.kanonen || 0) < KANONEN_MAX) {
+      const kk = Object.entries(KANONEN_KOSTEN)
+        .map(([ware, menge]) => `${WAREN_EMOJI[ware]}${menge}`).join(' ');
+      const beiWerft = !!werftNahe(tr);
+      h += `<button class="abriss-knopf" style="background:${beiWerft ? '#eef2ff' : '#f3f4f6'};color:${beiWerft ? '#4338ca' : 'var(--text-leise)'}" ` +
+           `onclick="kanonenNachruesten(state.truppAuswahl)">🔫 Kanonen nachrüsten (${kk})` +
+           (beiWerft ? '' : ' – bei der Werft') + `</button>`;
+    }
     h += `<button class="abriss-knopf" style="background:#f3f4f6;color:var(--text)" onclick="truppHalt()">✋ Halt</button>`;
+    h += `<button class="abriss-knopf" style="background:#f3f4f6;color:var(--text)" onclick="truppAbwaehlen()">✕ Auswahl aufheben</button>`;
     h += `<button class="abriss-knopf" onclick="truppAufloesen()">🏳️ Auflösen</button>`;
     $('panel-inhalt').innerHTML = h;
     return;
@@ -3467,8 +3769,9 @@ function panelZeigen() {
     html += `<div class="zeile" style="margin-top:6px"><span>Produktionstakt</span><span>alle ${def.dauer} s</span></div>`;
     html += `<div class="zeile"><span>Unterhalt</span><span>${(def.unterhalt * 60).toFixed(0)} 💰/min</span></div>`;
   } else {
-    if (def.marktRadius) html += `<div class="zeile"><span>Versorgungsradius</span><span>${def.marktRadius} Felder</span></div>`;
-    if (def.radius) html += `<div class="zeile"><span>Wirkungsradius</span><span>${def.radius} Felder</span></div>`;
+    // Tatsächlicher Radius – wächst mit der Ausbaustufe
+    if (def.marktRadius) html += `<div class="zeile"><span>Versorgungsradius</span><span>${wirkRadius(geb)} Felder</span></div>`;
+    if (def.radius) html += `<div class="zeile"><span>Wirkungsradius</span><span>${wirkRadius(geb)} Felder</span></div>`;
     if (def.unterhalt) html += `<div class="zeile"><span>Unterhalt</span><span>${(def.unterhalt * 60).toFixed(0)} 💰/min</span></div>`;
   }
 
@@ -3503,10 +3806,12 @@ function panelZeigen() {
         <span>${WAREN_EMOJI[ware]} <b>${Math.floor(res[ware])}</b>${trend}
           <small style="color:var(--text-leise)">${kaufpreis(ware)}/${verkaufspreis(ware)}💰</small></span>
         <span>
+          <button class="handel-verkauf" title="200 verkaufen (+${verkaufspreis(ware) * 200}💰)" onclick="handel('${ware}',-200)">−200</button>
           <button class="handel-verkauf" title="50 verkaufen (+${verkaufspreis(ware) * 50}💰)" onclick="handel('${ware}',-50)">−50</button>
           <button class="handel-verkauf" title="10 verkaufen (+${verkaufspreis(ware) * 10}💰)" onclick="handel('${ware}',-10)">−10</button>
           <button class="handel-kauf" title="10 kaufen (−${kaufpreis(ware) * 10}💰)" onclick="handel('${ware}',10)">+10</button>
           <button class="handel-kauf" title="50 kaufen (−${kaufpreis(ware) * 50}💰)" onclick="handel('${ware}',50)">+50</button>
+          <button class="handel-kauf" title="200 kaufen (−${kaufpreis(ware) * 200}💰)" onclick="handel('${ware}',200)">+200</button>
         </span></div>`;
       const regel = autoHandel[ware];
       html += `<div class="auto-zeile">
@@ -3523,12 +3828,15 @@ function panelZeigen() {
   // Ausbaustufe und Ausbau-Knopf
   const stufeJetzt = geb.ausbau || 1;
   html += `<div class="zeile"><span>Ausbaustufe</span><span>` +
-          '★'.repeat(stufeJetzt) + '☆'.repeat(AUSBAU_MAX - stufeJetzt) +
-          (stufeJetzt > 1 ? ` (Ertrag ×${ausbauFaktor(geb).toFixed(1).replace('.', ',')})` : '') +
-          `</span></div>`;
+          '★'.repeat(stufeJetzt) + '☆'.repeat(AUSBAU_MAX - stufeJetzt) + `</span></div>`;
+  html += `<div class="zeile"><span>Wirkung</span><span>${ausbauWirkung(geb, stufeJetzt)}</span></div>`;
   if (geb.spieler === 0 && stufeJetzt < AUSBAU_MAX) {
     const k = Object.entries(ausbauKosten(geb))
       .map(([ware, menge]) => `${WAREN_EMOJI[ware]}${menge}`).join(' ');
+    html += `<div class="beschr" style="margin-top:4px">Stufe ${stufeJetzt + 1} bringt: ` +
+            `<b>${ausbauWirkung(geb, stufeJetzt + 1)}</b>` +
+            (GEBAEUDE[geb.typ].unterhalt ? ` – dafür ${(GEBAEUDE[geb.typ].unterhalt * (stufeJetzt + 1) * 60).toFixed(0)} 💰/min Unterhalt` : '') +
+            `</div>`;
     html += `<button class="abriss-knopf" style="background:#eef2ff;color:#4338ca" ` +
             `onclick="ausbauen(state.auswahl)">⬆️ Auf Stufe ${stufeJetzt + 1} ausbauen (${k})</button>`;
   }
@@ -3621,7 +3929,20 @@ function niederlageErobert(sieger) {
 }
 
 function abreissenAuswahl() { if (state.auswahl && state.auswahl.spieler === 0) abreissen(state.auswahl); }
-$('panel-zu').addEventListener('click', () => { state.auswahl = null; panelZeigen(); });
+$('panel-zu').addEventListener('click', () => {
+  // Schließt beides: Gebäude-Infos UND eine ausgewählte Truppe
+  state.auswahl = null;
+  state.truppAuswahl = null;
+  state.vorschau = null;
+  bestaetigungZeigen();
+  panelZeigen();
+});
+function truppAbwaehlen() {
+  state.truppAuswahl = null;
+  state.vorschau = null;
+  bestaetigungZeigen();
+  panelZeigen();
+}
 
 // Kurze Meldung am unteren Rand; gleiche Meldungen werden gedrosselt
 let toastTimer = null;
@@ -3760,6 +4081,15 @@ function zentrieren() {
   kameraBegrenzen();
 }
 $('k-mitte').addEventListener('click', zentrieren);
+$('k-speichern').addEventListener('click', () => spielSpeichern(false));
+$('k-laden').addEventListener('click', () => spielLaden(false));
+
+// Alle 30 Sekunden und beim Verlassen automatisch sichern
+setInterval(() => { if (state.kontorGebaut && !state.vorbei) spielSpeichern(true); }, 30000);
+window.addEventListener('pagehide', () => { if (state.kontorGebaut) spielSpeichern(true); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && state.kontorGebaut) spielSpeichern(true);
+});
 
 let zuletzt = performance.now();
 let uiTakt = 0;
@@ -3806,6 +4136,26 @@ kameraStart();
 leinwand.classList.add('bauen');   // Start-Werkzeug ist das Kontor
 uiAktualisieren();
 requestAnimationFrame(schleife);
+
+// Liegt ein Spielstand vor? Dann fragen, ob fortgesetzt werden soll.
+if (standVorhanden()) {
+  $('overlay').style.display = 'flex';
+  $('overlay-box').innerHTML = `
+    <div class="gross">💾</div>
+    <h1>Weiterspielen?</h1>
+    <p>Es liegt ein gespeicherter Spielstand vor.<br>
+       Du kannst ihn fortsetzen oder eine neue Welt beginnen.</p>
+    <button class="knopf-gruen" onclick="spielFortsetzen()">Fortsetzen</button>
+    <button class="knopf-grau" onclick="neueWelt()">Neue Welt</button>`;
+}
+function spielFortsetzen() {
+  if (!spielLaden(true)) { $('overlay').style.display = 'none'; return; }
+  melden('📂 Weiter geht\'s!');
+}
+function neueWelt() {
+  standLoeschen();
+  $('overlay').style.display = 'none';
+}
 </script>
 </body>
 </html>
