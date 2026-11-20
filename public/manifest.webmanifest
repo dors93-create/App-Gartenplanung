@@ -1,0 +1,17 @@
+{
+  "name": "Inselgründer – Aufbauspiel",
+  "short_name": "Inselgründer",
+  "description": "Ein entspanntes Insel-Aufbauspiel: besiedle Inseln, baue Produktionsketten auf und setze dich gegen drei Konkurrenten durch.",
+  "lang": "de",
+  "start_url": "./inselspiel.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#2f5d8a",
+  "theme_color": "#2f5d8a",
+  "icons": [
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

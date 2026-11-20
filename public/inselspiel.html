@@ -2,8 +2,21 @@
 <html lang="de">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Inselgründer – Aufbauspiel</title>
+
+<!-- Als App auf dem Handy installierbar (PWA):
+     "Zum Home-Bildschirm hinzufügen" legt ein Symbol an, das Spiel
+     startet dann im Vollbild und läuft auch ohne Internet. -->
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#2f5d8a">
+<meta name="description" content="Ein entspanntes Insel-Aufbauspiel: Inseln besiedeln, Produktionsketten aufbauen und sich gegen drei Konkurrenten durchsetzen.">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Inselgründer">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+<link rel="icon" href="./icon-192.png">
 <style>
   /* ============================================================
      Inselgründer – ein entspanntes Insel-Aufbauspiel
@@ -19,6 +32,10 @@
     --flaeche: rgba(255, 255, 255, 0.92);
     --schatten: 0 4px 18px rgba(0, 0, 0, 0.16);
     --radius: 12px;
+    /* Freiraum für Notch und Home-Leiste, wenn das Spiel als App
+       im Vollbild läuft. Im Browser sind die Werte 0. */
+    --rand-oben: env(safe-area-inset-top, 0px);
+    --rand-unten: env(safe-area-inset-bottom, 0px);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; overflow: hidden; }
@@ -41,7 +58,7 @@
 
   /* ---------- Ressourcenleiste oben ---------- */
   #leiste-oben {
-    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    position: absolute; top: calc(10px + var(--rand-oben)); left: 50%; transform: translateX(-50%);
     display: flex; align-items: center; gap: 4px;
     background: var(--flaeche); border-radius: var(--radius);
     box-shadow: var(--schatten);
@@ -81,7 +98,7 @@
 
   /* ---------- Baumenü unten ---------- */
   #baumenue {
-    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+    position: absolute; bottom: calc(10px + var(--rand-unten)); left: 50%; transform: translateX(-50%);
     display: flex; gap: 6px; align-items: stretch;
     background: var(--flaeche); border-radius: var(--radius);
     box-shadow: var(--schatten); padding: 8px;
@@ -116,11 +133,11 @@
 
   /* ---------- Info-Panel (Klick auf ein Gebäude) ---------- */
   #info-panel {
-    position: absolute; top: 64px; right: 10px; width: 248px;
+    position: absolute; top: calc(64px + var(--rand-oben)); right: 10px; width: 248px;
     background: var(--flaeche); border-radius: var(--radius);
     box-shadow: var(--schatten); padding: 14px;
     z-index: 11; display: none; font-size: 13px;
-    max-height: calc(100vh - 180px); overflow-y: auto;
+    max-height: calc(100vh - 180px - var(--rand-oben) - var(--rand-unten)); overflow-y: auto;
   }
   #info-panel h2 { font-size: 15px; margin-bottom: 2px; display: flex; align-items: center; gap: 7px; }
   #info-panel .beschr { color: var(--text-leise); font-size: 12px; margin-bottom: 9px; }
@@ -147,7 +164,7 @@
 
   /* ---------- Zoom-Knöpfe ---------- */
   #zoom-knoepfe {
-    position: absolute; left: 10px; bottom: 118px; z-index: 9;
+    position: absolute; left: 10px; bottom: calc(118px + var(--rand-unten)); z-index: 9;
     display: flex; flex-direction: column; gap: 8px;
   }
   #zoom-knoepfe button {
@@ -160,7 +177,7 @@
 
   /* ---------- Bau-/Abriss-Bestätigung ---------- */
   #bestaetigung {
-    position: absolute; bottom: 96px; left: 50%; transform: translateX(-50%);
+    position: absolute; bottom: calc(96px + var(--rand-unten)); left: 50%; transform: translateX(-50%);
     background: var(--flaeche); border-radius: 12px; box-shadow: var(--schatten);
     padding: 10px 12px; z-index: 15; display: none;
     align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap;
@@ -220,21 +237,21 @@
 
   /* ---------- Meldungen (Toast) & Hinweise ---------- */
   #toast {
-    position: absolute; bottom: 210px; left: 50%; transform: translateX(-50%);
+    position: absolute; bottom: calc(210px + var(--rand-unten)); left: 50%; transform: translateX(-50%);
     background: rgba(31, 41, 55, 0.92); color: #fff;
     border-radius: 10px; padding: 8px 16px; font-size: 13px;
     z-index: 20; pointer-events: none; opacity: 0; transition: opacity .25s;
     max-width: 90vw; text-align: center;
   }
   #hinweis {
-    position: absolute; top: 62px; left: 50%; transform: translateX(-50%);
+    position: absolute; top: calc(62px + var(--rand-oben)); left: 50%; transform: translateX(-50%);
     background: var(--flaeche); border-radius: 10px; box-shadow: var(--schatten);
     padding: 8px 16px; font-size: 13.5px; font-weight: 600; z-index: 9;
     color: var(--accent-dunkel);
     max-width: calc(100vw - 24px); width: max-content; text-align: center;
   }
   #punkte {
-    position: absolute; top: 62px; left: 10px; z-index: 8;
+    position: absolute; top: calc(62px + var(--rand-oben)); left: 10px; z-index: 8;
     background: var(--flaeche); border-radius: 10px; box-shadow: var(--schatten);
     padding: 7px 10px; font-size: 11.5px; min-width: 132px;
   }
@@ -243,14 +260,14 @@
   .punkte-zeile span:last-child { font-weight: 600; font-variant-numeric: tabular-nums; }
 
   #bankrott-warnung {
-    position: absolute; top: 62px; left: 50%; transform: translateX(-50%);
+    position: absolute; top: calc(62px + var(--rand-oben)); left: 50%; transform: translateX(-50%);
     background: #fef2f2; color: var(--rot); border-radius: 10px;
     box-shadow: var(--schatten); padding: 8px 16px;
     font-size: 13.5px; font-weight: 700; z-index: 12; display: none;
   }
   /* Pulsierende Warnung, wenn den Einwohnern etwas fehlt */
   #mangel-warnung {
-    position: absolute; top: 62px; left: 50%; transform: translateX(-50%);
+    position: absolute; top: calc(62px + var(--rand-oben)); left: 50%; transform: translateX(-50%);
     background: #fef2f2; color: var(--rot); border-radius: 10px;
     padding: 8px 16px; font-size: 13.5px; font-weight: 700;
     z-index: 11; display: none; text-align: center;
@@ -3764,6 +3781,15 @@ function schleife(jetzt) {
   if (uiTakt >= 0.25) { uiTakt = 0; uiAktualisieren(); }
 
   requestAnimationFrame(schleife);
+}
+
+// --- Als App: Service Worker anmelden, damit das Spiel auch
+//     ohne Internet startet. Scheitert still, wenn die Datei
+//     lokal (file://) geöffnet wird – dann läuft es trotzdem.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  });
 }
 
 // --- Los geht's ---

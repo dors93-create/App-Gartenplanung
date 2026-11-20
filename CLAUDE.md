@@ -78,7 +78,17 @@ src/editor.js         Schritt 3a: Objekte zeichnen/setzen, bemaßen, speichern
 src/bestand.js        Schritt 3b: amtliche Gebäude automatisch erfassen
 src/style.css         Gestaltung (Design-Tokens, Suchleiste, Panel, Editor)
 public/inselspiel.html  Eigenständiges Insel-Aufbauspiel (Bonus): eine einzelne
-                        Datei, läuft auch ohne Server; wird mit veröffentlicht
+                        Datei, läuft auch ohne Server; wird mit veröffentlicht.
+                        Lässt sich als App auf den Homescreen laden (PWA) und
+                        läuft dann im Vollbild, auch ohne Internet.
+public/manifest.webmanifest
+                        App-Beschreibung für die Installation (Name, Icons,
+                        Startseite, Vollbildmodus)
+public/sw.js            Service Worker: legt das Spiel im Zwischenspeicher ab,
+                        damit es offline startet. Fängt bewusst nur die
+                        Spiel-Dateien ab, nicht die Gartenplanung
+public/icon-192.png · icon-512.png · apple-touch-icon.png
+                        App-Symbole für Android und iOS
 public/weisswein.html   Weißwein-Kompass (Bonus): 16 Rebsorten in einer
                         interaktiven Kreuzmatrix (Süße, Körper, Säure, Frucht,
                         Duft), Filter nach Herkunft und Essen; ebenfalls eine
