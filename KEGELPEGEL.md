@@ -110,6 +110,11 @@ diesen Text ersetzen, dann **„Veröffentlichen"**:
 }
 ```
 
+> **Auch das Inselspiel zu zweit im Einsatz?** Dann stattdessen die Regeln
+> aus `MEHRSPIELER.md` nehmen – sie enthalten diesen Kegelpegel-Teil
+> unverändert und zusätzlich die Freigabe für das Spiel. Mit dem Text
+> oben allein ginge die Freigabe wieder verloren.
+
 Was das bedeutet: Lesen darf jeder, der den Link hat. Geschrieben werden darf
 ausschließlich das eine Feld mit dem Punktestand, und auch nur ein Text unter
 20 000 Zeichen. Niemand kann die Datenbank also mit fremden Daten vollmüllen.

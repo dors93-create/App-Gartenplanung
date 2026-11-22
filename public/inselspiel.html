@@ -1933,7 +1933,7 @@ const MP_FASSUNGEN = ['10.13.2', '11.0.2', '10.12.5'];
 
 const MP = {
   an: false, rolle: null, code: null,
-  fb: null, db: null, pfad: null,
+  fb: null, app: null, db: null, pfad: null,
   taktZeit: 0, bautenZeit: 0, pulsZeit: 0, ausgang: null,
   hostPuls: 0, gastDa: false, fehler: '',
 };
@@ -1958,11 +1958,47 @@ async function firebaseLaden() {
 
 async function mpVerbinden() {
   if (MP.db) return true;
-  const fb = await firebaseLaden();
-  MP.fb = fb;
-  const app = fb.initializeApp(MP_KONFIG, 'inselspiel');
-  MP.db = fb.getDatabase(app);
+  // Jeder Schritt nur einmal – so klappt auch ein zweiter Versuch,
+  // wenn der erste mittendrin gescheitert ist
+  if (!MP.fb) MP.fb = await firebaseLaden();
+  if (!MP.app) MP.app = MP.fb.initializeApp(MP_KONFIG, 'inselspiel');
+  MP.db = MP.fb.getDatabase(MP.app);
   return true;
+}
+
+// Wartet höchstens eine Weile auf die Datenbank. Ohne Netz bliebe die
+// Anzeige sonst für immer bei „Verbinde …" stehen.
+const MP_FRIST = 15;   // Sekunden
+function mitFrist(versprechen) {
+  return Promise.race([
+    versprechen,
+    new Promise((_, ablehnen) =>
+      setTimeout(() => ablehnen(new Error('zeitueberschreitung')), MP_FRIST * 1000)),
+  ]);
+}
+
+// Fehler der Datenbank in verständliches Deutsch übersetzen.
+// „kurz" liefert eine knappe Fassung für die Meldungszeile.
+function mpFehlerText(e, kurz) {
+  const roh = (String(e && e.code || '') + ' ' + String(e && e.message || e)).trim();
+  // Die Regeln der Datenbank erlauben den Bereich „inselspiel" nicht
+  if (/permission.denied/i.test(roh))
+    return kurz ? 'die Datenbank erlaubt das Inselspiel nicht (Freigabe fehlt)'
+      : '🔒 Die Datenbank lässt das Inselspiel noch nicht zu. Das ist eine einmalige ' +
+        'Freigabe, die nur ihr Besitzer erteilen kann: in der Firebase-Konsole unter ' +
+        '„Realtime Database" → „Regeln" den Bereich „inselspiel" erlauben. ' +
+        'Die genaue Anleitung steht in MEHRSPIELER.md.';
+  // Keine Antwort: kein Netz, oder die Firebase-Bausteine ließen sich nicht laden
+  if (/zeitueberschreitung|offline|network|failed to fetch|dynamically imported|module script|load failed/i.test(roh))
+    return kurz ? 'keine Verbindung zur Datenbank'
+      : '📡 Die Datenbank antwortet nicht. Bitte die Internetverbindung prüfen und es noch einmal versuchen.';
+  return kurz ? roh : 'Das hat nicht geklappt: ' + roh;
+}
+
+// Bricht die Datenbank eine laufende Verbindung ab, soll man das sehen
+function mpHorchFehler(e) {
+  MP.fehler = String(e && e.message || e);
+  melden('🌐 Verbindung gestört – ' + mpFehlerText(e, true), 'mpfehler', 30000);
 }
 
 function mpCodeErzeugen() {
@@ -1982,14 +2018,14 @@ async function partieEroeffnen() {
   }
   mpStatus('Verbinde …');
   try {
-    await mpVerbinden();
+    await mitFrist(mpVerbinden());
     const fb = MP.fb;
     MP.code = mpCodeErzeugen();
     MP.pfad = 'inselspiel/' + MP.code;
-    await fb.set(fb.ref(MP.db, MP.pfad), {
+    await mitFrist(fb.set(fb.ref(MP.db, MP.pfad), {
       welt: { saat: weltSaat, fassung: WELT_FASSUNG, erstellt: Date.now() },
       meta: { puls: Date.now(), gast: false },
-    });
+    }));
     MP.an = true; MP.rolle = 'gastgeber';
     // Platz 2 wird frei für den Mitspieler
     spieler[1].ki = false;
@@ -2001,17 +2037,18 @@ async function partieEroeffnen() {
         spieler[1].name = 'Mitspieler';
         melden('🎉 Dein Mitspieler ist der Partie beigetreten!');
       }
-    });
+    }, mpHorchFehler);
     fb.onChildAdded(fb.ref(MP.db, MP.pfad + '/befehle'), schnapp => {
-      befehlAnnehmen(schnapp.val());
-      fb.remove(schnapp.ref);
-    });
+      // Ein fehlerhafter Befehl darf die Partie nicht aufhalten
+      try { befehlAnnehmen(schnapp.val()); } catch (e) { console.error('Befehl verworfen', e); }
+      fb.remove(schnapp.ref).catch(() => {});
+    }, mpHorchFehler);
     mpStatus('');
     mpFensterZeigen();
     melden('🌐 Partie eröffnet – gib deinem Mitspieler den Code ' + MP.code);
   } catch (e) {
     MP.fehler = String(e && e.message || e);
-    mpStatus('Verbindung fehlgeschlagen: ' + MP.fehler);
+    mpStatus(mpFehlerText(e));
   }
 }
 
@@ -2021,10 +2058,10 @@ async function partieBeitreten(code) {
   if (code.length < 4) { mpStatus('Bitte den Code eingeben'); return; }
   mpStatus('Suche Partie …');
   try {
-    await mpVerbinden();
+    await mitFrist(mpVerbinden());
     const fb = MP.fb;
     MP.pfad = 'inselspiel/' + code;
-    const welt = (await fb.get(fb.ref(MP.db, MP.pfad + '/welt'))).val();
+    const welt = (await mitFrist(fb.get(fb.ref(MP.db, MP.pfad + '/welt')))).val();
     if (!welt) { mpStatus('Keine Partie mit diesem Code gefunden'); return; }
     // Aus demselben Startwert entsteht nur dann dieselbe Welt, wenn beide
     // Geräte dieselbe Spielfassung geladen haben.
@@ -2045,12 +2082,16 @@ async function partieBeitreten(code) {
     state.kontorGebaut = false;
     state.terrainAlt = true;
 
-    await fb.set(fb.ref(MP.db, MP.pfad + '/meta/gast'), true);
-    fb.onValue(fb.ref(MP.db, MP.pfad + '/stand/takt'), sn => standAnwenden(sn.val()));
-    fb.onValue(fb.ref(MP.db, MP.pfad + '/stand/bauten'), sn => bautenAnwenden(sn.val()));
-    fb.onValue(fb.ref(MP.db, MP.pfad + '/meta/puls'), sn => { MP.hostPuls = sn.val() || 0; });
-    MP.ausgang = paket => fb.push(fb.ref(MP.db, MP.pfad + '/befehle'), paket)
-      .catch(() => melden('Befehl konnte nicht gesendet werden'));
+    await mitFrist(fb.set(fb.ref(MP.db, MP.pfad + '/meta/gast'), true));
+    fb.onValue(fb.ref(MP.db, MP.pfad + '/stand/takt'), sn => standAnwenden(sn.val()), mpHorchFehler);
+    fb.onValue(fb.ref(MP.db, MP.pfad + '/stand/bauten'), sn => bautenAnwenden(sn.val()), mpHorchFehler);
+    fb.onValue(fb.ref(MP.db, MP.pfad + '/meta/puls'), sn => { MP.hostPuls = sn.val() || 0; }, mpHorchFehler);
+    // Befehle abschicken. Scheitert das – gleich oder später –, erfährt man es.
+    MP.ausgang = paket => {
+      const pech = () => melden('Befehl konnte nicht gesendet werden', 'mpbefehl');
+      try { fb.push(fb.ref(MP.db, MP.pfad + '/befehle'), paket).catch(pech); }
+      catch (e) { pech(); }
+    };
 
     menueBauen();
     werkzeugWaehlen('kontor');
@@ -2059,7 +2100,7 @@ async function partieBeitreten(code) {
     melden('🌐 Verbunden! Such dir eine Insel und baue dein Kontor.');
   } catch (e) {
     MP.fehler = String(e && e.message || e);
-    mpStatus('Beitritt fehlgeschlagen: ' + MP.fehler);
+    mpStatus(mpFehlerText(e));
   }
 }
 
@@ -2067,23 +2108,36 @@ async function partieBeitreten(code) {
 function mpSenden(dt) {
   // Ohne bestehende Verbindung wird nichts gesendet (und nichts kaputt)
   if (!istGastgeber() || !MP.fb || !MP.db || !MP.pfad) return;
-  const fb = MP.fb;
   MP.taktZeit += dt; MP.bautenZeit += dt; MP.pulsZeit += dt;
 
   if (MP.taktZeit >= 0.35) {
     MP.taktZeit = 0;
-    fb.set(fb.ref(MP.db, MP.pfad + '/stand/takt'), taktPaket()).catch(() => {});
+    mpSchreiben('/stand/takt', taktPaket);
   }
 
   if (MP.bautenZeit >= 1.5) {
     MP.bautenZeit = 0;
-    fb.set(fb.ref(MP.db, MP.pfad + '/stand/bauten'), bautenPaket()).catch(() => {});
+    mpSchreiben('/stand/bauten', bautenPaket);
   }
 
   if (MP.pulsZeit >= 2) {
     MP.pulsZeit = 0;
-    fb.set(fb.ref(MP.db, MP.pfad + '/meta/puls'), Date.now()).catch(() => {});
+    mpSchreiben('/meta/puls', () => Date.now());
   }
+}
+
+// Ein Paket in die Datenbank schreiben. Diese Funktion läuft mitten in
+// der Spielschleife – ein Fehler hier darf das Spiel niemals anhalten.
+// Darum wird alles abgefangen und nur als Hinweis gemeldet.
+function mpSchreiben(unterpfad, paketBauen) {
+  try {
+    MP.fb.set(MP.fb.ref(MP.db, MP.pfad + unterpfad), paketBauen()).catch(mpSendeFehler);
+  } catch (e) { mpSendeFehler(e); }
+}
+function mpSendeFehler(e) {
+  MP.fehler = String(e && e.message || e);
+  melden('🌐 Der Spielstand kommt gerade nicht beim Mitspieler an – ' + mpFehlerText(e, true),
+         'mpsenden', 30000);
 }
 
 // Der laufende Stand, kompakt als Zahlen

@@ -4,6 +4,49 @@ Zwei Handys, dieselbe Welt: gemeinsamer Markt, Diplomatie und Krieg.
 Die Verbindung läuft über die Firebase-Datenbank, die auch der
 Kegelpegel-Punktestand nutzt (`kegeltour-45451`).
 
+## Einmalig vorab: Datenbank freigeben
+
+Die Datenbank lässt von sich aus nur den Kegelpegel zu. Ohne die folgende
+Freigabe meldet das Spiel beim Eröffnen oder Beitreten:
+„🔒 Die Datenbank lässt das Inselspiel noch nicht zu" (früher stand dort
+nur `permission_denied`). Das Freischalten geht nur mit dem Google-Konto,
+dem die Datenbank gehört, und dauert zwei Minuten:
+
+1. [Firebase-Konsole](https://console.firebase.google.com) öffnen, Projekt
+   `kegeltour-45451` wählen.
+2. Links **Realtime Database** → Reiter **„Regeln"**.
+3. Den Text dort durch diesen ersetzen und **„Veröffentlichen"** antippen:
+
+```json
+{
+  "rules": {
+    "kegelpegel": {
+      ".read": true,
+      "stand": {
+        ".write": true,
+        ".validate": "newData.isString() && newData.val().length < 20000"
+      }
+    },
+    "inselspiel": {
+      "$code": {
+        ".read": true,
+        ".write": true
+      }
+    }
+  }
+}
+```
+
+Der Teil `kegelpegel` ist unverändert der Schutz aus `KEGELPEGEL.md`. Neu
+ist nur `inselspiel`: Jede Partie liegt unter ihrem Code und ist für alle
+les- und schreibbar, die diesen Code kennen. Die Liste aller Partien kann
+niemand abrufen.
+
+> **Hinweis zur Sicherheit:** Es gibt keine Anmeldung. Wer den Code einer
+> Partie kennt, kann mitspielen; wer sich auskennt, könnte theoretisch
+> eine Partie stören oder Datenmüll ablegen. Für ein Spiel im
+> Freundeskreis ist das in Ordnung – für mehr nicht.
+
 ## So spielt ihr zusammen
 
 1. **Beide** öffnen das Spiel und laden die Seite einmal neu, damit auf
@@ -40,29 +83,16 @@ Beitreten eine „andere Spielfassung", hilft Neuladen auf beiden Geräten.
 - Datenverbrauch: grob 10–15 KB pro Sekunde, also etwa 40 MB je
   Stunde. Im WLAN unkritisch, unterwegs lieber im Blick behalten.
 
-## Falls der Beitritt nicht klappt
+## Wenn es nicht klappt
 
-Dann erlauben die Regeln der Firebase-Datenbank den Pfad `inselspiel`
-noch nicht. In der [Firebase-Konsole](https://console.firebase.google.com)
-unter **Realtime Database → Regeln** muss er lesbar und schreibbar sein,
-zum Beispiel so:
-
-```json
-{
-  "rules": {
-    "kegelpegel": { ".read": true, ".write": true },
-    "inselspiel": { ".read": true, ".write": true }
-  }
-}
-```
-
-Stehen dort bereits `".read": true` und `".write": true` auf oberster
-Ebene, ist nichts zu tun.
-
-> **Hinweis zur Sicherheit:** Wie beim Kegelpegel ist das eine offene
-> Datenbank ohne Anmeldung. Wer den Code kennt, kann mitspielen; wer
-> sich auskennt, könnte theoretisch fremde Partien stören. Für ein
-> Spiel im Freundeskreis ist das in Ordnung – für mehr nicht.
+| Meldung im Spiel | Was zu tun ist |
+|---|---|
+| 🔒 „Die Datenbank lässt das Inselspiel noch nicht zu" | Die Freigabe oben fehlt noch (oder wurde beim Ändern der Regeln überschrieben). |
+| 📡 „Die Datenbank antwortet nicht" | Internetverbindung prüfen, dann noch einmal versuchen. |
+| „Keine Partie mit diesem Code gefunden" | Code vergleichen. Der Gastgeber muss die Partie gerade geöffnet haben. |
+| „… andere Spielfassung" | Auf beiden Geräten die Seite neu laden. |
+| „Dieser Spielstand stammt aus einer älteren Fassung" | Zu zweit geht es nur in einer neuen Welt. |
+| „Der Gastgeber ist gerade nicht erreichbar" | Das Gerät des Gastgebers ist gesperrt, pausiert oder ohne Netz. |
 
 ## Grenzen der aktuellen Fassung
 
