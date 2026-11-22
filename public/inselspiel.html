@@ -3426,15 +3426,68 @@ const leinwand = document.getElementById('karte');
 const ctx = leinwand.getContext('2d');
 let dpr = 1;
 
-// Das Terrain ändert sich selten – wir zeichnen es einmal in einen
-// unsichtbaren Puffer und stempeln den jedes Bild nur noch auf.
-const terrainPuffer = document.createElement('canvas');
-terrainPuffer.width = N * TP; terrainPuffer.height = N * TP;
-const tctx = terrainPuffer.getContext('2d');
+/* ---------- Isometrische Projektion ---------------------------
+   Die Karte wird nicht senkrecht von oben gezeigt, sondern schräg:
+   jede Kachel ist eine Raute (doppelt so breit wie hoch). Dadurch
+   sieht man von jedem Bauwerk zwei Wandseiten und das Dach.
 
-// Grundfarbe einer Kachel malen (Wasser, Strand, Gras, Wald, Berg).
-// Der Puffer arbeitet mit TP Pixeln je Kachel und wird beim Zeichnen
-// auf die Weltgröße (T je Kachel) hochskaliert.
+   Kachelgitter -> Weltpixel:
+     x = (tx - ty) * KW/2 + XV        (XV, damit x nie negativ wird)
+     y = (tx + ty) * KH/2
+   Die Funktionen nehmen GITTERPUNKTE, nicht Kachelmitten: isoX(3,4)
+   ist die Nordecke der Kachel (3,4), isoX(4,5) ihre Südecke.
+   --------------------------------------------------------------- */
+const KW = 64;                  // Breite einer Kachelraute
+const KH = 32;                  // Höhe einer Kachelraute
+const XV = N * KW / 2;          // Nullpunktverschiebung
+const WELT_B = N * KW;          // Weltbreite in Pixeln
+const WELT_H = N * KH;          // Welthöhe in Pixeln
+
+// Wie hoch liegt Land über dem Meeresspiegel (in Bildschirmpixeln)?
+const H_STRAND = 5;
+const H_LAND = 9;
+const H_BERG = 26;
+
+function isoX(tx, ty) { return (tx - ty) * (KW / 2) + XV; }
+function isoY(tx, ty) { return (tx + ty) * (KH / 2); }
+
+// Umkehrung: Weltpunkt -> (gebrochene) Kachelkoordinate
+function kachelVonWelt(wx, wy) {
+  const u = (wx - XV) / (KW / 2);     // = tx - ty
+  const v = wy / (KH / 2);            // = tx + ty
+  return { x: (v + u) / 2, y: (v - u) / 2 };
+}
+
+// Höhe einer Kachel. Wasser liegt auf 0, Land auf einem Plateau,
+// Berge ragen darüber hinaus – daraus entstehen Steilkanten am Ufer.
+function kachelHoehe(k) {
+  if (!k || k.typ === 'wasser') return 0;
+  if (k.typ === 'strand') return H_STRAND;
+  if (k.typ === 'fluss') return H_LAND - 4;
+  if (k.typ === 'berg') return H_LAND + H_BERG;
+  return H_LAND;
+}
+function hoeheBei(x, y) {
+  if (x < 0 || y < 0 || x >= N || y >= N) return 0;
+  return hoehCache ? hoehCache[y * N + x] : kachelHoehe(karte[y * N + x]);
+}
+
+// Mittelpunkt einer Kachel auf dem Bildschirm (mit Höhe)
+function kachelMitte(x, y) {
+  return { x: isoX(x + 0.5, y + 0.5), y: isoY(x + 0.5, y + 0.5) - hoeheBei(x, y) };
+}
+
+// Die Raute einer Kachel als Pfad (oben = Nordecke)
+function rautePfad(x, y, hoch, wachs) {
+  const w = wachs || 0;
+  ctx.beginPath();
+  ctx.moveTo(isoX(x, y), isoY(x, y) - hoch - w);
+  ctx.lineTo(isoX(x + 1, y), isoY(x + 1, y) - hoch);
+  ctx.lineTo(isoX(x + 1, y + 1), isoY(x + 1, y + 1) - hoch + w);
+  ctx.lineTo(isoX(x, y + 1), isoY(x, y + 1) - hoch);
+  ctx.closePath();
+}
+
 // ---------- Farbwelt ----------------------------------------
 // Warme, erdige Töne wie in den klassischen Aufbauspielen.
 const PALETTE = {
@@ -3443,72 +3496,35 @@ const PALETTE = {
   flach:      [76, 146, 173],
   fluss:      [78, 148, 186],
   sand:       [231, 211, 160],
-  sandDunkel: [206, 183, 130],
-  gras:       [141, 172, 94],
-  grasHell:   [160, 189, 110],
-  grasDunkel: [113, 146, 74],
-  wald:       [86, 126, 60],
-  waldDunkel: [62, 96, 44],
-  berg:       [141, 132, 121],
-  bergHell:   [176, 167, 155],
-  bergDunkel: [99, 91, 82],
+  sandDunkel: [196, 173, 120],
+  gras:       [124, 162, 82],
+  grasHell:   [150, 184, 104],
+  grasDunkel: [98, 132, 64],
+  wald:       [82, 122, 56],
+  waldDunkel: [58, 92, 42],
+  berg:       [146, 138, 126],
+  bergHell:   [184, 176, 162],
+  bergDunkel: [96, 89, 80],
+  erde:       [150, 118, 78],
+  erdeDunkel: [112, 86, 56],
 };
+
 function ton(c, v = 0) {
   return `rgb(${Math.round(c[0] + v)},${Math.round(c[1] + v)},${Math.round(c[2] + v)})`;
 }
-
-// Rechteck mit einzeln einstellbaren Ecken – damit werden aus
-// quadratischen Kacheln geschwungene Küstenlinien.
-function form4(c, x, y, w, h, tl, tr, br, bl) {
-  c.beginPath();
-  c.moveTo(x + tl, y);
-  c.lineTo(x + w - tr, y);
-  c.arcTo(x + w, y, x + w, y + tr, tr);
-  c.lineTo(x + w, y + h - br);
-  c.arcTo(x + w, y + h, x + w - br, y + h, br);
-  c.lineTo(x + bl, y + h);
-  c.arcTo(x, y + h, x, y + h - bl, bl);
-  c.lineTo(x, y + tl);
-  c.arcTo(x, y, x + tl, y, tl);
-  c.closePath();
-}
-
-function istWasser(x, y) {
-  const k = kachel(x, y);
-  return !k || k.typ === 'wasser';
-}
-// Eckradien einer Landkachel: je mehr Wasser an einer Ecke, desto runder
-function landEcken(x, y, R) {
-  const o = istWasser(x, y - 1), u = istWasser(x, y + 1);
-  const l = istWasser(x - 1, y), r = istWasser(x + 1, y);
-  const e = (a, b) => (a && b) ? R : (a || b) ? R * 0.55 : 0;
-  return [e(o, l), e(o, r), e(u, r), e(u, l)];
-}
-
-// Dasselbe für Wald- und Bergflächen: Ecken dort abrunden, wo der
-// Nachbar eine andere Oberfläche hat. So wirken die Flächen organisch
-// gewachsen statt wie ein Schachbrett.
-function flaechenEcken(x, y, R, typ) {
-  const anders = (dx, dy) => {
-    const k = kachel(x + dx, y + dy);
-    return !k || k.typ !== typ;
-  };
-  const o = anders(0, -1), u = anders(0, 1);
-  const l = anders(-1, 0), r = anders(1, 0);
-  const e = (a, b) => (a && b) ? R : (a || b) ? R * 0.5 : 0;
-  return [e(o, l), e(o, r), e(u, r), e(u, l)];
-}
-
-// Zwei Farben mischen (t = 0 → a, t = 1 → b)
 function mischen(a, b, t) {
   return [a[0] + (b[0] - a[0]) * t,
           a[1] + (b[1] - a[1]) * t,
           a[2] + (b[2] - a[2]) * t];
 }
+function istWasser(x, y) {
+  const k = kachel(x, y);
+  return !k || k.typ === 'wasser';
+}
 
 // Tiefenfeld des Meeres: für jede Wasserkachel der Abstand zum Land.
-// Wird einmal beim Kartenaufbau gerechnet und danach zweimal
-// weichgezeichnet – sonst zerfiele der Farbverlauf in grobe Stufen.
+// Wird einmal beim Kartenaufbau gerechnet und danach weichgezeichnet,
+// damit der Farbverlauf nicht in groben Stufen zerfällt.
 let tiefenFeld = null;
 function tiefenFeldRechnen() {
   const MAX = 9;
@@ -3518,7 +3534,6 @@ function tiefenFeldRechnen() {
   for (let i = 0; i < N * N; i++)
     if (karte[i].typ !== 'wasser') { f[i] = 0; schlange[ende++] = i; }
 
-  // Breitensuche vom Land aus übers Wasser
   while (kopf < ende) {
     const j = schlange[kopf++];
     if (f[j] >= MAX) continue;
@@ -3532,7 +3547,6 @@ function tiefenFeldRechnen() {
   }
   for (let i = 0; i < N * N; i++) if (f[i] === -1) f[i] = MAX;
 
-  // Weichzeichnen: Mittelwert der Nachbarschaft, mehrfach
   for (let durchgang = 0; durchgang < 4; durchgang++) {
     const g = Float32Array.from(f);
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
@@ -3555,258 +3569,233 @@ function meerFarbe(wert) {
                  : mischen(PALETTE.see, PALETTE.tiefsee, (t - 0.5) * 2);
 }
 
-// ---------- Gelände einer Kachel --------------------------------
-function kachelHintergrund(x, y) {
-  const k = kachel(x, y);
-  const px = x * TP, py = y * TP;
-  const v = (k.var - 0.5) * 16;           // Helligkeitsstreuung je Kachel
-
-  // Immer zuerst das Meer – Landkacheln werden darüber gelegt
-  tctx.fillStyle = ton(PALETTE.tiefsee, v * 0.6);
-  tctx.fillRect(px, py, TP, TP);
-
-  if (k.typ === 'wasser') {
-    // Weicher Übergang Ufer → offenes Meer. Damit keine Kästchen
-    // entstehen, verläuft die Farbe auch INNERHALB der Kachel: die
-    // Steigung des Tiefenfeldes gibt Richtung und Stärke vor, so
-    // gehen benachbarte Kacheln nahtlos ineinander über.
-    const i0 = y * N + x;
-    const tf = tiefenFeld;
-    const wert = tf ? tf[i0] : 5.5;
-    const hol = (ax, ay) => {
-      const nx = x + ax, ny = y + ay;
-      if (!tf || nx < 0 || ny < 0 || nx >= N || ny >= N) return wert;
-      return tf[ny * N + nx];
-    };
-    const gx = (hol(1, 0) - hol(-1, 0)) / 2;
-    const gy = (hol(0, 1) - hol(0, -1)) / 2;
-    const staerke = Math.hypot(gx, gy);
-    if (staerke > 0.05) {
-      const a = (Math.abs(gx) + Math.abs(gy)) / 2;          // halbe Spanne
-      const mx = px + TP / 2, my = py + TP / 2;
-      const sx = (gx / staerke) * (a / staerke) * TP;
-      const sy = (gy / staerke) * (a / staerke) * TP;
-      const verlauf = tctx.createLinearGradient(mx - sx, my - sy, mx + sx, my + sy);
-      verlauf.addColorStop(0, ton(meerFarbe(wert - a)));
-      verlauf.addColorStop(1, ton(meerFarbe(wert + a)));
-      tctx.fillStyle = verlauf;
-    } else {
-      tctx.fillStyle = ton(meerFarbe(wert));
-    }
-    tctx.fillRect(px - 0.5, py - 0.5, TP + 1, TP + 1);
-
-    // Heller Saum direkt vor der Küste (Brandung)
-    if (!istWasser(x + 1, y) || !istWasser(x - 1, y) ||
-        !istWasser(x, y + 1) || !istWasser(x, y - 1)) {
-      tctx.fillStyle = 'rgba(255,255,255,0.12)';
-      tctx.fillRect(px - 0.5, py - 0.5, TP + 1, TP + 1);
-    }
-
-    // Ruhige Wellenstriche
-    if (k.var > 0.78) {
-      tctx.strokeStyle = 'rgba(255,255,255,0.16)';
-      tctx.lineWidth = Math.max(1, TP * 0.055);
-      tctx.beginPath();
-      const wy = py + TP * (0.3 + k.var * 0.4);
-      tctx.moveTo(px + TP * 0.18, wy);
-      tctx.quadraticCurveTo(px + TP * 0.5, wy - TP * 0.1, px + TP * 0.8, wy);
-      tctx.stroke();
-    }
-    return;
-  }
-
-  // --- Land: erst ein Sandsaum, dann die eigentliche Oberfläche ---
-  const ecken = landEcken(x, y, TP * 0.45);
-  form4(tctx, px - 1, py - 1, TP + 2, TP + 2, ...ecken);
-  tctx.fillStyle = ton(PALETTE.sand, v * 0.5);
-  tctx.fill();
-
-  if (k.typ === 'strand') {
-    // Feine Körnung im Sand
-    tctx.fillStyle = ton(PALETTE.sandDunkel, v);
-    for (let i = 0; i < 3; i++) {
-      const ox = ((k.var * 31 + i * 7.3) % 1) * TP * 0.8 + TP * 0.1;
-      const oy = ((k.var * 17 + i * 5.1) % 1) * TP * 0.8 + TP * 0.1;
-      tctx.fillRect(px + ox, py + oy, TP * 0.09, TP * 0.055);
-    }
-    return;
-  }
-
-  if (k.typ === 'fluss') {
-    form4(tctx, px, py, TP, TP, TP * 0.3, TP * 0.3, TP * 0.3, TP * 0.3);
-    tctx.fillStyle = ton(PALETTE.fluss, v);
-    tctx.fill();
-    return;
-  }
-
-  // Gras bzw. Wald als eingerückte Fläche, damit ringsum Sand bleibt
-  const inset = istStrandNah(x, y) ? TP * 0.07 : 0;
-  // Gras liegt immer flächig – Wald und Berg kommen als weiche
-  // Flecken darüber, damit ihre Ränder nicht als Kästchen auffallen.
-  form4(tctx, px - 1 + inset, py - 1 + inset,
-        TP + 2 - inset * 2, TP + 2 - inset * 2, ...landEcken(x, y, TP * 0.4));
-  tctx.fillStyle = ton(PALETTE.gras, v * 0.4);   // ruhiger Grundton
-  tctx.fill();
-
-  if (k.typ === 'wald' || k.typ === 'berg') {
-    const grund = k.typ === 'wald' ? PALETTE.wald : PALETTE.berg;
-    const ecken = flaechenEcken(x, y, TP * 0.45, k.typ);
-    form4(tctx, px - 1 + inset, py - 1 + inset,
-          TP + 2 - inset * 2, TP + 2 - inset * 2, ...ecken);
-    tctx.fillStyle = ton(grund, v * 0.18);
-    tctx.fill();
-  }
-
-  if (k.typ === 'gras' || k.typ === 'wald') {
-    // Grasbüschel als kurze Striche – gibt der Fläche Struktur
-    tctx.strokeStyle = ton(k.typ === 'wald' ? PALETTE.waldDunkel : PALETTE.grasDunkel, v);
-    tctx.lineWidth = Math.max(0.8, TP * 0.045);
-    for (let i = 0; i < 4; i++) {
-      const ox = px + ((k.var * 13 + i * 3.7) % 1) * TP * 0.78 + TP * 0.11;
-      const oy = py + ((k.var * 29 + i * 6.1) % 1) * TP * 0.78 + TP * 0.11;
-      tctx.beginPath();
-      tctx.moveTo(ox, oy + TP * 0.07);
-      tctx.lineTo(ox + TP * 0.03, oy);
-      tctx.stroke();
-    }
-    // Vereinzelte Lichtflecken – bewusst unregelmäßig gesetzt, damit
-    // kein sichtbares Raster über der Landschaft liegt
-    if (k.var > 0.76) {
-      const fx = px + ((k.var * 37) % 1) * TP * 0.55 + TP * 0.2;
-      const fy = py + ((k.var * 53) % 1) * TP * 0.55 + TP * 0.2;
-      tctx.fillStyle = ton(PALETTE.grasHell, v);
-      tctx.beginPath();
-      tctx.ellipse(fx, fy, TP * (0.1 + (k.var % 0.1)), TP * 0.08,
-                   k.var * 3, 0, Math.PI * 2);
-      tctx.fill();
-    }
+// Deckfarben und Höhen ändern sich nur, wenn sich die Karte ändert.
+// Darum werden sie einmal berechnet und gemerkt – das spart in jedem
+// Bild tausende Farbrechnungen.
+let farbCache = null, hoehCache = null;
+function geländeCacheBauen() {
+  farbCache = new Array(N * N);
+  hoehCache = new Float32Array(N * N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const i = y * N + x;
+    farbCache[i] = deckFarbe(karte[i], x, y);
+    hoehCache[i] = kachelHoehe(karte[i]);
   }
 }
 
-// Liegt die Kachel direkt am Wasser? Nur dann bleibt ein Sandsaum stehen.
-function istStrandNah(x, y) {
-  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]])
-    if (istWasser(x + dx, y + dy)) return true;
-  return false;
+// Grundfarbe der Deckfläche einer Kachel
+function deckFarbe(k, x, y) {
+  const v = (k.var - 0.5) * 9;
+  switch (k.typ) {
+    case 'wasser': return ton(meerFarbe(tiefenFeld ? tiefenFeld[y * N + x] : 5.5), v * 0.3);
+    case 'strand': return ton(PALETTE.sand, v);
+    case 'fluss':  return ton(PALETTE.fluss, v * 0.5);
+    case 'wald':   return ton(PALETTE.wald, v * 0.6);
+    case 'berg':   return ton(PALETTE.bergHell, v);
+    default:       return ton(PALETTE.gras, v);
+  }
 }
 
-// ---------- Aufbauten einer Kachel: Bäume, Fels, Erz ------------
-function kachelInhalt(x, y) {
-  const k = kachel(x, y);
-  const px = x * TP, py = y * TP;
+// Farbe der Steilkante unter einer Kachel (Erde, Sand oder Fels)
+function kantenFarbe(k, dunkler) {
+  const basis = k.typ === 'berg' ? PALETTE.berg
+              : k.typ === 'strand' ? PALETTE.sandDunkel : PALETTE.erde;
+  return ton(basis, dunkler ? -26 : 0);
+}
 
-  // --- Berge als geschichteter Fels ---
-  if (k.typ === 'berg') {
-    // Lage und Größe des Felsens leicht verwürfeln, damit aus den
-    // Kacheln ein zerklüfteter Grat wird und kein Dreiecksraster
-    const vx = ((k.var * 23) % 1 - 0.5) * TP * 0.22;
-    const vy = ((k.var * 41) % 1 - 0.5) * TP * 0.14;
-    const gr = 0.84 + ((k.var * 17) % 1) * 0.3;
-    const m = px + TP / 2 + vx;
-    const fuss = py + TP * 0.86 + vy;
-    const spitze = py + TP * (0.9 - 0.68 * gr) + vy;
-    const halb = TP * 0.4 * gr;
-    // Schatten am Fuß
-    tctx.fillStyle = 'rgba(40,36,30,0.25)';
-    tctx.beginPath();
-    tctx.ellipse(m, fuss - TP * 0.02, halb * 0.95, TP * 0.13, 0, 0, Math.PI * 2);
-    tctx.fill();
-    // Felskegel
-    tctx.beginPath();
-    tctx.moveTo(m, spitze);
-    tctx.lineTo(m + halb, fuss);
-    tctx.lineTo(m - halb, fuss);
-    tctx.closePath();
-    tctx.fillStyle = ton(PALETTE.berg, (k.var - 0.5) * 12);
-    tctx.fill();
-    // Lichtseite links
-    tctx.beginPath();
-    tctx.moveTo(m, spitze);
-    tctx.lineTo(m, fuss);
-    tctx.lineTo(m - halb, fuss);
-    tctx.closePath();
-    tctx.fillStyle = ton(PALETTE.bergHell, (k.var - 0.5) * 10);
-    tctx.fill();
-    // Dunkle Kante
-    tctx.strokeStyle = ton(PALETTE.bergDunkel);
-    tctx.lineWidth = Math.max(0.8, TP * 0.035);
-    tctx.beginPath();
-    tctx.moveTo(m, spitze);
-    tctx.lineTo(m + halb, fuss);
-    tctx.stroke();
+/* ---------- Sichtbarer Ausschnitt ------------------------------ */
+// Welche Kacheln liegen überhaupt im Bild? Alles andere wird
+// übersprungen – sonst müssten jedes Bild 19.600 Rauten gemalt werden.
+function sichtBereich() {
+  const b = leinwand.clientWidth / kamera.zoom;
+  const h = leinwand.clientHeight / kamera.zoom;
+  let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+  for (const [wx, wy] of [[kamera.x, kamera.y], [kamera.x + b, kamera.y],
+                          [kamera.x, kamera.y + h], [kamera.x + b, kamera.y + h]]) {
+    const t = kachelVonWelt(wx, wy);
+    x0 = Math.min(x0, t.x); x1 = Math.max(x1, t.x);
+    y0 = Math.min(y0, t.y); y1 = Math.max(y1, t.y);
+  }
+  return {
+    x0: Math.max(0, Math.floor(x0) - 1), x1: Math.min(N - 1, Math.ceil(x1) + 3),
+    y0: Math.max(0, Math.floor(y0) - 1), y1: Math.min(N - 1, Math.ceil(y1) + 3),
+    links: kamera.x - KW, rechts: kamera.x + b + KW,
+    oben: kamera.y - KH * 4, unten: kamera.y + h + KH * 2,
+  };
+}
 
-    // Erzadern als farbige Punkte
-    const erz = k.golderz > 0 ? '#e3b23c' : k.eisen > 0 ? '#9fb3c8' : null;
-    if (erz) {
-      tctx.fillStyle = erz;
+// Liegt die Kachel im Bild? (grobe, billige Prüfung)
+function imBild(s, x, y) {
+  const mx = isoX(x + 0.5, y + 0.5), my = isoY(x + 0.5, y + 0.5);
+  return mx > s.links && mx < s.rechts && my > s.oben && my < s.unten;
+}
+
+/* ---------- Der Boden ------------------------------------------ */
+// Erst alle Deckflächen, dann alle Steilkanten: so verdeckt keine
+// später gezeichnete Kachel die Kante ihres Nachbarn.
+function bodenZeichnen(s, fein) {
+  if (!farbCache) geländeCacheBauen();
+
+  // 1. Deckflächen
+  for (let y = s.y0; y <= s.y1; y++) {
+    for (let x = s.x0; x <= s.x1; x++) {
+      if (!imBild(s, x, y)) continue;
+      const i = y * N + x;
+      rautePfad(x, y, hoehCache[i], 0.6);
+      ctx.fillStyle = farbCache[i];
+      ctx.fill();
+    }
+  }
+
+  // 2. Struktur: alle Striche in EINEM Pfad, das ist deutlich schneller
+  if (fein) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (let y = s.y0; y <= s.y1; y++) for (let x = s.x0; x <= s.x1; x++) {
+      const k = karte[y * N + x];
+      if (k.typ !== 'wasser' || k.var < 0.84 || !imBild(s, x, y)) continue;
+      const mx = isoX(x + 0.5, y + 0.5), my = isoY(x + 0.5, y + 0.5);
+      ctx.moveTo(mx - KW * 0.16, my);
+      ctx.quadraticCurveTo(mx, my - KH * 0.12, mx + KW * 0.16, my);
+    }
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(96,126,62,0.55)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    for (let y = s.y0; y <= s.y1; y++) for (let x = s.x0; x <= s.x1; x++) {
+      const k = karte[y * N + x];
+      if ((k.typ !== 'gras' && k.typ !== 'wald') || k.var < 0.35) continue;
+      if (!imBild(s, x, y)) continue;
+      const mx = isoX(x + 0.5, y + 0.5), my = isoY(x + 0.5, y + 0.5) - hoehCache[y * N + x];
       for (let i = 0; i < 3; i++) {
-        const ox = px + TP * (0.35 + ((k.var * 11 + i * 2.3) % 1) * 0.3);
-        const oy = py + TP * (0.5 + ((k.var * 7 + i * 1.7) % 1) * 0.25);
-        tctx.beginPath();
-        tctx.arc(ox, oy, TP * 0.055, 0, Math.PI * 2);
-        tctx.fill();
+        const ox = ((k.var * 13 + i * 3.7) % 1 - 0.5) * KW * 0.52;
+        const oy = ((k.var * 29 + i * 6.1) % 1 - 0.5) * KH * 0.52;
+        ctx.moveTo(mx + ox, my + oy + 2);
+        ctx.lineTo(mx + ox + 1.5, my + oy - 1);
       }
-      tctx.strokeStyle = 'rgba(255,255,255,0.5)';
-      tctx.lineWidth = 0.7;
-      tctx.stroke();
+    }
+    ctx.stroke();
+  }
+
+  // 3. Steilkanten nach Südosten und Südwesten
+  for (let y = s.y0; y <= s.y1; y++) {
+    for (let x = s.x0; x <= s.x1; x++) {
+      if (!imBild(s, x, y)) continue;
+      const k = karte[y * N + x];
+      const hoch = hoehCache[y * N + x];
+      if (hoch <= 0) continue;
+      const hO = hoeheBei(x + 1, y);      // Nachbar nach rechts/unten (Ost)
+      const hS = hoeheBei(x, y + 1);      // Nachbar nach links/unten (Süd)
+      if (hO >= hoch && hS >= hoch) continue;
+      // rechte Flanke: Kante Ostecke -> Südecke
+      if (hO < hoch) {
+        const ax = isoX(x + 1, y), ay = isoY(x + 1, y);
+        const bx = isoX(x + 1, y + 1), by = isoY(x + 1, y + 1);
+        ctx.beginPath();
+        ctx.moveTo(ax, ay - hoch); ctx.lineTo(bx, by - hoch);
+        ctx.lineTo(bx, by - hO); ctx.lineTo(ax, ay - hO);
+        ctx.closePath();
+        ctx.fillStyle = kantenFarbe(k, true);
+        ctx.fill();
+      }
+      // linke Flanke: Kante Südecke -> Westecke
+      if (hS < hoch) {
+        const ax = isoX(x + 1, y + 1), ay = isoY(x + 1, y + 1);
+        const bx = isoX(x, y + 1), by = isoY(x, y + 1);
+        ctx.beginPath();
+        ctx.moveTo(ax, ay - hoch); ctx.lineTo(bx, by - hoch);
+        ctx.lineTo(bx, by - hS); ctx.lineTo(ax, ay - hS);
+        ctx.closePath();
+        ctx.fillStyle = kantenFarbe(k, false);
+        ctx.fill();
+      }
+    }
+  }
+}
+
+/* ---------- Aufbauten einer Kachel: Fels und Bäume ------------- */
+function kachelAufbau(x, y, fein) {
+  const k = karte[y * N + x];
+  if (k.typ === 'berg') {
+    // Felszacken auf dem Bergplateau
+    const m = kachelMitte(x, y);
+    const gr = KW * (0.2 + ((k.var * 17) % 1) * 0.12);
+    const hoehe = KH * (0.6 + ((k.var * 23) % 1) * 0.7);
+    const vx = ((k.var * 31) % 1 - 0.5) * KW * 0.2;
+    ctx.beginPath();
+    ctx.moveTo(m.x + vx, m.y - hoehe);
+    ctx.lineTo(m.x + vx + gr, m.y + gr * 0.4);
+    ctx.lineTo(m.x + vx - gr, m.y + gr * 0.4);
+    ctx.closePath();
+    ctx.fillStyle = ton(PALETTE.berg, (k.var - 0.5) * 10);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(m.x + vx, m.y - hoehe);
+    ctx.lineTo(m.x + vx, m.y + gr * 0.4);
+    ctx.lineTo(m.x + vx - gr, m.y + gr * 0.4);
+    ctx.closePath();
+    ctx.fillStyle = ton(PALETTE.bergHell, (k.var - 0.5) * 8);
+    ctx.fill();
+    if (fein) {
+      const erz = k.golderz > 0 ? '#e9c04a' : k.eisen > 0 ? '#9fb3c8' : null;
+      if (erz) {
+        ctx.fillStyle = erz;
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.arc(m.x + vx - gr * 0.3 + i * gr * 0.3,
+                  m.y - hoehe * (0.1 + i * 0.18), 1.8, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
     }
     return;
   }
 
-  // --- Bäume: Stamm, zwei Kronen, weicher Schatten ---
   if (k.baum > 0.02) {
+    const m = kachelMitte(x, y);
     const anzahl = Math.max(1, Math.round(k.baum * 3));
     for (let i = 0; i < anzahl; i++) {
-      const ox = px + ((k.var * 7 + i * 2.6) % 1) * (TP * 1.1) - TP * 0.05;
-      const oy = py + ((k.var * 13 + i * 3.7) % 1) * (TP * 1.0) + TP * 0.05;
-      const gr = TP * (0.15 + k.baum * 0.07) * (0.78 + ((k.var * 29 + i * 1.9) % 1) * 0.5);
-
-      tctx.fillStyle = 'rgba(40,50,28,0.22)';
-      tctx.beginPath();
-      tctx.ellipse(ox + gr * 0.2, oy + gr * 0.75, gr * 0.75, gr * 0.3, 0, 0, Math.PI * 2);
-      tctx.fill();
-
-      tctx.fillStyle = '#6b4a2c';
-      tctx.fillRect(ox - gr * 0.11, oy, gr * 0.22, gr * 0.75);
-
-      tctx.fillStyle = ton(PALETTE.waldDunkel);
-      tctx.beginPath();
-      tctx.arc(ox, oy - gr * 0.1, gr * 0.72, 0, Math.PI * 2);
-      tctx.fill();
-      tctx.fillStyle = ton([111, 154, 74], ((k.var * 37 + i * 2.1) % 1 - 0.5) * 26);
-      tctx.beginPath();
-      tctx.arc(ox - gr * 0.16, oy - gr * 0.3, gr * 0.52, 0, Math.PI * 2);
-      tctx.fill();
+      const ox = ((k.var * 7 + i * 2.6) % 1 - 0.5) * KW * 0.55;
+      const oy = ((k.var * 13 + i * 3.7) % 1 - 0.5) * KH * 0.55;
+      const gr = KH * (0.38 + k.baum * 0.2) * (0.8 + ((k.var * 29 + i * 1.9) % 1) * 0.45);
+      const bx = m.x + ox, by = m.y + oy;
+      // Schatten
+      ctx.fillStyle = 'rgba(40,50,28,0.22)';
+      ctx.beginPath();
+      ctx.ellipse(bx + gr * 0.2, by, gr * 0.5, gr * 0.22, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Stamm
+      ctx.fillStyle = '#6b4a2c';
+      ctx.fillRect(bx - gr * 0.08, by - gr * 0.55, gr * 0.16, gr * 0.6);
+      // Krone
+      ctx.fillStyle = ton(PALETTE.waldDunkel, 0);
+      ctx.beginPath();
+      ctx.arc(bx, by - gr * 0.72, gr * 0.52, 0, Math.PI * 2);
+      ctx.fill();
+      if (fein) {
+        ctx.fillStyle = ton([111, 154, 74], ((k.var * 37 + i * 2.1) % 1 - 0.5) * 24);
+        ctx.beginPath();
+        ctx.arc(bx - gr * 0.13, by - gr * 0.88, gr * 0.37, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
 }
 
-// Das komplette Terrain neu malen (nur beim Start nötig)
-function terrainZeichnen() {
-  tiefenFeldRechnen();
-  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) kachelHintergrund(x, y);
-  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) kachelInhalt(x, y);
-  state.terrainAlt = false;
-  schmutzKacheln.clear();
-}
-
-// Geänderte Kacheln merken (z. B. gefällte oder nachgewachsene Bäume) …
+// Das Terrain wird jedes Bild frisch gezeichnet; dieser Rest bleibt
+// nur, damit die Simulation weiter „Kachel geändert" melden kann.
 const schmutzKacheln = new Set();
-function kachelSchmutzig(x, y) { schmutzKacheln.add(y * N + x); }
-
-// … und nur diese Stellen auffrischen statt der ganzen Karte.
-// Es wird je ein 3×3-Block erneuert, weil Baum-Symbole leicht über
-// die Kachelränder hinausragen.
-function kachelnAuffrischen() {
-  for (const idx of schmutzKacheln) {
-    const x0 = idx % N, y0 = (idx / N) | 0;
-    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++)
-      if (kachel(x0 + dx, y0 + dy)) kachelHintergrund(x0 + dx, y0 + dy);
-    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++)
-      if (kachel(x0 + dx, y0 + dy)) kachelInhalt(x0 + dx, y0 + dy);
+function kachelSchmutzig(x, y) {
+  schmutzKacheln.add(y * N + x);
+  if (farbCache) {                       // nur diese eine Kachel auffrischen
+    const i = y * N + x;
+    farbCache[i] = deckFarbe(karte[i], x, y);
+    hoehCache[i] = kachelHoehe(karte[i]);
   }
-  schmutzKacheln.clear();
 }
+function terrainZeichnen() { tiefenFeldRechnen(); farbCache = null; state.terrainAlt = false; }
 
 // Abgerundetes Rechteck (eigene Hilfsfunktion, läuft überall)
 function rundRect(c, x, y, w, h, r) {
@@ -3870,42 +3859,184 @@ function segelschiff(sx, sy, gr, farbe, wippen) {
   ctx.restore();
 }
 
-// ---------- Gebäude als echte Bauwerke zeichnen ----------------
-// Jedes Haus wird von schräg oben gezeigt: unten ein Wandstreifen mit
-// Tür und Fenstern, darüber ein Satteldach mit First und überstehender
-// Traufe. Die AUSBAUSTUFE verändert das Bauwerk sichtbar – aus dem
-// Strohdach wird ein Ziegel- und schließlich ein Schieferdach, aus der
-// Bretterwand erst Fachwerk und dann verputzter Stein; dazu kommen
-// Dachgauben, ein Steinsockel und zuletzt eine Fahne.
-// Jede Gebäudeart trägt zusätzlich ihr eigenes Kennzeichen:
-// Mühlenflügel, Kirchturm, Hafenkran, Schmiedefeuer und so weiter.
+/* ---------- Isometrische Bauteile ------------------------------
+   Alles Gebaute besteht aus wenigen Grundkörpern, die auf einer
+   Bodenraute stehen. Sichtbar sind immer die beiden dem Betrachter
+   zugewandten Wände (rechts und links unten) sowie das Dach.
+   --------------------------------------------------------------- */
 
-// Baumaterial je Ausbaustufe 1 … AUSBAU_MAX
+// Eine Farbe abdunkeln bzw. aufhellen (für Licht- und Schattenseite)
+function schattiert(hex, f) {
+  if (typeof hex !== 'string' || hex[0] !== '#') return hex;
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.max(0, Math.min(255, Math.round(((n >> 16) & 255) * f)));
+  const g = Math.max(0, Math.min(255, Math.round(((n >> 8) & 255) * f)));
+  const b = Math.max(0, Math.min(255, Math.round((n & 255) * f)));
+  return `rgb(${r},${g},${b})`;
+}
+
+// Quader auf einer Bodenraute um (cx, cy); hw/hh = halbe Rautenmaße
+function isoKasten(cx, cy, hw, hh, hoehe, farbe) {
+  const oben = schattiert(farbe, 1.0);
+  const rechts = schattiert(farbe, 0.74);
+  const links = schattiert(farbe, 0.88);
+  if (hoehe > 0) {
+    ctx.beginPath();                                   // rechte Wand
+    ctx.moveTo(cx + hw, cy); ctx.lineTo(cx, cy + hh);
+    ctx.lineTo(cx, cy + hh - hoehe); ctx.lineTo(cx + hw, cy - hoehe);
+    ctx.closePath(); ctx.fillStyle = rechts; ctx.fill();
+    ctx.beginPath();                                   // linke Wand
+    ctx.moveTo(cx, cy + hh); ctx.lineTo(cx - hw, cy);
+    ctx.lineTo(cx - hw, cy - hoehe); ctx.lineTo(cx, cy + hh - hoehe);
+    ctx.closePath(); ctx.fillStyle = links; ctx.fill();
+  }
+  ctx.beginPath();                                     // Deckfläche
+  ctx.moveTo(cx, cy - hh - hoehe); ctx.lineTo(cx + hw, cy - hoehe);
+  ctx.lineTo(cx, cy + hh - hoehe); ctx.lineTo(cx - hw, cy - hoehe);
+  ctx.closePath(); ctx.fillStyle = oben; ctx.fill();
+}
+
+// Satteldach über einer Bodenraute. First läuft von links nach rechts.
+function isoSattel(cx, cy, hw, hh, basis, first, farbe) {
+  const y = cy - basis;
+  const n = { x: cx, y: y - hh }, o = { x: cx + hw, y: y };
+  const s = { x: cx, y: y + hh }, w = { x: cx - hw, y: y };
+  const a = { x: cx - hw / 2, y: y - hh / 2 - first };   // Firstende links
+  const b = { x: cx + hw / 2, y: y + hh / 2 - first };   // Firstende rechts
+
+  ctx.beginPath();                                   // hintere Dachfläche
+  ctx.moveTo(n.x, n.y); ctx.lineTo(o.x, o.y);
+  ctx.lineTo(b.x, b.y); ctx.lineTo(a.x, a.y);
+  ctx.closePath(); ctx.fillStyle = schattiert(farbe, 0.8); ctx.fill();
+
+  ctx.beginPath();                                   // vordere Dachfläche
+  ctx.moveTo(w.x, w.y); ctx.lineTo(s.x, s.y);
+  ctx.lineTo(b.x, b.y); ctx.lineTo(a.x, a.y);
+  ctx.closePath(); ctx.fillStyle = schattiert(farbe, 1.0); ctx.fill();
+
+  ctx.beginPath();                                   // Firstlinie
+  ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+  ctx.strokeStyle = schattiert(farbe, 1.18);
+  ctx.lineWidth = Math.max(1, hh * 0.12);
+  ctx.stroke();
+  return { a, b, n, o, s, w };
+}
+
+// Giebeldreieck an der rechten Stirnseite (zum Betrachter hin)
+function isoGiebel(cx, cy, hw, hh, basis, first, farbe) {
+  const y = cy - basis;
+  ctx.beginPath();
+  ctx.moveTo(cx + hw, y); ctx.lineTo(cx, y + hh);
+  ctx.lineTo(cx + hw / 2, y + hh / 2 - first);
+  ctx.closePath();
+  ctx.fillStyle = schattiert(farbe, 0.8); ctx.fill();
+}
+
+// Walmdach / Pyramide: vier Flächen zu einer Spitze über der Mitte
+function isoWalm(cx, cy, hw, hh, basis, hoehe, farbe) {
+  const y = cy - basis, sp = { x: cx, y: y - hoehe };
+  const n = { x: cx, y: y - hh }, o = { x: cx + hw, y: y };
+  const s = { x: cx, y: y + hh }, w = { x: cx - hw, y: y };
+  const flaeche = (p, q, f) => {
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y); ctx.lineTo(q.x, q.y); ctx.lineTo(sp.x, sp.y);
+    ctx.closePath(); ctx.fillStyle = schattiert(farbe, f); ctx.fill();
+  };
+  flaeche(n, o, 0.76); flaeche(n, w, 0.84);
+  flaeche(w, s, 1.0);  flaeche(o, s, 0.68);
+}
+
+// Kegel (Turmhelm, Nadelbaum)
+function isoKegel(cx, cy, r, hoehe, farbe) {
+  ctx.beginPath();
+  ctx.moveTo(cx - r, cy); ctx.lineTo(cx, cy - hoehe); ctx.lineTo(cx + r, cy);
+  ctx.ellipse(cx, cy, r, r * KH / KW, 0, 0, Math.PI);
+  ctx.closePath();
+  ctx.fillStyle = schattiert(farbe, 0.78); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(cx - r, cy); ctx.lineTo(cx, cy - hoehe); ctx.lineTo(cx, cy);
+  ctx.ellipse(cx, cy, r, r * KH / KW, 0, Math.PI / 2, Math.PI);
+  ctx.closePath();
+  ctx.fillStyle = schattiert(farbe, 1.0); ctx.fill();
+}
+
+// Zylinder (Fass, Brennofen, Rundturm)
+function isoZylinder(cx, cy, r, hoehe, farbe) {
+  const ry = r * KH / KW;
+  ctx.beginPath();
+  ctx.moveTo(cx - r, cy);
+  ctx.lineTo(cx - r, cy - hoehe);
+  ctx.ellipse(cx, cy - hoehe, r, ry, 0, Math.PI, 0, true);
+  ctx.lineTo(cx + r, cy);
+  ctx.ellipse(cx, cy, r, ry, 0, 0, Math.PI);
+  ctx.closePath();
+  ctx.fillStyle = schattiert(farbe, 0.8); ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(cx, cy - hoehe, r, ry, 0, 0, Math.PI * 2);
+  ctx.fillStyle = schattiert(farbe, 1.05); ctx.fill();
+}
+
+// Kugel/Ballen
+function isoKugel(cx, cy, r, farbe) {
+  ctx.beginPath();
+  ctx.arc(cx, cy - r * 0.6, r, 0, Math.PI * 2);
+  ctx.fillStyle = farbe; ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.3, cy - r * 0.8, r * 0.45, 0, Math.PI * 2);
+  ctx.fillStyle = schattiert(farbe, 1.12); ctx.fill();
+}
+
+// Stehender Pfosten
+function pfosten(cx, cy, hoehe, dicke, farbe) {
+  ctx.fillStyle = farbe;
+  ctx.fillRect(cx - dicke / 2, cy - hoehe, dicke, hoehe);
+}
+
+// Fahnenmast mit wehendem Tuch
+function isoFahne(cx, cy, hoehe, farbe) {
+  pfosten(cx, cy, hoehe, Math.max(1.2, hoehe * 0.08), '#6b5a46');
+  const weht = Math.sin(performance.now() / 420) * hoehe * 0.09;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - hoehe);
+  ctx.lineTo(cx + hoehe * 0.55 + weht, cy - hoehe * 0.84);
+  ctx.lineTo(cx, cy - hoehe * 0.66);
+  ctx.closePath();
+  ctx.fillStyle = farbe || '#c0392b'; ctx.fill();
+}
+
+// Aufsteigender Rauch
+function isoRauch(cx, cy, gr) {
+  const t = performance.now() / 1000;
+  for (let i = 0; i < 3; i++) {
+    const p = (t * 0.45 + i / 3) % 1;
+    ctx.globalAlpha = (1 - p) * 0.38;
+    ctx.beginPath();
+    ctx.arc(cx + Math.sin(p * 4 + i) * gr * 0.5, cy - p * gr * 3.4, gr * (0.45 + p * 0.8), 0, Math.PI * 2);
+    ctx.fillStyle = '#e8e8e8'; ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ---------- Baustil je Ausbaustufe -----------------------------
+   Vom Strohdach-Schuppen bis zum Steinhaus mit Schieferdach:
+   Wand, Dach, Sockel und Zierat ändern sich sichtbar.
+   --------------------------------------------------------------- */
 const BAUSTIL = [
   null,
-  { dachHell: '#c9a868', dachDunkel: '#a1813f', first: '#ddc389',
-    wand: '#a37f55', wandDunkel: '#8a6a46', balken: null,
-    sockel: null, gauben: 0, fahne: false, reet: true, dachAnteil: 0.70 },
-  { dachHell: '#c3a260', dachDunkel: '#9b7d42', first: '#d8ba80',
-    wand: '#cdbb98', wandDunkel: '#b1a081', balken: null,
-    sockel: null, gauben: 0, fahne: false, reet: true, dachAnteil: 0.65 },
-  { dachHell: '#b85540', dachDunkel: '#8f3d2c', first: '#d06c52',
-    wand: '#ded0b2', wandDunkel: '#c3b496', balken: '#7a5636',
-    sockel: null, gauben: 1, fahne: false, dachAnteil: 0.58 },
-  { dachHell: '#c25c44', dachDunkel: '#96402e', first: '#da7357',
-    wand: '#e6dac0', wandDunkel: '#cbbfa4', balken: '#6d4c2f',
-    sockel: '#9d9384', gauben: 2, fahne: false, dachAnteil: 0.52 },
-  { dachHell: '#727c8e', dachDunkel: '#525a69', first: '#8d97a6',
-    wand: '#ece3d1', wandDunkel: '#d2c9b7', balken: null,
-    sockel: '#918b7f', gauben: 2, fahne: false, dachAnteil: 0.48 },
-  { dachHell: '#7a849b', dachDunkel: '#565f72', first: '#9aa4b5',
-    wand: '#f3ecdc', wandDunkel: '#d9d1bf', balken: null,
-    sockel: '#8a8477', gauben: 2, fahne: true, dachAnteil: 0.45, gold: '#d8b64a' },
+  { wand: '#a37f55', dach: '#c9a868', balken: null,      sockel: null,
+    gauben: 0, fahne: false, hoch: 0.72 },
+  { wand: '#cdbb98', dach: '#c3a260', balken: null,      sockel: null,
+    gauben: 0, fahne: false, hoch: 0.86 },
+  { wand: '#ded0b2', dach: '#bb5540', balken: '#7a5636', sockel: null,
+    gauben: 1, fahne: false, hoch: 1.0 },
+  { wand: '#e6dac0', dach: '#c25c44', balken: '#6d4c2f', sockel: '#9d9384',
+    gauben: 2, fahne: false, hoch: 1.18 },
+  { wand: '#ece3d1', dach: '#6d7789', balken: null,      sockel: '#918b7f',
+    gauben: 2, fahne: false, hoch: 1.36 },
+  { wand: '#f3ecdc', dach: '#79839a', balken: null,      sockel: '#8a8477',
+    gauben: 2, fahne: true,  hoch: 1.55, gold: '#d8b64a' },
 ];
 
-// Welcher Baustil gilt für dieses Gebäude?
-// Wohnhäuser steigen zusätzlich mit ihrer Bevölkerungsstufe auf:
-// Pioniere hausen in der Hütte, Aristokraten im Steinhaus.
 function stilVon(geb) {
   const a = Math.max(1, Math.min(AUSBAU_MAX, geb.ausbau || 1));
   if (geb.typ === 'wohnhaus')
@@ -3913,1077 +4044,738 @@ function stilVon(geb) {
   return BAUSTIL[Math.min(6, a)];
 }
 
-// Getrampelter Boden unter dem Haus, damit es nicht in der Luft schwebt
-function bodenFleck(x, y, w, h) {
-  ctx.beginPath();
-  ctx.ellipse(x + w * 0.5, y + h * 0.84, w * 0.52, h * 0.2, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(126,104,70,0.17)';
-  ctx.fill();
-}
+/* ---------- Das Standardhaus ----------------------------------- */
+// cx/cy: Mitte der Bodenraute, hw/hh: halbe Rautenmaße.
+// Liefert die Firsthöhe zurück, damit Aufbauten darauf passen.
+function isoHaus(st, cx, cy, hw, hh, opt = {}) {
+  const wandH = (opt.wandH === undefined ? KH * 0.62 : opt.wandH) * st.hoch;
+  const dachH = opt.dachH === undefined ? KH * 0.52 : opt.dachH;
+  const ueber = opt.ueber === undefined ? 1.12 : opt.ueber;      // Dachüberstand
 
-// Weicher Schlagschatten nach rechts unten
-function schlagschatten(x, y, w, h) {
-  ctx.beginPath();
-  ctx.ellipse(x + w * 0.58, y + h * 0.86, w * 0.46, h * 0.16, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(32,36,22,0.22)';
-  ctx.fill();
-}
+  if (st.sockel) isoKasten(cx, cy, hw * 1.04, hh * 1.04, wandH * 0.22, st.sockel);
+  isoKasten(cx, cy, hw, hh, wandH, st.wand);
 
-// Wandstreifen mit Sockel, Fachwerk, Tür und Fenstern
-function wandBand(x, y, w, h, st, opt = {}) {
-  if (h <= 0.5) return;
-  ctx.fillStyle = opt.wandFarbe || st.wand;
-  ctx.fillRect(x, y, w, h);
-  ctx.fillStyle = 'rgba(0,0,0,0.14)';          // Schattenseite rechts
-  ctx.fillRect(x + w * 0.84, y, w * 0.16, h);
-  if (st.sockel) {                             // Steinsockel
-    ctx.fillStyle = st.sockel;
-    ctx.fillRect(x, y + h * 0.7, w, h * 0.3);
-  }
-  if (st.balken && w > 11) {                   // Fachwerkbalken
+  // Fachwerk auf der linken (helleren) Wand
+  if (st.balken && hw > 9) {
     ctx.strokeStyle = st.balken;
-    ctx.lineWidth = Math.max(0.7, w * 0.03);
-    ctx.beginPath();
-    ctx.moveTo(x, y + h * 0.45); ctx.lineTo(x + w, y + h * 0.45);
-    for (let i = 1; i < 3; i++) {
-      const bx = x + (w / 3) * i;
-      ctx.moveTo(bx, y); ctx.lineTo(bx, y + h);
-    }
-    ctx.stroke();
-  }
-  if (w > 9 && opt.tuer !== false) {           // Tür
-    const tw = Math.max(1.8, w * 0.17), th = h * 0.66;
-    ctx.fillStyle = '#6b4a2e';
-    ctx.fillRect(x + w * (opt.tuerX === undefined ? 0.42 : opt.tuerX), y + h - th, tw, th);
-  }
-  if (w > 15 && opt.fenster !== false) {       // Fenster
-    const hoch = h > w * 0.5;                  // mehrstöckig?
-    const fw = Math.max(1.4, w * 0.1);
-    const fh = Math.max(1.4, h * (hoch ? 0.2 : 0.3));
-    ctx.fillStyle = 'rgba(78,104,128,0.9)';
-    ctx.fillRect(x + w * 0.13, y + h * 0.16, fw, fh);
-    ctx.fillRect(x + w * 0.73, y + h * 0.16, fw, fh);
-    if (hoch) {                                // zweites Fensterband
-      ctx.fillRect(x + w * 0.13, y + h * 0.48, fw, fh);
-      ctx.fillRect(x + w * 0.73, y + h * 0.48, fw, fh);
-      ctx.fillStyle = 'rgba(0,0,0,0.09)';      // Geschossband
-      ctx.fillRect(x, y + h * 0.42, w, Math.max(0.7, h * 0.03));
-    }
-  }
-}
-
-// Satteldach: hintere (dunkle) und vordere (helle) Fläche, dazwischen
-// der First. Nach hinten verjüngt – dadurch wirkt das Dach geneigt.
-function satteldach(x, y, w, h, st, opt = {}) {
-  if (h <= 0.5) return null;
-  const u = w * (opt.ueberstand === undefined ? 0.07 : opt.ueberstand);
-  const X = x - u, W = w + u * 2;
-  const ein = W * 0.13;
-  const fy = y + h * 0.42;
-  const fl = X + ein * 0.45, fr = X + W - ein * 0.45;
-
-  ctx.beginPath();                              // hintere Dachfläche
-  ctx.moveTo(X + ein, y); ctx.lineTo(X + W - ein, y);
-  ctx.lineTo(fr, fy); ctx.lineTo(fl, fy); ctx.closePath();
-  ctx.fillStyle = st.dachDunkel; ctx.fill();
-
-  ctx.beginPath();                              // vordere Dachfläche
-  ctx.moveTo(fl, fy); ctx.lineTo(fr, fy);
-  ctx.lineTo(X + W, y + h); ctx.lineTo(X, y + h); ctx.closePath();
-  ctx.fillStyle = st.dachHell; ctx.fill();
-
-  if (W > 16) {                                 // Ziegelreihen bzw. Reetstriche
-    ctx.strokeStyle = st.reet ? 'rgba(90,70,35,0.18)' : 'rgba(0,0,0,0.12)';
-    ctx.lineWidth = Math.max(0.6, h * 0.04);
+    ctx.lineWidth = Math.max(0.8, hw * 0.05);
     ctx.beginPath();
     for (let i = 1; i <= 2; i++) {
-      const y2 = fy + (y + h - fy) * i / 3;
-      ctx.moveTo(X + (W - (W - 2 * ein)) * 0.1, y2); ctx.lineTo(X + W, y2);
+      const t = i / 3;
+      const px = cx - hw * t, py = cy + hh * (1 - t);
+      ctx.moveTo(px, py); ctx.lineTo(px, py - wandH);
     }
+    ctx.moveTo(cx, cy + hh - wandH * 0.5);
+    ctx.lineTo(cx - hw, cy - wandH * 0.5);
     ctx.stroke();
   }
-
-  ctx.fillStyle = st.first;                     // First
-  ctx.fillRect(fl, fy - Math.max(0.7, h * 0.05), fr - fl, Math.max(1.1, h * 0.09));
-  ctx.fillStyle = 'rgba(0,0,0,0.2)';            // Traufkante
-  ctx.fillRect(X, y + h - Math.max(0.7, h * 0.07), W, Math.max(0.7, h * 0.07));
-  return { fy, X, W };
-}
-
-// Flaches Walmdach mit Gesims – für Hallen und Prachtbauten
-function walmdach(x, y, w, h, st) {
-  const u = w * 0.05, X = x - u, W = w + u * 2;
-  ctx.beginPath();
-  ctx.moveTo(X + W * 0.14, y); ctx.lineTo(X + W * 0.86, y);
-  ctx.lineTo(X + W, y + h); ctx.lineTo(X, y + h); ctx.closePath();
-  ctx.fillStyle = st.dachHell; ctx.fill();
-  ctx.fillStyle = st.dachDunkel;
-  ctx.fillRect(X + W * 0.14, y, W * 0.72, Math.max(1, h * 0.3));
-  ctx.fillStyle = st.first;
-  ctx.fillRect(X, y + h - Math.max(1, h * 0.22), W, Math.max(1, h * 0.22));
-}
-
-// Schornstein auf der hinteren Dachfläche, bei Bedarf mit Rauch
-function schornstein(x, y, w, h, rauch) {
-  const b = Math.max(1.6, w * 0.13);
-  ctx.fillStyle = '#7d6a58';
-  ctx.fillRect(x, y, b, h);
-  ctx.fillStyle = '#5d4e40';
-  ctx.fillRect(x, y, b, Math.max(0.8, h * 0.22));
-  if (rauch && b > 2) rauchFahne(x + b / 2, y, b * 1.5);
-}
-
-// Aufsteigende Rauchwölkchen
-function rauchFahne(x, y, gr) {
-  const t = performance.now() / 1000;
-  for (let i = 0; i < 3; i++) {
-    const p = ((t * 0.45 + i / 3) % 1);
-    ctx.globalAlpha = (1 - p) * 0.4;
+  // Tür auf der Vorderseite (linke Wandhälfte)
+  if (opt.tuer !== false && hw > 10) {
+    const t = 0.45;
+    const px = cx - hw * t, py = cy + hh * (1 - t);
+    ctx.fillStyle = '#5c4228';
     ctx.beginPath();
-    ctx.arc(x + Math.sin(p * 4 + i) * gr * 0.4, y - p * gr * 3.2, gr * (0.4 + p * 0.7), 0, Math.PI * 2);
-    ctx.fillStyle = '#e6e6e6';
-    ctx.fill();
+    ctx.moveTo(px - hw * 0.1, py + hh * 0.1);
+    ctx.lineTo(px + hw * 0.1, py - hh * 0.1);
+    ctx.lineTo(px + hw * 0.1, py - hh * 0.1 - wandH * 0.62);
+    ctx.lineTo(px - hw * 0.1, py + hh * 0.1 - wandH * 0.62);
+    ctx.closePath(); ctx.fill();
   }
-  ctx.globalAlpha = 1;
-}
-
-// Dachgauben auf der vorderen Dachfläche
-function dachgauben(dach, st, anzahl, h) {
-  if (!dach || dach.W < 22) return;
-  const gb = dach.W * 0.14, gh = h * 0.2;
-  for (let i = 0; i < anzahl; i++) {
-    const gx = dach.X + dach.W * (anzahl === 1 ? 0.43 : 0.2 + i * 0.44);
-    const gy = dach.fy + h * 0.1;
-    ctx.fillStyle = st.wand;
-    ctx.fillRect(gx, gy, gb, gh);
-    ctx.fillStyle = 'rgba(78,104,128,0.9)';
-    ctx.fillRect(gx + gb * 0.22, gy + gh * 0.25, gb * 0.56, gh * 0.5);
-    ctx.fillStyle = st.dachDunkel;
-    ctx.fillRect(gx - gb * 0.12, gy - gh * 0.22, gb * 1.24, gh * 0.3);
-  }
-}
-
-// Fahnenmast mit wehendem Tuch
-function fahnenmast(x, y, hoehe, farbe) {
-  if (hoehe < 6) return;
-  ctx.strokeStyle = '#6b5a46';
-  ctx.lineWidth = Math.max(0.8, hoehe * 0.08);
-  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - hoehe); ctx.stroke();
-  const weht = Math.sin(performance.now() / 420) * hoehe * 0.08;
-  ctx.beginPath();
-  ctx.moveTo(x, y - hoehe);
-  ctx.lineTo(x + hoehe * 0.6 + weht, y - hoehe * 0.82);
-  ctx.lineTo(x, y - hoehe * 0.62);
-  ctx.closePath();
-  ctx.fillStyle = farbe || '#c0392b';
-  ctx.fill();
-}
-
-// Spitzer Turmhelm
-function turmhelm(x, y, w, h, st) {
-  ctx.beginPath();
-  ctx.moveTo(x - w * 0.14, y + h);
-  ctx.lineTo(x + w / 2, y);
-  ctx.lineTo(x + w * 1.14, y + h);
-  ctx.closePath();
-  ctx.fillStyle = st.dachHell; ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(x + w / 2, y);
-  ctx.lineTo(x + w * 1.14, y + h);
-  ctx.lineTo(x + w / 2, y + h);
-  ctx.closePath();
-  ctx.fillStyle = st.dachDunkel; ctx.fill();
-}
-
-// Standardhaus: Dach + Wand. Liefert die Dachdaten für Aufbauten zurück.
-function hausBasis(st, x, y, w, h, opt = {}) {
-  const dachH = h * (opt.dachAnteil === undefined ? (st.dachAnteil || 0.58) : opt.dachAnteil);
-  const wandEin = w * (opt.wandEin === undefined ? 0.1 : opt.wandEin);
-  wandBand(x + wandEin, y + dachH, w - wandEin * 2, h - dachH, st, opt);
-  const dach = satteldach(x, y, w, dachH, st, opt);
-  if (st.gauben && opt.gauben !== false) dachgauben(dach, st, st.gauben, dachH);
-  if (opt.schornstein && w > 13)
-    schornstein(x + w * 0.74, y + dachH * 0.08, w, dachH * 0.42, opt.rauch);
-  if (st.fahne && opt.fahne !== false && dach)
-    fahnenmast(x + w * 0.2, dach.fy, h * 0.42, opt.fahnenFarbe);
-  return dach;
-}
-
-/* ---------- Kennzeichen der einzelnen Gebäudearten ------------- */
-
-// Betrieb: links ein schmales Haus, rechts der Arbeitsplatz.
-// Erst dieser Arbeitsplatz macht die Betriebe auf einen Blick
-// unterscheidbar – er bekommt deshalb reichlich Platz und kräftige
-// Farben, auch wenn das Gebäude klein auf dem Bildschirm steht.
-function werkHof(geb, st, x, y, w, h, arbeit, opt = {}) {
-  const hausB = opt.hausBreite === undefined ? 0.54 : opt.hausBreite;
-  hausBasis(st, x, y + h * 0.06, w * hausB, h * 0.9,
-            Object.assign({ wandEin: 0.05, tuerX: 0.36, fenster: false, fahne: false }, opt));
-  arbeit(x + w * (hausB + 0.02), y + h * 0.1, w * (0.98 - hausB), h * 0.84, st, w);
-  if (st.fahne) fahnenmast(x + w * 0.08, y + h * 0.36, h * 0.3, st.gold);
-}
-
-// Ein Stapel runder Dinge (Baumstämme, Ballen, Fässer …)
-function stapel(x, y, r, reihen, spalten, farbe, kern) {
-  for (let s = 0; s < reihen; s++)
-    for (let i = 0; i < spalten - s; i++) {
-      const cx = x + r * (1 + i * 1.9 + s * 0.95), cy = y - s * r * 1.7;
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fillStyle = farbe; ctx.fill();
-      if (kern) {
-        ctx.beginPath(); ctx.arc(cx, cy, r * 0.5, 0, Math.PI * 2);
-        ctx.fillStyle = kern; ctx.fill();
+  // Fenster auf der rechten Wand
+  if (opt.fenster !== false && hw > 12) {
+    ctx.fillStyle = 'rgba(74,100,126,0.92)';
+    for (const t of (wandH > KH * 0.8 ? [0.3, 0.7] : [0.5])) {
+      const px = cx + hw * t, py = cy + hh * (1 - t);
+      for (const hy of (wandH > KH * 0.8 ? [0.35, 0.72] : [0.55])) {
+        ctx.beginPath();
+        ctx.moveTo(px - hw * 0.08, py + hh * 0.08 - wandH * hy);
+        ctx.lineTo(px + hw * 0.08, py - hh * 0.08 - wandH * hy);
+        ctx.lineTo(px + hw * 0.08, py - hh * 0.08 - wandH * (hy + 0.22));
+        ctx.lineTo(px - hw * 0.08, py + hh * 0.08 - wandH * (hy + 0.22));
+        ctx.closePath(); ctx.fill();
       }
     }
-}
-
-// Gestell aus zwei Pfosten und einem Querbalken
-function gestell(x, y, w, h) {
-  ctx.strokeStyle = '#7a5f3c';
-  ctx.lineWidth = Math.max(0.9, w * 0.09);
-  ctx.beginPath();
-  ctx.moveTo(x + w * 0.1, y + h); ctx.lineTo(x + w * 0.1, y);
-  ctx.moveTo(x + w * 0.9, y + h); ctx.lineTo(x + w * 0.9, y);
-  ctx.moveTo(x, y + h * 0.06); ctx.lineTo(x + w, y + h * 0.06);
-  ctx.stroke();
-}
-
-// Eingezäunte Koppel mit Tieren
-function koppel(x, y, w, h, tiere, farbe, fleck) {
-  ctx.fillStyle = 'rgba(150,170,100,0.55)';
-  ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = '#a07f52';
-  ctx.lineWidth = Math.max(0.8, w * 0.06);
-  ctx.strokeRect(x, y, w, h);
-  const r = Math.max(2.2, w * 0.21);
-  for (let i = 0; i < tiere; i++) {
-    const cx = x + w * (0.28 + (i % 2) * 0.45), cy = y + h * (0.25 + Math.floor(i / 2) * 0.42);
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, r, r * 0.72, 0, 0, Math.PI * 2);
-    ctx.fillStyle = farbe; ctx.fill();
-    if (fleck) {
-      ctx.beginPath();
-      ctx.ellipse(cx + r * 0.3, cy, r * 0.42, r * 0.38, 0, 0, Math.PI * 2);
-      ctx.fillStyle = fleck; ctx.fill();
-    }
-    ctx.beginPath();                                  // Kopf
-    ctx.arc(cx - r * 0.9, cy - r * 0.15, r * 0.42, 0, Math.PI * 2);
-    ctx.fillStyle = farbe; ctx.fill();
   }
+
+  const dach = isoSattel(cx, cy, hw * ueber, hh * ueber, wandH, dachH, st.dach);
+  isoGiebel(cx, cy, hw * ueber, hh * ueber, wandH, dachH, st.wand);
+
+  // Dachgauben auf der vorderen Dachfläche
+  if (st.gauben && hw > 14 && opt.gauben !== false) {
+    for (let i = 0; i < st.gauben; i++) {
+      const t = st.gauben === 1 ? 0.5 : 0.3 + i * 0.4;
+      const gx = cx - hw * 0.5 + hw * t, gy = cy + hh * 0.25 - wandH - dachH * 0.45 + hh * t * 0.5;
+      isoKasten(gx, gy, hw * 0.13, hh * 0.13, dachH * 0.45, st.wand);
+      ctx.fillStyle = 'rgba(74,100,126,0.9)';
+      ctx.fillRect(gx - hw * 0.06, gy - dachH * 0.42, hw * 0.12, dachH * 0.26);
+    }
+  }
+  if (opt.schornstein !== false && hw > 11) {
+    const sx = cx + hw * 0.42, sy = cy - hh * 0.3 - wandH - dachH * 0.4;
+    isoKasten(sx, sy, hw * 0.1, hh * 0.1, dachH * 0.8, '#7d6a58');
+    if (opt.rauch) isoRauch(sx, sy - dachH * 0.8, hw * 0.16);
+  }
+  if (st.fahne && opt.fahne !== false)
+    isoFahne(cx - hw * 0.45, cy - wandH - dachH * 0.2, KH * 0.9, opt.fahnenFarbe || st.gold);
+  return { wandH, dachH, first: wandH + dachH, dach };
 }
 
+/* ---------- Die einzelnen Gebäudearten ------------------------- */
+// Alle bekommen die Mitte der Bodenraute (cx, cy) und deren halbe
+// Maße (hw, hh). Oben links ist hinten, unten rechts vorn.
 
-// Werkstatt: Haus mit rauchendem Schornstein
-function bauWerkstatt(geb, st, x, y, w, h) {
-  hausBasis(st, x, y, w, h, { schornstein: true, rauch: true });
+// Betrieb: Haus hinten links, Arbeitsplatz vorn rechts
+function werkHof(st, cx, cy, hw, hh, arbeit, opt = {}) {
+  const f = opt.hausAnteil === undefined ? 0.56 : opt.hausAnteil;
+  isoHaus(st, cx - hw * (1 - f) * 0.55, cy - hh * (1 - f) * 0.55,
+          hw * f, hh * f, Object.assign({ fahne: false }, opt));
+  arbeit(cx + hw * (1 - f) * 0.55, cy + hh * (1 - f) * 0.55, hw * (1 - f), hh * (1 - f), st);
+  if (st.fahne) isoFahne(cx - hw * 0.7, cy, KH, st.gold);
 }
 
-// Scheune/Hof: breites Dach, großes Tor
-function bauScheune(geb, st, x, y, w, h) {
-  const d = hausBasis(st, x, y, w, h, { ueberstand: 0.12, dachAnteil: 0.55, wandEin: 0.06, tuer: false });
-  const wy = y + h * 0.55, wh = y + h - wy;
-  ctx.fillStyle = 'rgba(70,48,28,0.75)';        // Scheunentor
-  ctx.fillRect(x + w * 0.38, wy + wh * 0.22, w * 0.24, wh * 0.78);
-  if (st.balken) {
-    ctx.strokeStyle = st.balken; ctx.lineWidth = Math.max(0.7, w * 0.022);
+// Zaun um eine Fläche
+function isoZaun(cx, cy, hw, hh, hoehe) {
+  const ecke = [[cx, cy - hh], [cx + hw, cy], [cx, cy + hh], [cx - hw, cy]];
+  ctx.strokeStyle = '#a07f52';
+  ctx.lineWidth = 1.8;
+  for (const q of [0.45, 0.9]) {
     ctx.beginPath();
-    ctx.moveTo(x + w * 0.38, wy + wh * 0.22); ctx.lineTo(x + w * 0.62, wy + wh);
-    ctx.moveTo(x + w * 0.62, wy + wh * 0.22); ctx.lineTo(x + w * 0.38, wy + wh);
+    for (let i = 0; i < 4; i++) {
+      const a = ecke[i], b = ecke[(i + 1) % 4];
+      ctx.moveTo(a[0], a[1] - hoehe * q);
+      ctx.lineTo(b[0], b[1] - hoehe * q);
+    }
     ctx.stroke();
   }
-  return d;
+  for (const e of ecke) pfosten(e[0], e[1], hoehe, 2.4, '#8a6a44');
+  for (let i = 0; i < 4; i++) {
+    const a = ecke[i], b = ecke[(i + 1) % 4];
+    pfosten((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, hoehe * 0.9, 2, '#8a6a44');
+  }
 }
 
 const BAU_ZEICHNER = {
 
-  // --- Hafen und Handel ---------------------------------------
-  kontor(geb, st, x, y, w, h) {
-    // Steg ins Wasser
-    ctx.fillStyle = '#9b7a4f';
-    ctx.fillRect(x + w * 0.06, y + h * 0.86, w * 0.88, h * 0.1);
-    ctx.fillStyle = 'rgba(0,0,0,0.2)';
-    for (let i = 0; i < 5; i++)
-      ctx.fillRect(x + w * (0.1 + i * 0.18), y + h * 0.86, w * 0.025, h * 0.1);
+  kontor(geb, st, cx, cy, hw, hh) {
+    // Steg nach vorn ins Wasser
+    isoKasten(cx + hw * 0.3, cy + hh * 0.55, hw * 0.55, hh * 0.55, 3, '#9b7a4f');
     // Lagerhaus
-    hausBasis(st, x + w * 0.04, y + h * 0.04, w * 0.66, h * 0.78,
-              { schornstein: false, fahne: false, tuerX: 0.44 });
+    const r = isoHaus(st, cx - hw * 0.2, cy - hh * 0.2, hw * 0.6, hh * 0.6,
+                      { fahne: false, schornstein: false });
     // Kran am Steg
-    const kx = x + w * 0.82, ky = y + h * 0.26;
-    ctx.strokeStyle = '#7a5f3c';
-    ctx.lineWidth = Math.max(1, w * 0.035);
+    const kx = cx + hw * 0.5, ky = cy + hh * 0.2;
+    pfosten(kx, ky, KH * 1.5, 3, '#7a5f3c');
+    ctx.strokeStyle = '#7a5f3c'; ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(kx, y + h * 0.84); ctx.lineTo(kx, ky);
-    ctx.lineTo(kx - w * 0.22, ky + h * 0.04);
+    ctx.moveTo(kx, ky - KH * 1.5); ctx.lineTo(kx - hw * 0.45, ky - KH * 1.25);
     ctx.stroke();
-    ctx.strokeStyle = 'rgba(40,30,20,0.6)';
-    ctx.lineWidth = Math.max(0.6, w * 0.016);
+    ctx.strokeStyle = 'rgba(40,30,20,0.6)'; ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.moveTo(kx - w * 0.2, ky + h * 0.05); ctx.lineTo(kx - w * 0.2, ky + h * 0.3);
+    ctx.moveTo(kx - hw * 0.43, ky - KH * 1.26); ctx.lineTo(kx - hw * 0.43, ky - KH * 0.6);
     ctx.stroke();
-    ctx.fillStyle = '#8a6a44';
-    ctx.fillRect(kx - w * 0.25, ky + h * 0.3, w * 0.1, h * 0.09);
-    // Fässer
-    if (w > 30) {
-      ctx.fillStyle = '#9c6b3e';
-      for (let i = 0; i < 3; i++) {
-        ctx.beginPath();
-        ctx.ellipse(x + w * (0.14 + i * 0.1), y + h * 0.79, w * 0.035, w * 0.03, 0, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-    // Flagge des Besitzers
-    fahnenmast(x + w * 0.07, y + h * 0.22, h * 0.3,
-               spieler[geb.spieler] && spieler[geb.spieler].farbe);
+    isoKasten(kx - hw * 0.43, ky - KH * 0.6, hw * 0.1, hh * 0.1, 5, '#8a6a44');
+    // Fässer am Kai
+    for (let i = 0; i < 3; i++)
+      isoZylinder(cx - hw * 0.1 + i * hw * 0.22, cy + hh * 0.5 + i * hh * 0.04,
+                  hw * 0.07, 5, '#9c6b3e');
+    isoFahne(cx - hw * 0.55, cy - hh * 0.2 - r.first, KH * 1.1,
+             spieler[geb.spieler] && spieler[geb.spieler].farbe);
   },
 
-  werft(geb, st, x, y, w, h) {
-    ctx.fillStyle = '#9b7a4f';                    // Helling
-    ctx.fillRect(x + w * 0.5, y + h * 0.2, w * 0.46, h * 0.72);
-    ctx.fillStyle = 'rgba(0,0,0,0.16)';
-    for (let i = 0; i < 4; i++)
-      ctx.fillRect(x + w * 0.5, y + h * (0.28 + i * 0.16), w * 0.46, h * 0.03);
-    hausBasis(st, x + w * 0.02, y + h * 0.1, w * 0.5, h * 0.74, { fahne: false });
-    // Schiffsrumpf im Bau
+  werft(geb, st, cx, cy, hw, hh) {
+    isoKasten(cx + hw * 0.3, cy + hh * 0.4, hw * 0.6, hh * 0.6, 3, '#9b7a4f');
+    isoHaus(st, cx - hw * 0.3, cy - hh * 0.3, hw * 0.52, hh * 0.52, { fahne: false });
+    // Schiffsrumpf auf der Helling
+    const sx = cx + hw * 0.32, sy = cy + hh * 0.34;
     ctx.beginPath();
-    ctx.moveTo(x + w * 0.56, y + h * 0.36);
-    ctx.quadraticCurveTo(x + w * 0.74, y + h * 0.3, x + w * 0.9, y + h * 0.42);
-    ctx.quadraticCurveTo(x + w * 0.74, y + h * 0.68, x + w * 0.56, y + h * 0.36);
+    ctx.moveTo(sx - hw * 0.4, sy - 4);
+    ctx.quadraticCurveTo(sx, sy + hh * 0.26, sx + hw * 0.4, sy - 6);
+    ctx.quadraticCurveTo(sx, sy - hh * 0.1, sx - hw * 0.4, sy - 4);
     ctx.closePath();
     ctx.fillStyle = '#8a5f38'; ctx.fill();
-    ctx.strokeStyle = '#604125'; ctx.lineWidth = Math.max(0.7, w * 0.018); ctx.stroke();
-    // Gerüst
-    ctx.strokeStyle = 'rgba(120,95,60,0.85)';
-    ctx.lineWidth = Math.max(0.7, w * 0.02);
-    ctx.beginPath();
-    ctx.moveTo(x + w * 0.6, y + h * 0.2); ctx.lineTo(x + w * 0.6, y + h * 0.78);
-    ctx.moveTo(x + w * 0.86, y + h * 0.2); ctx.lineTo(x + w * 0.86, y + h * 0.78);
-    ctx.moveTo(x + w * 0.56, y + h * 0.26); ctx.lineTo(x + w * 0.9, y + h * 0.26);
-    ctx.stroke();
+    ctx.strokeStyle = '#5e4125'; ctx.lineWidth = 1.2; ctx.stroke();
+    pfosten(sx, sy - 6, KH * 1.1, 2.5, '#6b4a2e');
+    for (const dx of [-0.38, 0.38]) pfosten(sx + hw * dx, sy, KH * 0.8, 2, '#8a6a44');
   },
 
-  marktplatz(geb, st, x, y, w, h) {
-    // Gepflasterter Platz
-    rundRect(ctx, x, y + h * 0.1, w, h * 0.86, Math.min(w, h) * 0.16);
-    ctx.fillStyle = '#cbb48d'; ctx.fill();
-    ctx.strokeStyle = 'rgba(120,95,60,0.45)';
-    ctx.lineWidth = Math.max(0.6, w * 0.016);
-    ctx.stroke();
-    if (w > 22) {                                  // Pflasterfugen
-      ctx.strokeStyle = 'rgba(120,95,60,0.22)';
-      ctx.beginPath();
-      for (let i = 1; i < 4; i++) {
-        ctx.moveTo(x + w * i / 4, y + h * 0.1); ctx.lineTo(x + w * i / 4, y + h * 0.96);
-        ctx.moveTo(x, y + h * (0.1 + 0.86 * i / 4)); ctx.lineTo(x + w, y + h * (0.1 + 0.86 * i / 4));
-      }
-      ctx.stroke();
-    }
+  marktplatz(geb, st, cx, cy, hw, hh) {
+    // Gepflasterter Platz, leicht erhöht
+    isoKasten(cx, cy, hw * 0.96, hh * 0.96, 2.5, '#cbb48d');
     // Brunnen in der Mitte
+    isoZylinder(cx, cy, hw * 0.14, 6, '#9c9488');
     ctx.beginPath();
-    ctx.arc(x + w * 0.5, y + h * 0.54, Math.max(2, w * 0.1), 0, Math.PI * 2);
-    ctx.fillStyle = '#9c9488'; ctx.fill();
-    ctx.beginPath();
-    ctx.arc(x + w * 0.5, y + h * 0.54, Math.max(1.2, w * 0.06), 0, Math.PI * 2);
+    ctx.ellipse(cx, cy - 6, hw * 0.11, hw * 0.11 * KH / KW, 0, 0, Math.PI * 2);
     ctx.fillStyle = '#6ba3c4'; ctx.fill();
-    // Marktstände mit gestreiften Planen
-    const stand = (sx, sy, sw, f1, f2) => {
-      ctx.fillStyle = '#8a6a44';
-      ctx.fillRect(sx, sy + sw * 0.5, sw, sw * 0.4);
-      for (let i = 0; i < 4; i++) {
-        ctx.fillStyle = i % 2 ? f1 : f2;
-        ctx.fillRect(sx + (sw / 4) * i, sy, sw / 4, sw * 0.5);
-      }
+    // Zwei Marktstände: Tisch mit Waren, darüber eine gestreifte Plane
+    const stand = (ox, oy, f1) => {
+      const bx = cx + hw * ox, by = cy + hh * oy;
+      const sw = hw * 0.3, sh = hh * 0.3;
+      isoKasten(bx, by, sw, sh, KH * 0.35, '#8a6a44');          // Tisch
+      for (const d of [[-1, 0], [1, 0], [0, -1], [0, 1]])
+        pfosten(bx + sw * d[0], by + sh * d[1], KH * 0.95, 2, '#6b4a2e');
+      const py = by - KH * 0.95;                                  // Plane
+      ctx.beginPath();
+      ctx.moveTo(bx, py - sh * 1.25); ctx.lineTo(bx + sw * 1.25, py);
+      ctx.lineTo(bx, py + sh * 1.25); ctx.lineTo(bx - sw * 1.25, py);
+      ctx.closePath(); ctx.fillStyle = '#f2ead8'; ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(bx, py - sh * 1.25); ctx.lineTo(bx + sw * 1.25, py);
+      ctx.lineTo(bx, py); ctx.closePath();
+      ctx.fillStyle = f1; ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(bx, py + sh * 1.25); ctx.lineTo(bx - sw * 1.25, py);
+      ctx.lineTo(bx, py); ctx.closePath();
+      ctx.fillStyle = f1; ctx.fill();
+      isoKugel(bx - sw * 0.3, by - KH * 0.35, sw * 0.2, '#c76b2e');  // Waren
+      isoKugel(bx + sw * 0.3, by - KH * 0.35, sw * 0.2, '#7aa845');
     };
-    const sw = w * 0.26;
-    stand(x + w * 0.08, y + h * 0.18, sw, '#c0392b', '#f0e6d2');
-    stand(x + w * 0.64, y + h * 0.66, sw, '#2d7a5f', '#f0e6d2');
-    if (st.fahne) fahnenmast(x + w * 0.9, y + h * 0.3, h * 0.28, st.gold);
+    stand(-0.38, -0.12, '#c0392b');
+    stand(0.32, 0.24, '#2d7a5f');
+    if (st.fahne) isoFahne(cx + hw * 0.55, cy - hh * 0.3, KH, st.gold);
   },
 
-  bruecke(geb, st, x, y, w, h) {
-    ctx.fillStyle = '#a8814f';                     // Fahrbahn
-    ctx.fillRect(x, y + h * 0.28, w, h * 0.44);
-    ctx.strokeStyle = 'rgba(70,48,28,0.5)';        // Planken
-    ctx.lineWidth = Math.max(0.6, w * 0.03);
+  bruecke(geb, st, cx, cy, hw, hh) {
+    isoKasten(cx, cy, hw * 0.98, hh * 0.98, 4, '#a8814f');
+    ctx.strokeStyle = 'rgba(70,48,28,0.45)';
+    ctx.lineWidth = 1.2;
     ctx.beginPath();
-    for (let i = 1; i < 6; i++) {
-      const bx = x + (w / 6) * i;
-      ctx.moveTo(bx, y + h * 0.28); ctx.lineTo(bx, y + h * 0.72);
+    for (let i = 1; i < 5; i++) {
+      const t = i / 5;
+      ctx.moveTo(cx - hw + hw * t, cy - hh * t - 4);
+      ctx.lineTo(cx + hw * t, cy + hh * (1 - t) - 4);
     }
     ctx.stroke();
-    ctx.fillStyle = '#7b5c38';                     // Geländer
-    ctx.fillRect(x, y + h * 0.22, w, h * 0.08);
-    ctx.fillRect(x, y + h * 0.7, w, h * 0.08);
+    // Niedriges Geländer an den beiden vorderen Kanten
+    ctx.strokeStyle = '#7b5c38';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx + hw * 0.92, cy - 10); ctx.lineTo(cx, cy + hh * 0.92 - 10);
+    ctx.lineTo(cx - hw * 0.92, cy - 10);
+    ctx.stroke();
+    for (const p of [[0.92, 0], [0, 0.92], [-0.92, 0]])
+      pfosten(cx + hw * p[0], cy + hh * p[1] - 4, 7, 2.2, '#7b5c38');
   },
 
-  // --- Siedlung -----------------------------------------------
-  wohnhaus(geb, st, x, y, w, h) {
-    const d = hausBasis(st, x + w * 0.04, y, w * 0.8, h * 0.94,
-                        { schornstein: true, rauch: false, tuerX: 0.4 });
-    // Ab Bürgern ein Anbau an der Seite
-    if ((geb.stufe || 0) >= 2 && w > 20) {
-      const ax = x + w * 0.74, ay = y + h * 0.42;
-      wandBand(ax, ay + h * 0.2, w * 0.24, h * 0.32, st, { tuer: false, fenster: false });
-      satteldach(ax - w * 0.02, ay, w * 0.28, h * 0.22, st, { ueberstand: 0.05 });
-    }
-    // Vorgarten ab Kaufleuten
-    if ((geb.stufe || 0) >= 3 && w > 24) {
-      ctx.fillStyle = '#6f9a4e';
+  wohnhaus(geb, st, cx, cy, hw, hh) {
+    const r = isoHaus(st, cx, cy, hw * 0.74, hh * 0.74,
+                      { schornstein: true, rauch: false });
+    if ((geb.stufe || 0) >= 2 && hw > 16)        // Anbau ab Bürgern
+      isoHaus(st, cx + hw * 0.5, cy + hh * 0.18, hw * 0.3, hh * 0.3,
+              { fahne: false, schornstein: false, wandH: KH * 0.4, dachH: KH * 0.3, gauben: false });
+    if ((geb.stufe || 0) >= 3 && hw > 18) {      // Vorgarten
       ctx.beginPath();
-      ctx.ellipse(x + w * 0.18, y + h * 0.9, w * 0.1, h * 0.05, 0, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.ellipse(cx - hw * 0.45, cy + hh * 0.4, hw * 0.18, hh * 0.18, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#6f9a4e'; ctx.fill();
     }
-    return d;
+    return r;
   },
 
-  kapelle(geb, st, x, y, w, h) {
+  kapelle(geb, st, cx, cy, hw, hh) {
     // Kirchenschiff
-    hausBasis(st, x + w * 0.22, y + h * 0.14, w * 0.68, h * 0.8,
-              { fahne: false, gauben: false, tuer: false, fenster: false, dachAnteil: 0.56 });
-    // Rundbogenfenster
-    if (w > 22) {
-      ctx.fillStyle = 'rgba(78,104,128,0.9)';
-      for (let i = 0; i < 3; i++) {
-        const fx = x + w * (0.34 + i * 0.16);
-        ctx.beginPath();
-        ctx.arc(fx, y + h * 0.72, w * 0.035, Math.PI, 0);
-        ctx.rect(fx - w * 0.035, y + h * 0.72, w * 0.07, h * 0.12);
-        ctx.fill();
-      }
-    }
-    // Glockenturm links
-    const tx = x + w * 0.06, tw = w * 0.22;
-    ctx.fillStyle = st.wand;
-    ctx.fillRect(tx, y + h * 0.26, tw, h * 0.68);
-    ctx.fillStyle = 'rgba(0,0,0,0.14)';
-    ctx.fillRect(tx + tw * 0.78, y + h * 0.26, tw * 0.22, h * 0.68);
-    ctx.fillStyle = 'rgba(40,40,45,0.75)';         // Schallfenster
-    ctx.fillRect(tx + tw * 0.3, y + h * 0.36, tw * 0.4, h * 0.14);
-    turmhelm(tx, y + h * 0.02, tw, h * 0.26, st);
-    // Kreuz
-    if (w > 20) {
-      ctx.strokeStyle = st.gold || '#e8dfc8';
-      ctx.lineWidth = Math.max(0.8, w * 0.022);
-      ctx.beginPath();
-      ctx.moveTo(tx + tw / 2, y - h * 0.08); ctx.lineTo(tx + tw / 2, y + h * 0.04);
-      ctx.moveTo(tx + tw * 0.28, y - h * 0.03); ctx.lineTo(tx + tw * 0.72, y - h * 0.03);
-      ctx.stroke();
-    }
-  },
-
-  schule(geb, st, x, y, w, h) {
-    hausBasis(st, x + w * 0.04, y + h * 0.1, w * 0.92, h * 0.84,
-              { dachAnteil: 0.5, tuerX: 0.46 });
-    // Uhrengiebel über dem Eingang
-    const gx = x + w * 0.4, gy = y + h * 0.16;
-    ctx.fillStyle = st.wand;
+    isoHaus(st, cx + hw * 0.16, cy + hh * 0.16, hw * 0.6, hh * 0.6,
+            { fahne: false, gauben: false, schornstein: false, tuer: false,
+              wandH: KH * 0.9, dachH: KH * 0.62 });
+    // Glockenturm
+    const tx = cx - hw * 0.42, ty = cy - hh * 0.42;
+    isoKasten(tx, ty, hw * 0.2, hh * 0.2, KH * 1.5, st.wand);
+    ctx.fillStyle = 'rgba(40,40,45,0.7)';
+    ctx.fillRect(tx - hw * 0.07, ty - KH * 1.35, hw * 0.14, KH * 0.3);
+    isoKegel(tx, ty - KH * 1.5, hw * 0.24, KH * 1.1, st.dach);
+    ctx.strokeStyle = st.gold || '#e8dfc8';
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(gx, gy + h * 0.2); ctx.lineTo(gx + w * 0.1, gy);
-    ctx.lineTo(gx + w * 0.2, gy + h * 0.2); ctx.closePath();
-    ctx.fill();
-    if (w > 22) {
-      ctx.beginPath();
-      ctx.arc(gx + w * 0.1, gy + h * 0.12, w * 0.045, 0, Math.PI * 2);
-      ctx.fillStyle = '#f2ead8'; ctx.fill();
-      ctx.strokeStyle = '#5b5346'; ctx.lineWidth = Math.max(0.5, w * 0.012);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(gx + w * 0.1, gy + h * 0.12); ctx.lineTo(gx + w * 0.1, gy + h * 0.09);
-      ctx.moveTo(gx + w * 0.1, gy + h * 0.12); ctx.lineTo(gx + w * 0.13, gy + h * 0.13);
-      ctx.stroke();
-    }
-  },
-
-  badehaus(geb, st, x, y, w, h) {
-    hausBasis(st, x + w * 0.04, y + h * 0.06, w * 0.6, h * 0.8, { fahne: false });
-    // Becken mit dampfendem Wasser
-    rundRect(ctx, x + w * 0.62, y + h * 0.42, w * 0.34, h * 0.46, w * 0.08);
-    ctx.fillStyle = '#9c9488'; ctx.fill();
-    rundRect(ctx, x + w * 0.66, y + h * 0.47, w * 0.26, h * 0.36, w * 0.06);
-    ctx.fillStyle = '#6fb3d2'; ctx.fill();
-    ctx.globalAlpha = 0.35;
-    const t = performance.now() / 1000;
-    for (let i = 0; i < 3; i++) {
-      const p = (t * 0.3 + i / 3) % 1;
-      ctx.beginPath();
-      ctx.arc(x + w * (0.7 + i * 0.08), y + h * 0.5 - p * h * 0.3, w * 0.04 + p * w * 0.03, 0, Math.PI * 2);
-      ctx.fillStyle = '#ffffff'; ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-  },
-
-  theater(geb, st, x, y, w, h) {
-    hausBasis(st, x + w * 0.04, y + h * 0.04, w * 0.92, h * 0.74,
-              { dachAnteil: 0.46, tuer: false, fenster: false, fahne: false });
-    // Säulenvorbau
-    const vy = y + h * 0.64, vh = h * 0.3;
-    ctx.fillStyle = st.wand;
-    ctx.fillRect(x + w * 0.12, vy, w * 0.76, vh);
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    for (let i = 0; i < 5; i++)
-      ctx.fillRect(x + w * (0.17 + i * 0.15), vy, w * 0.035, vh);
-    ctx.fillStyle = st.dachHell;
-    ctx.fillRect(x + w * 0.08, vy - h * 0.07, w * 0.84, h * 0.08);
-    if (st.fahne) {
-      fahnenmast(x + w * 0.14, y + h * 0.1, h * 0.26, '#8e44ad');
-      fahnenmast(x + w * 0.86, y + h * 0.1, h * 0.26, '#c0392b');
-    }
-  },
-
-  ruhmeshalle(geb, st, x, y, w, h) {
-    // Breiter Tempel mit Giebelfeld und Säulen
-    const sy = y + h * 0.44, sh = h * 0.46;
-    ctx.fillStyle = st.wand;
-    ctx.fillRect(x + w * 0.08, sy, w * 0.84, sh);
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    for (let i = 0; i < 6; i++)
-      ctx.fillRect(x + w * (0.13 + i * 0.13), sy, w * 0.04, sh);
-    ctx.fillStyle = st.sockel || '#a89e8c';
-    ctx.fillRect(x + w * 0.04, y + h * 0.9, w * 0.92, h * 0.1);
-    // Giebeldreieck
-    ctx.beginPath();
-    ctx.moveTo(x + w * 0.02, sy);
-    ctx.lineTo(x + w * 0.5, y + h * 0.08);
-    ctx.lineTo(x + w * 0.98, sy);
-    ctx.closePath();
-    ctx.fillStyle = st.dachHell; ctx.fill();
-    ctx.fillStyle = st.gold || '#cbb27a';
-    ctx.fillRect(x + w * 0.02, sy - h * 0.05, w * 0.96, h * 0.05);
-    if (w > 26) {
-      ctx.beginPath();
-      ctx.arc(x + w * 0.5, y + h * 0.28, w * 0.06, 0, Math.PI * 2);
-      ctx.fillStyle = st.gold || '#cbb27a'; ctx.fill();
-    }
-  },
-
-  triumphbogen(geb, st, x, y, w, h) {
-    const sy = y + h * 0.26;
-    ctx.fillStyle = st.wand;
-    ctx.fillRect(x + w * 0.1, sy, w * 0.8, h * 0.68);
-    ctx.fillStyle = 'rgba(0,0,0,0.12)';
-    ctx.fillRect(x + w * 0.8, sy, w * 0.1, h * 0.68);
-    // Durchgang
-    ctx.beginPath();
-    ctx.moveTo(x + w * 0.37, y + h * 0.94);
-    ctx.lineTo(x + w * 0.37, y + h * 0.56);
-    ctx.arc(x + w * 0.5, y + h * 0.56, w * 0.13, Math.PI, 0);
-    ctx.lineTo(x + w * 0.63, y + h * 0.94);
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(48,42,34,0.8)'; ctx.fill();
-    // Gesims und Quadriga-Sockel
-    ctx.fillStyle = st.dachHell;
-    ctx.fillRect(x + w * 0.04, y + h * 0.18, w * 0.92, h * 0.1);
-    ctx.fillStyle = st.gold || '#cbb27a';
-    ctx.fillRect(x + w * 0.34, y + h * 0.06, w * 0.32, h * 0.12);
-    ctx.fillStyle = st.sockel || '#a89e8c';
-    ctx.fillRect(x + w * 0.06, y + h * 0.92, w * 0.88, h * 0.08);
-  },
-
-  statue(geb, st, x, y, w, h) {
-    const stein = st.sockel || '#b3a994';
-    const figur = st.gold || (st.sockel ? '#d8cba6' : '#c9b88c');
-    // Gestufter Unterbau – mit jedem zweiten Ausbau eine Stufe mehr
-    const stufen = Math.min(3, 1 + ((geb.ausbau || 1) >> 1));
-    for (let i = 0; i < stufen; i++) {
-      const b = 0.42 + i * 0.18;
-      ctx.fillStyle = stein;
-      ctx.fillRect(x + w * (0.5 - b / 2), y + h * (0.97 - 0.075 * (i + 1)), w * b, h * 0.075);
-      ctx.fillStyle = 'rgba(0,0,0,0.12)';
-      ctx.fillRect(x + w * (0.5 - b / 2), y + h * (0.97 - 0.075 * i) - h * 0.016, w * b, h * 0.016);
-    }
-    const sy = y + h * (0.97 - 0.075 * stufen);
-    ctx.fillStyle = stein;                        // Postament
-    ctx.fillRect(x + w * 0.33, sy - h * 0.22, w * 0.34, h * 0.22);
-    ctx.fillStyle = 'rgba(0,0,0,0.16)';
-    ctx.fillRect(x + w * 0.58, sy - h * 0.22, w * 0.09, h * 0.22);
-    // Figur: Gewand, Kopf, erhobener Arm
-    const fy = sy - h * 0.22;
-    ctx.fillStyle = figur;
-    ctx.beginPath();
-    ctx.moveTo(x + w * 0.38, fy);
-    ctx.lineTo(x + w * 0.43, y + h * 0.3);
-    ctx.lineTo(x + w * 0.61, y + h * 0.3);
-    ctx.lineTo(x + w * 0.64, fy);
-    ctx.closePath(); ctx.fill();
-    ctx.fillStyle = 'rgba(0,0,0,0.12)';
-    ctx.fillRect(x + w * 0.56, y + h * 0.3, w * 0.07, fy - (y + h * 0.3));
-    ctx.fillStyle = figur;
-    ctx.beginPath();
-    ctx.arc(x + w * 0.51, y + h * 0.2, w * 0.12, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = figur;
-    ctx.lineWidth = Math.max(1.2, w * 0.07);
-    ctx.beginPath();
-    ctx.moveTo(x + w * 0.45, y + h * 0.42); ctx.lineTo(x + w * 0.26, y + h * 0.16);
+    ctx.moveTo(tx, ty - KH * 2.6); ctx.lineTo(tx, ty - KH * 3.0);
+    ctx.moveTo(tx - 4, ty - KH * 2.88); ctx.lineTo(tx + 4, ty - KH * 2.88);
     ctx.stroke();
-    if ((geb.ausbau || 1) >= 5) {                 // Lorbeerkranz
-      ctx.strokeStyle = '#6f9b3c';
-      ctx.lineWidth = Math.max(0.9, w * 0.04);
-      ctx.beginPath();
-      ctx.arc(x + w * 0.51, y + h * 0.2, w * 0.17, Math.PI * 0.12, Math.PI * 0.88);
-      ctx.stroke();
+    // Rundbogenfenster am Schiff
+    if (hw > 24) {
+      ctx.fillStyle = 'rgba(74,100,126,0.9)';
+      for (let i = 0; i < 3; i++) {
+        const t = 0.25 + i * 0.25;
+        const px = cx + hw * 0.16 - hw * 0.6 * t, py = cy + hh * 0.16 + hh * 0.6 * (1 - t);
+        ctx.fillRect(px - 2, py - KH * 0.75, 4, KH * 0.4);
+      }
     }
   },
 
-  // --- Militär --------------------------------------------------
-  wachturm(geb, st, x, y, w, h) {
-    const a = geb.ausbau || 1;
-    const holz = a <= 2;                           // anfangs nur eine Holzwarte
-    const tw = w * (0.44 + a * 0.035), tx = x + (w - w * (0.44 + a * 0.035)) / 2;
-    ctx.fillStyle = holz ? '#9b7a4f' : (st.sockel || '#a8a08f');   // Turmschaft
-    ctx.fillRect(tx, y + h * 0.3, tw, h * 0.64);
-    ctx.fillStyle = 'rgba(0,0,0,0.17)';
-    ctx.fillRect(tx + tw * 0.74, y + h * 0.3, tw * 0.26, h * 0.64);
-    if (w > 16) {                                  // Balkenlage bzw. Steinfugen
-      ctx.strokeStyle = holz ? 'rgba(92,64,38,0.55)' : 'rgba(0,0,0,0.16)';
-      ctx.lineWidth = Math.max(0.5, w * 0.016);
-      ctx.beginPath();
-      for (let i = 1; i < 4; i++) {
-        const yy = y + h * (0.3 + 0.64 * i / 4);
-        ctx.moveTo(tx, yy); ctx.lineTo(tx + tw, yy);
-      }
-      if (!holz) for (let i = 1; i < 3; i++) {
-        ctx.moveTo(tx + tw * i / 3, y + h * 0.3); ctx.lineTo(tx + tw * i / 3, y + h * 0.94);
-      }
-      ctx.stroke();
-    }
-    ctx.fillStyle = 'rgba(40,40,45,0.75)';         // Schießscharte
-    ctx.fillRect(tx + tw * 0.4, y + h * 0.52, tw * 0.2, h * 0.16);
-    // Auskragender Wehrgang mit Zinnen
-    const wg = tw + w * 0.2;
-    ctx.fillStyle = holz ? '#8a6a44' : (st.sockel || '#b6ae9c');
-    ctx.fillRect(tx - w * 0.1, y + h * 0.19, wg, h * 0.13);
-    ctx.fillStyle = 'rgba(0,0,0,0.2)';
-    ctx.fillRect(tx - w * 0.1, y + h * 0.3, wg, h * 0.035);
-    const n = 4, zb = wg / (n * 2 - 1);
-    ctx.fillStyle = holz ? '#7a5f3c' : st.dachDunkel;
-    for (let i = 0; i < n; i++)
-      ctx.fillRect(tx - w * 0.1 + i * zb * 2, y + h * 0.08, zb, h * 0.12);
-    fahnenmast(tx + tw * 0.5, y + h * 0.1, h * 0.26,
-               spieler[geb.spieler] && spieler[geb.spieler].farbe);
-  },
-
-  kaserne(geb, st, x, y, w, h) {
-    // Wehrmauer
-    ctx.fillStyle = st.sockel || '#a39a8a';
-    ctx.fillRect(x + w * 0.04, y + h * 0.3, w * 0.92, h * 0.64);
-    ctx.fillStyle = 'rgba(0,0,0,0.12)';
-    ctx.fillRect(x + w * 0.84, y + h * 0.3, w * 0.12, h * 0.64);
-    // Zinnenkranz
-    const n = 6, zb = w * 0.92 / (n * 2 - 1);
-    ctx.fillStyle = st.dachDunkel;
-    for (let i = 0; i < n; i++)
-      ctx.fillRect(x + w * 0.04 + i * zb * 2, y + h * 0.2, zb, h * 0.12);
-    // Ecktürme
-    for (const ex of [0.02, 0.82]) {
-      ctx.fillStyle = st.sockel || '#b0a797';
-      ctx.fillRect(x + w * ex, y + h * 0.24, w * 0.16, h * 0.7);
-      ctx.fillStyle = st.dachDunkel;
-      ctx.fillRect(x + w * ex, y + h * 0.16, w * 0.16, h * 0.1);
-    }
-    // Tor
+  schule(geb, st, cx, cy, hw, hh) {
+    const r = isoHaus(st, cx, cy, hw * 0.82, hh * 0.82, { wandH: KH * 0.78 });
+    // Uhrengiebel über dem Eingang
+    const gx = cx - hw * 0.25, gy = cy + hh * 0.25 - r.wandH - r.dachH * 0.2;
     ctx.beginPath();
-    ctx.moveTo(x + w * 0.42, y + h * 0.94);
-    ctx.lineTo(x + w * 0.42, y + h * 0.62);
-    ctx.arc(x + w * 0.5, y + h * 0.62, w * 0.08, Math.PI, 0);
-    ctx.lineTo(x + w * 0.58, y + h * 0.94);
-    ctx.closePath();
-    ctx.fillStyle = '#5c4228'; ctx.fill();
-    // Wappenfahne
-    fahnenmast(x + w * 0.5, y + h * 0.18, h * 0.3,
-               spieler[geb.spieler] && spieler[geb.spieler].farbe);
+    ctx.arc(gx, gy, hw * 0.12, 0, Math.PI * 2);
+    ctx.fillStyle = '#f2ead8'; ctx.fill();
+    ctx.strokeStyle = '#5b5346'; ctx.lineWidth = 1.4; ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(gx, gy); ctx.lineTo(gx, gy - hw * 0.08);
+    ctx.moveTo(gx, gy); ctx.lineTo(gx + hw * 0.07, gy + hw * 0.03);
+    ctx.stroke();
   },
 
-  // --- Rohstoffe und Betriebe ----------------------------------
-  // Jeder Betrieb hat seinen eigenen Arbeitsplatz neben dem Haus,
-  // damit man ihn auch aus der Ferne sofort erkennt.
-  holzfaeller(geb, st, x, y, w, h) {
-    werkHof(geb, st, x, y, w, h, (bx, by, bw, bh) => {
-      stapel(bx, by + bh * 0.78, Math.max(1.6, bw * 0.15), 3, 3, '#a07a4c', '#dcc69c');
-      ctx.strokeStyle = '#6b4a2e';                      // Axt im Hauklotz
-      ctx.lineWidth = Math.max(0.9, bw * 0.08);
-      ctx.beginPath();
-      ctx.moveTo(bx + bw * 0.2, by + bh * 0.3); ctx.lineTo(bx + bw * 0.5, by + bh * 0.06);
-      ctx.stroke();
+  badehaus(geb, st, cx, cy, hw, hh) {
+    isoHaus(st, cx - hw * 0.25, cy - hh * 0.25, hw * 0.55, hh * 0.55, { fahne: false });
+    // Becken
+    isoKasten(cx + hw * 0.32, cy + hh * 0.32, hw * 0.4, hh * 0.4, 4, '#9c9488');
+    ctx.beginPath();
+    ctx.moveTo(cx + hw * 0.32, cy + hh * 0.32 - hh * 0.3 - 4);
+    ctx.lineTo(cx + hw * 0.32 + hw * 0.3, cy + hh * 0.32 - 4);
+    ctx.lineTo(cx + hw * 0.32, cy + hh * 0.32 + hh * 0.3 - 4);
+    ctx.lineTo(cx + hw * 0.32 - hw * 0.3, cy + hh * 0.32 - 4);
+    ctx.closePath();
+    ctx.fillStyle = '#6fb3d2'; ctx.fill();
+    isoRauch(cx + hw * 0.32, cy + hh * 0.32 - 6, hw * 0.12);
+  },
+
+  theater(geb, st, cx, cy, hw, hh) {
+    isoHaus(st, cx - hw * 0.12, cy - hh * 0.12, hw * 0.7, hh * 0.7,
+            { fahne: false, tuer: false, wandH: KH * 0.85 });
+    // Säulenvorbau
+    const vx = cx + hw * 0.3, vy = cy + hh * 0.3;
+    for (let i = 0; i < 5; i++) {
+      const t = i / 4;
+      pfosten(vx - hw * 0.35 + hw * 0.7 * t, vy - hh * 0.35 + hh * 0.7 * t,
+              KH * 0.8, 3.5, st.wand);
+    }
+    isoKasten(vx, vy - KH * 0.8, hw * 0.44, hh * 0.44, 6, st.dach);
+    if (st.fahne) {
+      isoFahne(cx - hw * 0.5, cy - hh * 0.1, KH * 1.1, '#8e44ad');
+      isoFahne(cx + hw * 0.1, cy - hh * 0.5, KH * 1.1, '#c0392b');
+    }
+  },
+
+  ruhmeshalle(geb, st, cx, cy, hw, hh) {
+    isoKasten(cx, cy, hw * 0.92, hh * 0.92, 5, st.sockel || '#a89e8c');
+    // Säulenreihe ringsum
+    for (let i = 0; i < 5; i++) {
+      const t = i / 4;
+      pfosten(cx - hw * 0.8 + hw * 0.8 * t, cy - 5 + hh * 0.8 * t, KH * 0.85, 4, st.wand);
+      pfosten(cx + hw * 0.8 * t, cy - 5 + hh * 0.8 - hh * 0.8 * t, KH * 0.85, 4, schattiert(st.wand, 0.84));
+    }
+    isoKasten(cx, cy - KH * 0.85, hw * 0.88, hh * 0.88, 5, st.wand);
+    isoWalm(cx, cy - KH * 0.85 - 5, hw * 0.88, hh * 0.88, 0, KH * 0.75, st.dach);
+    ctx.beginPath();
+    ctx.arc(cx, cy - KH * 0.85 - 5 - KH * 0.75, hw * 0.1, 0, Math.PI * 2);
+    ctx.fillStyle = st.gold || '#cbb27a'; ctx.fill();
+  },
+
+  triumphbogen(geb, st, cx, cy, hw, hh) {
+    const sockel = st.sockel || '#a89e8c';
+    isoKasten(cx, cy, hw * 0.9, hh * 0.9, 5, sockel);          // Plattform
+    // Zwei Pfeiler, dazwischen bleibt der Durchgang frei
+    isoKasten(cx - hw * 0.44, cy + hh * 0.44 - 5, hw * 0.24, hh * 0.24, KH * 1.25, st.wand);
+    isoKasten(cx + hw * 0.44, cy - hh * 0.44 - 5, hw * 0.24, hh * 0.24, KH * 1.25, st.wand);
+    isoKasten(cx, cy - 5 - KH * 1.25, hw * 0.7, hh * 0.7, KH * 0.35, st.wand);
+    isoKasten(cx, cy - 5 - KH * 1.6, hw * 0.74, hh * 0.74, 5, schattiert(st.wand, 0.86));
+    isoKasten(cx, cy - 5 - KH * 1.75, hw * 0.26, hh * 0.26, KH * 0.4, st.gold || '#cbb27a');
+  },
+
+  statue(geb, st, cx, cy, hw, hh) {
+    const stein = st.sockel || '#b3a994';
+    const gold = st.gold || (st.sockel ? '#d8cba6' : '#c9b88c');
+    const stufen = Math.min(3, 1 + ((geb.ausbau || 1) >> 1));
+    let basis = 0;
+    for (let i = 0; i < stufen; i++) {
+      ctx.save(); ctx.translate(0, -basis);
+      isoKasten(cx, cy, hw * (0.72 - i * 0.16), hh * (0.72 - i * 0.16), 4, stein);
+      ctx.restore();
+      basis += 4;
+    }
+    ctx.save(); ctx.translate(0, -basis);
+    isoKasten(cx, cy, hw * 0.26, hh * 0.26, KH * 0.7, stein);
+    ctx.restore();
+    const fy = cy - basis - KH * 0.7;
+    ctx.fillStyle = gold;                            // Figur
+    ctx.beginPath();
+    ctx.moveTo(cx - hw * 0.12, fy);
+    ctx.lineTo(cx - hw * 0.08, fy - KH * 0.75);
+    ctx.lineTo(cx + hw * 0.08, fy - KH * 0.75);
+    ctx.lineTo(cx + hw * 0.12, fy);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx, fy - KH * 0.92, hw * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = gold; ctx.lineWidth = Math.max(2, hw * 0.07);
+    ctx.beginPath();
+    ctx.moveTo(cx - hw * 0.06, fy - KH * 0.6); ctx.lineTo(cx - hw * 0.3, fy - KH * 1.1);
+    ctx.stroke();
+  },
+
+  wachturm(geb, st, cx, cy, hw, hh) {
+    const a = geb.ausbau || 1;
+    const holz = a <= 2;
+    const r = hw * (0.4 + a * 0.03);
+    const hoehe = KH * (1.05 + a * 0.15);
+    isoKasten(cx, cy, r, r * KH / KW, hoehe, holz ? '#9b7a4f' : (st.sockel || '#a8a08f'));
+    ctx.fillStyle = 'rgba(40,40,45,0.75)';           // Schießscharte
+    ctx.fillRect(cx - r * 0.12, cy - hoehe * 0.55, r * 0.24, hoehe * 0.2);
+    // Auskragender Wehrgang mit Zinnen
+    ctx.save(); ctx.translate(0, -hoehe);
+    isoKasten(cx, cy, r * 1.25, r * 1.25 * KH / KW, 5, holz ? '#8a6a44' : (st.sockel || '#b6ae9c'));
+    ctx.restore();
+    const zinne = (ox, oy) => {
+      ctx.save(); ctx.translate(0, -hoehe - 5);
+      isoKasten(cx + ox, cy + oy, r * 0.22, r * 0.22 * KH / KW, 6,
+                holz ? '#7a5f3c' : schattiert(st.dach, 0.9));
+      ctx.restore();
+    };
+    zinne(0, -r * 1.1 * KH / KW); zinne(r * 1.1, 0);
+    zinne(0, r * 1.1 * KH / KW); zinne(-r * 1.1, 0);
+    isoFahne(cx, cy - hoehe - 10, KH * 0.9,
+             spieler[geb.spieler] && spieler[geb.spieler].farbe);
+  },
+
+  kaserne(geb, st, cx, cy, hw, hh) {
+    const mauer = st.sockel || '#a8a08f';
+    const mh = KH * 1.15;
+    isoKasten(cx, cy, hw * 0.86, hh * 0.86, mh, mauer);
+    // Zinnen auf den beiden vorderen Mauerkronen
+    for (let i = 0; i <= 4; i++) {
+      const t = i / 4;
+      // vorn rechts: von der Ostecke zur Südecke
+      isoKasten(cx + hw * 0.86 * (1 - t), cy + hh * 0.86 * t - mh,
+                hw * 0.08, hh * 0.08, 7, schattiert(mauer, 0.9));
+      // vorn links: von der Südecke zur Westecke
+      isoKasten(cx - hw * 0.86 * t, cy + hh * 0.86 * (1 - t) - mh,
+                hw * 0.08, hh * 0.08, 7, schattiert(mauer, 0.98));
+    }
+    // Ecktürme
+    for (const [ox, oy] of [[-0.86, 0], [0.86, 0], [0, -0.86], [0, 0.86]]) {
+      isoKasten(cx + hw * ox, cy + hh * oy, hw * 0.16, hh * 0.16, KH * 1.6, mauer);
+      isoKegel(cx + hw * ox, cy + hh * oy - KH * 1.6, hw * 0.2, KH * 0.7,
+               schattiert(st.dach, 0.95));
+    }
+    // Tor an der Vorderseite
+    ctx.fillStyle = '#5c4228';
+    const px = cx - hw * 0.4, py = cy + hh * 0.6;
+    ctx.beginPath();
+    ctx.moveTo(px - hw * 0.1, py + hh * 0.1);
+    ctx.lineTo(px + hw * 0.1, py - hh * 0.1);
+    ctx.lineTo(px + hw * 0.1, py - hh * 0.1 - KH * 0.8);
+    ctx.lineTo(px - hw * 0.1, py + hh * 0.1 - KH * 0.8);
+    ctx.closePath(); ctx.fill();
+    isoFahne(cx, cy - hh * 0.9 - KH * 1.3, KH * 1.2,
+             spieler[geb.spieler] && spieler[geb.spieler].farbe);
+  },
+
+  // --- Rohstoffe und Betriebe ---------------------------------
+  holzfaeller(geb, st, cx, cy, hw, hh) {
+    werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
+      for (let r = 0; r < 2; r++) for (let i = 0; i < 3 - r; i++)
+        isoZylinder(bx - bw * 0.3 + i * bw * 0.3, by + bh * 0.2 - r * 5 - i * bh * 0.1,
+                    bw * 0.16, 5, '#a07a4c');
+      pfosten(bx + bw * 0.4, by - bh * 0.3, KH * 0.4, 3, '#6b4a2e');
       ctx.fillStyle = '#c3cbd3';
-      ctx.fillRect(bx + bw * 0.46, by, bw * 0.3, bh * 0.14);
+      ctx.fillRect(bx + bw * 0.32, by - bh * 0.3 - KH * 0.45, bw * 0.2, 4);
     });
   },
 
-  fischer(geb, st, x, y, w, h) {
-    werkHof(geb, st, x, y, w, h, (bx, by, bw, bh) => {
-      // Netz auf dem Gestell
-      gestell(bx, by, bw, bh * 0.44);
-      ctx.strokeStyle = 'rgba(248,246,236,0.95)';
-      ctx.lineWidth = Math.max(0.5, bw * 0.045);
+  fischer(geb, st, cx, cy, hw, hh) {
+    werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
+      // Boot
       ctx.beginPath();
-      for (let i = 0; i <= 3; i++) {
-        ctx.moveTo(bx + bw * (0.14 + i * 0.24), by + bh * 0.06);
-        ctx.lineTo(bx + bw * (0.14 + i * 0.24), by + bh * 0.44);
-        ctx.moveTo(bx + bw * 0.14, by + bh * (0.06 + i * 0.127));
-        ctx.lineTo(bx + bw * 0.86, by + bh * (0.06 + i * 0.127));
-      }
-      ctx.stroke();
-      // Ruderboot
-      ctx.beginPath();
-      ctx.moveTo(bx, by + bh * 0.76);
-      ctx.quadraticCurveTo(bx + bw * 0.5, by + bh * 0.58, bx + bw, by + bh * 0.78);
-      ctx.quadraticCurveTo(bx + bw * 0.5, by + bh, bx, by + bh * 0.76);
+      ctx.moveTo(bx - bw * 0.5, by + bh * 0.1);
+      ctx.quadraticCurveTo(bx, by + bh * 0.7, bx + bw * 0.5, by + bh * 0.15);
+      ctx.quadraticCurveTo(bx, by + bh * 0.3, bx - bw * 0.5, by + bh * 0.1);
       ctx.closePath();
       ctx.fillStyle = '#3f7fa6'; ctx.fill();
-      ctx.strokeStyle = '#27536e'; ctx.lineWidth = Math.max(0.5, bw * 0.05); ctx.stroke();
-    });
-  },
-
-  jagd(geb, st, x, y, w, h) {
-    werkHof(geb, st, x, y, w, h, (bx, by, bw, bh) => {
-      // Fell auf dem Spannrahmen
-      gestell(bx, by, bw, bh * 0.56);
+      ctx.strokeStyle = '#27536e'; ctx.lineWidth = 1.2; ctx.stroke();
+      // Netz am Gestell
+      for (const dx of [-0.45, 0.45]) pfosten(bx + bw * dx, by - bh * 0.3, KH * 0.7, 2.5, '#7a5f3c');
+      ctx.strokeStyle = 'rgba(248,246,236,0.95)'; ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.ellipse(bx + bw * 0.5, by + bh * 0.3, bw * 0.32, bh * 0.22, 0, 0, Math.PI * 2);
-      ctx.fillStyle = '#a9743f'; ctx.fill();
-      ctx.strokeStyle = '#e8ddc4'; ctx.lineWidth = Math.max(0.4, bw * 0.04); ctx.stroke();
-      // Geweih am Pfosten
-      ctx.strokeStyle = '#ece0c2';
-      ctx.lineWidth = Math.max(0.6, bw * 0.055);
-      const gx = bx + bw * 0.5, gy = by + bh * 0.84;
-      ctx.beginPath();
-      ctx.moveTo(gx, gy); ctx.lineTo(gx - bw * 0.22, gy - bh * 0.16);
-      ctx.moveTo(gx, gy); ctx.lineTo(gx + bw * 0.22, gy - bh * 0.16);
-      ctx.moveTo(gx - bw * 0.12, gy - bh * 0.09); ctx.lineTo(gx - bw * 0.28, gy - bh * 0.05);
-      ctx.moveTo(gx + bw * 0.12, gy - bh * 0.09); ctx.lineTo(gx + bw * 0.28, gy - bh * 0.05);
+      for (let i = 0; i <= 3; i++) {
+        const t = i / 3;
+        ctx.moveTo(bx - bw * 0.45 + bw * 0.9 * t, by - bh * 0.3 - KH * 0.7);
+        ctx.lineTo(bx - bw * 0.45 + bw * 0.9 * t, by - bh * 0.3 - KH * 0.2);
+        ctx.moveTo(bx - bw * 0.45, by - bh * 0.3 - KH * (0.7 - t * 0.5));
+        ctx.lineTo(bx + bw * 0.45, by - bh * 0.3 - KH * (0.7 - t * 0.5));
+      }
       ctx.stroke();
     });
   },
 
-  weberei(geb, st, x, y, w, h) {
-    werkHof(geb, st, x, y, w, h, (bx, by, bw, bh) => {
-      // Webrahmen mit gespannten Fäden
-      gestell(bx, by, bw, bh * 0.5);
-      ctx.strokeStyle = '#cfd8e2';
-      ctx.lineWidth = Math.max(0.4, bw * 0.035);
+  jagd(geb, st, cx, cy, hw, hh) {
+    werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
+      for (const dx of [-0.45, 0.45]) pfosten(bx + bw * dx, by + bh * 0.1, KH * 0.8, 2.5, '#7a5f3c');
+      ctx.beginPath();
+      ctx.ellipse(bx, by + bh * 0.1 - KH * 0.5, bw * 0.38, KH * 0.3, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#a9743f'; ctx.fill();
+      ctx.strokeStyle = '#e8ddc4'; ctx.lineWidth = 1.2; ctx.stroke();
+    });
+  },
+
+  weberei(geb, st, cx, cy, hw, hh) {
+    werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
+      for (const dx of [-0.45, 0.45]) pfosten(bx + bw * dx, by - bh * 0.2, KH * 0.75, 2.5, '#7a5f3c');
+      ctx.strokeStyle = '#cfd8e2'; ctx.lineWidth = 1;
       ctx.beginPath();
       for (let i = 1; i < 6; i++) {
-        ctx.moveTo(bx + bw * i / 6, by + bh * 0.06);
-        ctx.lineTo(bx + bw * i / 6, by + bh * 0.5);
+        const px = bx - bw * 0.45 + bw * 0.9 * (i / 6);
+        ctx.moveTo(px, by - bh * 0.2 - KH * 0.75); ctx.lineTo(px, by - bh * 0.2 - KH * 0.1);
       }
       ctx.stroke();
-      // Wollballen
-      stapel(bx, by + bh * 0.9, Math.max(1.8, bw * 0.17), 2, 3, '#f3f0e6', '#dcd6c4');
+      for (let i = 0; i < 3; i++)
+        isoKugel(bx - bw * 0.3 + i * bw * 0.3, by + bh * 0.4, bw * 0.17, '#f3f0e6');
     });
   },
 
-  schneiderei(geb, st, x, y, w, h) {
-    werkHof(geb, st, x, y, w, h, (bx, by, bw, bh) => {
-      // Wäscheleine mit Kleidungsstücken
-      ctx.strokeStyle = '#8a7a60';
-      ctx.lineWidth = Math.max(0.4, bw * 0.035);
+  schneiderei(geb, st, cx, cy, hw, hh) {
+    werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
+      for (const dx of [-0.45, 0.45]) pfosten(bx + bw * dx, by, KH * 0.8, 2.5, '#8a7a60');
+      ctx.strokeStyle = '#8a7a60'; ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(bx, by + bh * 0.16); ctx.lineTo(bx + bw, by + bh * 0.16);
+      ctx.moveTo(bx - bw * 0.45, by - KH * 0.8); ctx.lineTo(bx + bw * 0.45, by - KH * 0.8);
       ctx.stroke();
-      const hemd = (hx, f) => {
-        ctx.fillStyle = f;
-        ctx.fillRect(hx, by + bh * 0.18, bw * 0.24, bh * 0.3);
-        ctx.fillRect(hx - bw * 0.06, by + bh * 0.2, bw * 0.36, bh * 0.1);
-      };
-      hemd(bx + bw * 0.1, '#4a6fa5');
-      hemd(bx + bw * 0.58, '#b5495b');
-      // Stoffballen
-      ctx.fillStyle = '#d8c7a2';
-      ctx.fillRect(bx + bw * 0.1, by + bh * 0.62, bw * 0.8, bh * 0.14);
-      ctx.fillStyle = '#6a8fb5';
-      ctx.fillRect(bx + bw * 0.1, by + bh * 0.78, bw * 0.8, bh * 0.14);
+      ctx.fillStyle = '#4a6fa5';
+      ctx.fillRect(bx - bw * 0.35, by - KH * 0.78, bw * 0.3, KH * 0.45);
+      ctx.fillStyle = '#b5495b';
+      ctx.fillRect(bx + bw * 0.05, by - KH * 0.78, bw * 0.3, KH * 0.45);
     });
   },
 
-  tabakladen(geb, st, x, y, w, h) {
-    werkHof(geb, st, x, y, w, h, (bx, by, bw, bh) => {
-      gestell(bx, by, bw, bh * 0.5);
-      ctx.fillStyle = '#8a5a2c';                        // trocknende Blätter
+  tabakladen(geb, st, cx, cy, hw, hh) {
+    werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
+      for (const dx of [-0.45, 0.45]) pfosten(bx + bw * dx, by - bh * 0.2, KH * 0.7, 2.5, '#7a5f3c');
+      ctx.fillStyle = '#8a5a2c';
       for (let i = 0; i < 4; i++) {
         ctx.beginPath();
-        ctx.ellipse(bx + bw * (0.16 + i * 0.22), by + bh * 0.3, bw * 0.08, bh * 0.2, 0, 0, Math.PI * 2);
+        ctx.ellipse(bx - bw * 0.35 + i * bw * 0.23, by - bh * 0.2 - KH * 0.45,
+                    bw * 0.09, KH * 0.22, 0, 0, Math.PI * 2);
         ctx.fill();
       }
-      // Fässer mit Tabakwaren
-      stapel(bx, by + bh * 0.9, Math.max(1.6, bw * 0.16), 2, 3, '#9c6b3e', '#c99a63');
+      for (let i = 0; i < 2; i++)
+        isoZylinder(bx - bw * 0.2 + i * bw * 0.4, by + bh * 0.4, bw * 0.15, 6, '#9c6b3e');
     });
   },
 
-  schaffarm(geb, st, x, y, w, h) {
-    bauScheune(geb, st, x, y, w * 0.56, h * 0.94);
-    koppel(x + w * 0.58, y + h * 0.26, w * 0.4, h * 0.64, 3, '#f5f2e8', null);
-  },
+  schaffarm(geb, st, cx, cy, hw, hh) { hofMitKoppel(st, cx, cy, hw, hh, 3, '#f5f2e8', null); },
+  rinderfarm(geb, st, cx, cy, hw, hh) { hofMitKoppel(st, cx, cy, hw, hh, 2, '#7d4f33', '#f0ece2'); },
 
-  rinderfarm(geb, st, x, y, w, h) {
-    bauScheune(geb, st, x, y, w * 0.56, h * 0.94);
-    koppel(x + w * 0.58, y + h * 0.26, w * 0.4, h * 0.64, 2, '#7d4f33', '#f0ece2');
-  },
-
-  getreidefarm(geb, st, x, y, w, h) {
-    bauScheune(geb, st, x, y, w * 0.6, h * 0.94);
-    const bx = x + w * 0.62, by = y + h * 0.3, bw = w * 0.36, bh = h * 0.6;
-    // Garben an die Wand gelehnt
-    ctx.fillStyle = '#d9b457';
-    for (let i = 0; i < 3; i++) {
-      ctx.beginPath();
-      ctx.moveTo(bx + bw * (0.12 + i * 0.3), by + bh);
-      ctx.lineTo(bx + bw * (0.26 + i * 0.3), by + bh * 0.25);
-      ctx.lineTo(bx + bw * (0.34 + i * 0.3), by + bh);
-      ctx.closePath(); ctx.fill();
-    }
-    ctx.strokeStyle = '#a07f3a';
-    ctx.lineWidth = Math.max(0.5, w * 0.018);
-    ctx.beginPath();
-    ctx.moveTo(bx, by + bh * 0.66); ctx.lineTo(bx + bw, by + bh * 0.66);
-    ctx.stroke();
-  },
-
-  zuckerrohr(geb, st, x, y, w, h) {
-    bauScheune(geb, st, x, y, w * 0.6, h * 0.94);
-    const bx = x + w * 0.62, by = y + h * 0.24, bw = w * 0.36, bh = h * 0.68;
-    ctx.strokeStyle = '#6f9b3c';                        // gebündeltes Rohr
-    ctx.lineWidth = Math.max(0.8, bw * 0.1);
-    ctx.beginPath();
-    for (let i = 0; i < 5; i++) {
-      ctx.moveTo(bx + bw * (0.1 + i * 0.2), by + bh);
-      ctx.lineTo(bx + bw * (0.18 + i * 0.2), by);
-    }
-    ctx.stroke();
-    ctx.strokeStyle = '#8a6a44';
-    ctx.lineWidth = Math.max(0.6, bw * 0.08);
-    ctx.beginPath();
-    ctx.moveTo(bx, by + bh * 0.55); ctx.lineTo(bx + bw, by + bh * 0.5);
-    ctx.stroke();
-  },
-
-  tabakplantage(geb, st, x, y, w, h) {
-    bauScheune(geb, st, x, y, w * 0.6, h * 0.94);
-    const bx = x + w * 0.62, by = y + h * 0.26, bw = w * 0.36, bh = h * 0.62;
-    gestell(bx, by, bw, bh * 0.9);
-    ctx.fillStyle = '#9c6a30';
-    for (let r = 0; r < 2; r++) for (let i = 0; i < 3; i++) {
-      ctx.beginPath();
-      ctx.ellipse(bx + bw * (0.22 + i * 0.28), by + bh * (0.26 + r * 0.42),
-                  bw * 0.1, bh * 0.18, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  },
-
-  gewuerzplantage(geb, st, x, y, w, h) {
-    bauScheune(geb, st, x, y, w * 0.6, h * 0.94);
-    const bx = x + w * 0.62, by = y + h * 0.3, bw = w * 0.36, bh = h * 0.58;
-    // Trockenmatte mit Gewürzen
-    ctx.fillStyle = '#c9b48a';
-    ctx.fillRect(bx, by, bw, bh * 0.4);
-    const farben = ['#c0392b', '#e0871f', '#8a5a2c'];
-    for (let i = 0; i < 3; i++) {
-      ctx.fillStyle = farben[i];
-      ctx.fillRect(bx + bw * (0.08 + i * 0.3), by + bh * 0.08, bw * 0.24, bh * 0.24);
-    }
-    // Säcke
-    ctx.fillStyle = '#d6c69e';
-    for (let i = 0; i < 2; i++) {
-      ctx.beginPath();
-      ctx.ellipse(bx + bw * (0.3 + i * 0.4), by + bh * 0.76, bw * 0.17, bh * 0.22, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = farben[i];
-      ctx.fillRect(bx + bw * (0.22 + i * 0.4), by + bh * 0.56, bw * 0.16, bh * 0.1);
-      ctx.fillStyle = '#d6c69e';
-    }
-  },
-
-  eisenmine(geb, st, x, y, w, h) { mineZeichnen(st, x, y, w, h, '#9fb3c8', '#6d7d8e'); },
-  goldmine(geb, st, x, y, w, h) { mineZeichnen(st, x, y, w, h, '#e9c04a', '#b8882a'); },
-
-  ziegelei(geb, st, x, y, w, h) {
-    werkHof(geb, st, x, y, w, h, (bx, by, bw, bh) => {
-      // Brennofen als Kuppel mit Feuerloch
-      const ox = bx + bw * 0.5, oy = by + bh * 0.42;
-      ctx.beginPath();
-      ctx.arc(ox, oy, bw * 0.42, Math.PI, 0);
-      ctx.rect(ox - bw * 0.42, oy, bw * 0.84, bh * 0.4);
-      ctx.fillStyle = '#9c6b4a'; ctx.fill();
-      ctx.fillStyle = 'rgba(0,0,0,0.18)';
-      ctx.fillRect(ox + bw * 0.2, oy, bw * 0.22, bh * 0.4);
-      ctx.fillStyle = '#e8781f';
-      ctx.fillRect(ox - bw * 0.14, oy + bh * 0.16, bw * 0.28, bh * 0.2);
-      rauchFahne(ox, oy - bw * 0.42, bw * 0.22);
-      // Ziegelstapel
-      ctx.fillStyle = '#b45a3c';
-      for (let r = 0; r < 3; r++)
-        ctx.fillRect(bx, by + bh * (0.86 - r * 0.1), bw * 0.5, bh * 0.08);
-    }, { hausBreite: 0.42 });
-  },
-
-  baeckerei(geb, st, x, y, w, h) {
-    werkHof(geb, st, x, y, w, h, (bx, by, bw, bh) => {
-      // Kuppelofen
-      const ox = bx + bw * 0.46, oy = by + bh * 0.48;
-      ctx.beginPath();
-      ctx.arc(ox, oy, bw * 0.4, Math.PI, 0);
-      ctx.rect(ox - bw * 0.4, oy, bw * 0.8, bh * 0.34);
-      ctx.fillStyle = '#b08462'; ctx.fill();
-      ctx.fillStyle = '#e8781f';
-      ctx.fillRect(ox - bw * 0.14, oy + bh * 0.12, bw * 0.28, bh * 0.18);
-      rauchFahne(ox, oy - bw * 0.4, bw * 0.2);
-      // Brote auf dem Brett
-      ctx.fillStyle = '#8a6a44';
-      ctx.fillRect(bx, by + bh * 0.88, bw, bh * 0.07);
-      ctx.fillStyle = '#d7a556';
+  getreidefarm(geb, st, cx, cy, hw, hh) {
+    scheuneMitGut(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
+      ctx.fillStyle = '#d9b457';
       for (let i = 0; i < 3; i++) {
+        const gx = bx - bw * 0.3 + i * bw * 0.3, gy = by + bh * 0.1 + i * bh * 0.08;
         ctx.beginPath();
-        ctx.ellipse(bx + bw * (0.2 + i * 0.3), by + bh * 0.84, bw * 0.11, bh * 0.06, 0, 0, Math.PI * 2);
+        ctx.moveTo(gx - bw * 0.12, gy);
+        ctx.lineTo(gx, gy - KH * 0.8);
+        ctx.lineTo(gx + bw * 0.12, gy);
+        ctx.closePath(); ctx.fill();
+      }
+    });
+  },
+
+  zuckerrohr(geb, st, cx, cy, hw, hh) {
+    scheuneMitGut(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
+      ctx.strokeStyle = '#6f9b3c'; ctx.lineWidth = Math.max(1.5, bw * 0.1);
+      ctx.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const gx = bx - bw * 0.35 + i * bw * 0.18;
+        ctx.moveTo(gx, by + bh * 0.2); ctx.lineTo(gx + bw * 0.06, by + bh * 0.2 - KH * 0.9);
+      }
+      ctx.stroke();
+    });
+  },
+
+  tabakplantage(geb, st, cx, cy, hw, hh) {
+    scheuneMitGut(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
+      for (const dx of [-0.4, 0.4]) pfosten(bx + bw * dx, by + bh * 0.2, KH * 0.8, 2.5, '#7a5f3c');
+      ctx.fillStyle = '#9c6a30';
+      for (let r = 0; r < 2; r++) for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.ellipse(bx - bw * 0.28 + i * bw * 0.28, by + bh * 0.2 - KH * (0.62 - r * 0.28),
+                    bw * 0.1, KH * 0.16, 0, 0, Math.PI * 2);
         ctx.fill();
       }
-    }, { hausBreite: 0.44 });
+    });
   },
 
-  brennerei(geb, st, x, y, w, h) {
-    werkHof(geb, st, x, y, w, h, (bx, by, bw, bh) => {
-      // Kupferkessel mit Rohr
+  gewuerzplantage(geb, st, cx, cy, hw, hh) {
+    scheuneMitGut(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
+      isoKasten(bx, by, bw * 0.55, bh * 0.55, 2, '#c9b48a');
+      const farben = ['#c0392b', '#e0871f', '#8a5a2c'];
+      for (let i = 0; i < 3; i++)
+        isoKugel(bx - bw * 0.25 + i * bw * 0.25, by - 2 + i * bh * 0.1, bw * 0.12, farben[i]);
+    });
+  },
+
+  eisenmine(geb, st, cx, cy, hw, hh) { mineZeichnen(st, cx, cy, hw, hh, '#9fb3c8', '#6d7d8e'); },
+  goldmine(geb, st, cx, cy, hw, hh) { mineZeichnen(st, cx, cy, hw, hh, '#e9c04a', '#b8882a'); },
+
+  ziegelei(geb, st, cx, cy, hw, hh) {
+    werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
+      isoZylinder(bx, by, bw * 0.45, KH * 0.8, '#9c6b4a');
+      isoKegel(bx, by - KH * 0.8, bw * 0.45, KH * 0.55, '#8a5a3a');
+      ctx.fillStyle = '#e8781f';
+      ctx.fillRect(bx - bw * 0.14, by - KH * 0.5, bw * 0.28, KH * 0.28);
+      isoRauch(bx, by - KH * 1.35, bw * 0.22);
+      for (let r = 0; r < 3; r++) {
+        ctx.fillStyle = '#b45a3c';
+        ctx.fillRect(bx - bw * 0.7, by + bh * 0.3 - r * 4, bw * 0.4, 4);
+      }
+    }, { hausAnteil: 0.46 });
+  },
+
+  muehle(geb, st, cx, cy, hw, hh) {
+    isoZylinder(cx, cy, hw * 0.4, KH * 1.9, st.wand);
+    isoKegel(cx, cy - KH * 1.9, hw * 0.44, KH * 0.8, st.dach);
+    ctx.fillStyle = '#5c4228';
+    ctx.fillRect(cx - hw * 0.1, cy - KH * 0.7, hw * 0.2, KH * 0.7);
+    // Drehende Flügel vor dem Turm
+    const dreh = performance.now() / 2600;
+    ctx.save();
+    ctx.translate(cx - hw * 0.1, cy - KH * 2.0);
+    for (let i = 0; i < 4; i++) {
+      ctx.save();
+      ctx.rotate(dreh + i * Math.PI / 2);
+      ctx.fillStyle = '#7a5f3c';
+      ctx.fillRect(-hw * 0.03, 0, hw * 0.06, hw * 0.75);
+      ctx.fillStyle = 'rgba(245,240,225,0.85)';
+      ctx.fillRect(hw * 0.03, hw * 0.18, hw * 0.14, hw * 0.5);
+      ctx.restore();
+    }
+    ctx.restore();
+  },
+
+  baeckerei(geb, st, cx, cy, hw, hh) {
+    werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
+      isoZylinder(bx, by, bw * 0.42, KH * 0.5, '#b08462');
+      isoKegel(bx, by - KH * 0.5, bw * 0.42, KH * 0.45, '#a2795a');
+      ctx.fillStyle = '#e8781f';
+      ctx.fillRect(bx - bw * 0.12, by - KH * 0.35, bw * 0.24, KH * 0.24);
+      isoRauch(bx, by - KH * 0.95, bw * 0.2);
+      for (let i = 0; i < 3; i++)
+        isoKugel(bx - bw * 0.3 + i * bw * 0.3, by + bh * 0.45, bw * 0.1, '#d7a556');
+    }, { hausAnteil: 0.5 });
+  },
+
+  brennerei(geb, st, cx, cy, hw, hh) {
+    werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
+      isoZylinder(bx, by, bw * 0.34, KH * 0.7, '#c47a3c');
+      isoKegel(bx, by - KH * 0.7, bw * 0.34, KH * 0.5, '#a2602c');
+      ctx.strokeStyle = '#8a5428'; ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(bx + bw * 0.46, by + bh * 0.46, bw * 0.34, 0, Math.PI * 2);
-      ctx.fillStyle = '#c47a3c'; ctx.fill();
-      ctx.beginPath();
-      ctx.arc(bx + bw * 0.34, by + bh * 0.36, bw * 0.12, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fill();
-      ctx.strokeStyle = '#8a5428';
-      ctx.lineWidth = Math.max(0.8, bw * 0.1);
-      ctx.beginPath();
-      ctx.moveTo(bx + bw * 0.46, by + bh * 0.12); ctx.lineTo(bx + bw * 0.46, by);
+      ctx.moveTo(bx, by - KH * 1.2); ctx.lineTo(bx + bw * 0.4, by - KH * 1.0);
       ctx.stroke();
-      // Fässer
-      stapel(bx, by + bh * 0.94, Math.max(1.8, bw * 0.18), 1, 3, '#9c6b3e', '#c99a63');
-    }, { schornstein: true, rauch: true, hausBreite: 0.46 });
+      for (let i = 0; i < 2; i++)
+        isoZylinder(bx - bw * 0.2 + i * bw * 0.45, by + bh * 0.45, bw * 0.15, 6, '#9c6b3e');
+    }, { schornstein: true, rauch: true, hausAnteil: 0.48 });
   },
 
-  schmiede(geb, st, x, y, w, h) { schmiedeZeichnen(geb, st, x, y, w, h, 'werkzeug'); },
-  waffenschmiede(geb, st, x, y, w, h) { schmiedeZeichnen(geb, st, x, y, w, h, 'waffe'); },
-  goldschmiede(geb, st, x, y, w, h) { schmiedeZeichnen(geb, st, x, y, w, h, 'gold'); },
+  schmiede(geb, st, cx, cy, hw, hh) { schmiedeZeichnen(st, cx, cy, hw, hh, 'werkzeug'); },
+  waffenschmiede(geb, st, cx, cy, hw, hh) { schmiedeZeichnen(st, cx, cy, hw, hh, 'waffe'); },
+  goldschmiede(geb, st, cx, cy, hw, hh) { schmiedeZeichnen(st, cx, cy, hw, hh, 'gold'); },
 };
 
-// Bergwerk: Stollen im Fels, Lore und sichtbare Erzadern
-function mineZeichnen(st, x, y, w, h, erzHell, erzDunkel) {
+// Hof mit Scheune und eingezäunter Koppel
+function hofMitKoppel(st, cx, cy, hw, hh, tiere, farbe, fleck) {
+  isoHaus(st, cx - hw * 0.26, cy - hh * 0.26, hw * 0.52, hh * 0.52,
+          { ueber: 1.3, tuer: false, fahne: false, schornstein: false });
+  const kx = cx + hw * 0.34, ky = cy + hh * 0.34, kw = hw * 0.56, kh = hh * 0.56;
+  isoKasten(kx, ky, kw, kh, 1.5, '#9bb268');
+  isoZaun(kx, ky, kw, kh, 7);
+  for (let i = 0; i < tiere; i++) {
+    const ox = (i % 2 - 0.5) * kw * 0.7, oy = (Math.floor(i / 2) - 0.25) * kh * 0.9;
+    const r = Math.max(3.5, kw * 0.24);
+    isoKugel(kx + ox, ky + oy, r, farbe);
+    ctx.beginPath();                                   // Kopf
+    ctx.arc(kx + ox - r * 1.0, ky + oy - r * 0.85, r * 0.45, 0, Math.PI * 2);
+    ctx.fillStyle = fleck || '#d8d4c6'; ctx.fill();
+  }
+}
+
+// Scheune mit gelagertem Erntegut daneben
+function scheuneMitGut(st, cx, cy, hw, hh, gut) {
+  isoHaus(st, cx - hw * 0.24, cy - hh * 0.24, hw * 0.56, hh * 0.56,
+          { ueber: 1.3, tuer: false, fahne: false, schornstein: false });
+  gut(cx + hw * 0.34, cy + hh * 0.34, hw * 0.42, hh * 0.42, st);
+  if (st.fahne) isoFahne(cx - hw * 0.7, cy, KH, st.gold);
+}
+
+// Bergwerk: Stollen im Fels mit Lore
+function mineZeichnen(st, cx, cy, hw, hh, erzHell, erzDunkel) {
+  // Felsbrocken
+  isoKegel(cx - hw * 0.1, cy - hh * 0.1, hw * 0.6, KH * 1.6, '#8e857a');
+  isoKegel(cx + hw * 0.35, cy + hh * 0.1, hw * 0.3, KH * 0.9, '#9a9186');
+  // Erzader
+  ctx.strokeStyle = erzDunkel; ctx.lineWidth = Math.max(2, hw * 0.1);
   ctx.beginPath();
-  ctx.moveTo(x + w * 0.06, y + h * 0.92);
-  ctx.lineTo(x + w * 0.3, y + h * 0.16);
-  ctx.lineTo(x + w * 0.54, y + h * 0.44);
-  ctx.lineTo(x + w * 0.74, y + h * 0.1);
-  ctx.lineTo(x + w * 0.96, y + h * 0.92);
-  ctx.closePath();
-  ctx.fillStyle = '#8e857a'; ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(x + w * 0.3, y + h * 0.16);
-  ctx.lineTo(x + w * 0.54, y + h * 0.44);
-  ctx.lineTo(x + w * 0.42, y + h * 0.92);
-  ctx.closePath();
-  ctx.fillStyle = 'rgba(255,255,255,0.16)'; ctx.fill();
-  // Erzader quer durch den Fels
-  ctx.strokeStyle = erzDunkel;
-  ctx.lineWidth = Math.max(1.4, w * 0.075);
-  ctx.beginPath();
-  ctx.moveTo(x + w * 0.12, y + h * 0.6);
-  ctx.quadraticCurveTo(x + w * 0.5, y + h * 0.42, x + w * 0.9, y + h * 0.58);
+  ctx.moveTo(cx - hw * 0.45, cy - KH * 0.4);
+  ctx.quadraticCurveTo(cx, cy - KH * 1.0, cx + hw * 0.35, cy - KH * 0.5);
   ctx.stroke();
-  ctx.strokeStyle = erzHell;
-  ctx.lineWidth = Math.max(0.8, w * 0.04);
+  ctx.strokeStyle = erzHell; ctx.lineWidth = Math.max(1, hw * 0.05);
   ctx.stroke();
-  // Stollen mit Holzrahmen
+  // Stolleneingang nach vorn
+  const sx = cx - hw * 0.12, sy = cy + hh * 0.5;
   ctx.fillStyle = '#2b241d';
   ctx.beginPath();
-  ctx.moveTo(x + w * 0.38, y + h * 0.92);
-  ctx.lineTo(x + w * 0.38, y + h * 0.7);
-  ctx.arc(x + w * 0.5, y + h * 0.7, w * 0.12, Math.PI, 0);
-  ctx.lineTo(x + w * 0.62, y + h * 0.92);
+  ctx.moveTo(sx - hw * 0.16, sy); ctx.lineTo(sx + hw * 0.16, sy);
+  ctx.lineTo(sx + hw * 0.16, sy - KH * 0.5);
+  ctx.quadraticCurveTo(sx, sy - KH * 0.75, sx - hw * 0.16, sy - KH * 0.5);
   ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = '#7a5f3c';
-  ctx.lineWidth = Math.max(1, w * 0.045);
+  ctx.strokeStyle = '#7a5f3c'; ctx.lineWidth = 2.5;
   ctx.beginPath();
-  ctx.moveTo(x + w * 0.34, y + h * 0.94); ctx.lineTo(x + w * 0.34, y + h * 0.68);
-  ctx.lineTo(x + w * 0.66, y + h * 0.68); ctx.lineTo(x + w * 0.66, y + h * 0.94);
+  ctx.moveTo(sx - hw * 0.2, sy + 2); ctx.lineTo(sx - hw * 0.2, sy - KH * 0.55);
+  ctx.lineTo(sx + hw * 0.2, sy - KH * 0.55); ctx.lineTo(sx + hw * 0.2, sy + 2);
   ctx.stroke();
-  // Volle Lore davor
-  ctx.fillStyle = '#6b5a46';
-  ctx.fillRect(x + w * 0.04, y + h * 0.8, w * 0.24, h * 0.12);
-  ctx.fillStyle = erzHell;
-  ctx.beginPath();
-  ctx.ellipse(x + w * 0.16, y + h * 0.79, w * 0.1, h * 0.05, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#4a4038';
-  for (const rx of [0.08, 0.22]) {
-    ctx.beginPath();
-    ctx.arc(x + w * rx, y + h * 0.93, Math.max(0.8, w * 0.035), 0, Math.PI * 2);
-    ctx.fill();
-  }
-  if (st.fahne) fahnenmast(x + w * 0.86, y + h * 0.46, h * 0.24, st.gold);
+  // Volle Lore
+  isoKasten(cx + hw * 0.4, cy + hh * 0.55, hw * 0.17, hh * 0.17, 6, '#6b5a46');
+  isoKugel(cx + hw * 0.4, cy + hh * 0.55 - 6, hw * 0.1, erzHell);
+  if (st.fahne) isoFahne(cx - hw * 0.6, cy + hh * 0.3, KH, st.gold);
 }
 
 // Schmiede: Werkstatt mit glühender Esse, Amboss und Zunftzeichen
-function schmiedeZeichnen(geb, st, x, y, w, h, art) {
-  werkHof(geb, st, x, y, w, h, (bx, by, bw, bh) => {
-    // Offene Esse mit Glut
-    ctx.fillStyle = '#6b5a46';
-    ctx.fillRect(bx + bw * 0.1, by + bh * 0.24, bw * 0.8, bh * 0.36);
+function schmiedeZeichnen(st, cx, cy, hw, hh, art) {
+  werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
+    isoKasten(bx, by - bh * 0.2, bw * 0.45, bh * 0.45, KH * 0.5, '#6b5a46');
     const glut = 0.55 + Math.sin(performance.now() / 260) * 0.3;
     ctx.globalAlpha = glut;
     ctx.fillStyle = '#ff8a2b';
-    ctx.fillRect(bx + bw * 0.24, by + bh * 0.32, bw * 0.52, bh * 0.2);
+    ctx.fillRect(bx - bw * 0.2, by - bh * 0.2 - KH * 0.42, bw * 0.4, KH * 0.22);
     ctx.globalAlpha = 1;
-    rauchFahne(bx + bw * 0.5, by + bh * 0.24, bw * 0.18);
-    // Amboss
-    ctx.fillStyle = '#4e5056';
-    ctx.fillRect(bx + bw * 0.2, by + bh * 0.74, bw * 0.6, bh * 0.1);
-    ctx.fillRect(bx + bw * 0.38, by + bh * 0.84, bw * 0.24, bh * 0.14);
-    // Zunftzeichen: Werkzeug, Waffe oder Goldbarren
+    isoRauch(bx, by - bh * 0.2 - KH * 0.5, bw * 0.18);
+    isoKasten(bx - bw * 0.1, by + bh * 0.5, bw * 0.2, bh * 0.2, 5, '#4e5056');
     if (art === 'gold') {
-      ctx.fillStyle = '#e9c04a';
-      ctx.fillRect(bx + bw * 0.16, by + bh * 0.1, bw * 0.3, bh * 0.1);
-      ctx.fillRect(bx + bw * 0.5, by + bh * 0.1, bw * 0.3, bh * 0.1);
-      ctx.fillRect(bx + bw * 0.33, by, bw * 0.3, bh * 0.1);
+      for (let i = 0; i < 3; i++)
+        isoKasten(bx + bw * 0.45, by + bh * 0.2 - i * 4, bw * 0.14, bh * 0.14, 4, '#e9c04a');
     } else if (art === 'waffe') {
-      ctx.strokeStyle = '#c3cbd3';
-      ctx.lineWidth = Math.max(0.9, bw * 0.1);
+      ctx.strokeStyle = '#c3cbd3'; ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(bx + bw * 0.14, by + bh * 0.2); ctx.lineTo(bx + bw * 0.86, by + bh * 0.02);
-      ctx.moveTo(bx + bw * 0.14, by + bh * 0.02); ctx.lineTo(bx + bw * 0.86, by + bh * 0.2);
+      ctx.moveTo(bx + bw * 0.2, by + bh * 0.1); ctx.lineTo(bx + bw * 0.7, by - KH * 0.7);
+      ctx.moveTo(bx + bw * 0.7, by + bh * 0.1); ctx.lineTo(bx + bw * 0.2, by - KH * 0.7);
       ctx.stroke();
     } else {
-      ctx.strokeStyle = '#8a6a44';
-      ctx.lineWidth = Math.max(0.9, bw * 0.1);
+      ctx.strokeStyle = '#8a6a44'; ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(bx + bw * 0.16, by + bh * 0.2); ctx.lineTo(bx + bw * 0.7, by + bh * 0.06);
+      ctx.moveTo(bx + bw * 0.2, by + bh * 0.1); ctx.lineTo(bx + bw * 0.6, by - KH * 0.6);
       ctx.stroke();
       ctx.fillStyle = '#c3cbd3';
-      ctx.fillRect(bx + bw * 0.62, by, bw * 0.3, bh * 0.14);
+      ctx.fillRect(bx + bw * 0.45, by - KH * 0.72, bw * 0.3, 5);
     }
-  }, { hausBreite: 0.46, schornstein: true, rauch: false });
+  }, { hausAnteil: 0.5, schornstein: true, rauch: false });
 }
 
-// Einstieg aus der Zeichenschleife
-function gebaeudeZeichnen(geb, def, px0, py0, bw0, bh0) {
-  const ausbau = Math.max(1, Math.min(AUSBAU_MAX, geb.ausbau || 1));
-  // Mit jeder Ausbaustufe füllt das Bauwerk die Kachel etwas mehr aus.
-  // Der Abstand hängt an der Kachelgröße, nicht an der Gebäudegröße –
-  // sonst bekämen große Bauwerke einen übertrieben breiten Rand.
-  const rand = T * (0.15 - 0.013 * (ausbau - 1));
-  const x = px0 + rand, y = py0 + rand;
-  const w = bw0 - rand * 2, h = bh0 - rand * 2;
+// Einstieg: ein Bauwerk an seinem Platz zeichnen
+function gebaeudeZeichnen(geb) {
+  const def = GEBAEUDE[geb.typ];
+  const hoch = hoeheBei(geb.x, geb.y);
+  const cx = isoX(geb.x + def.w / 2, geb.y + def.h / 2);
+  const cy = isoY(geb.x + def.w / 2, geb.y + def.h / 2) - hoch;
+  const hw = (def.w + def.h) * KW / 4;
+  const hh = (def.w + def.h) * KH / 4;
   const st = stilVon(geb);
 
-  // Die Brücke liegt flach auf der Kachel und braucht weder Rand
-  // noch Schatten – sie soll ja beide Ufer berühren.
-  if (geb.typ === 'bruecke') {
-    BAU_ZEICHNER.bruecke(geb, st, px0, py0, bw0, bh0);
-    return;
-  }
-
-  bodenFleck(x, y, w, h);
-  schlagschatten(x, y, w, h);
+  // Schatten auf dem Boden
+  ctx.beginPath();
+  ctx.ellipse(cx + hw * 0.18, cy + hh * 0.2, hw * 0.78, hh * 0.78, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(30,40,20,0.18)';
+  ctx.fill();
 
   const zeichner = BAU_ZEICHNER[geb.typ];
-  if (zeichner) zeichner(geb, st, x, y, w, h);
-  else if (FELD_FARMEN.has(geb.typ)) bauScheune(geb, st, x, y, w, h);
-  else bauWerkstatt(geb, st, x, y, w, h);
+  if (zeichner) zeichner(geb, st, cx, cy, hw, hh);
+  else if (FELD_FARMEN.has(geb.typ)) scheuneMitGut(st, cx, cy, hw, hh, () => {});
+  else isoHaus(st, cx, cy, hw * 0.8, hh * 0.8, { schornstein: true, rauch: true });
+  return { cx, cy, hw, hh };
 }
 
 function zeichnen() {
@@ -4993,191 +4785,118 @@ function zeichnen() {
   if (leinwand.width !== b * dpr || leinwand.height !== h * dpr) {
     leinwand.width = b * dpr; leinwand.height = h * dpr;
   }
-
   if (state.terrainAlt) terrainZeichnen();
-  else if (schmutzKacheln.size) kachelnAuffrischen();
+  if (schmutzKacheln.size) schmutzKacheln.clear();
 
   // Hintergrund: tiefes Meer
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = '#1a4764';
+  ctx.fillStyle = '#143b54';
   ctx.fillRect(0, 0, b, h);
 
   // Ab hier in Weltkoordinaten zeichnen
   const z = kamera.zoom;
   ctx.setTransform(dpr * z, 0, 0, dpr * z, -kamera.x * dpr * z, -kamera.y * dpr * z);
-  ctx.imageSmoothingEnabled = true;
-  // Terrain-Puffer (TP px je Kachel) auf Weltgröße (T px je Kachel) skalieren
-  ctx.drawImage(terrainPuffer, 0, 0, N * TP, N * TP, 0, 0, N * T, N * T);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const s = sichtBereich();
+  const fein = z > 0.45;             // bei starker Verkleinerung ohne Kleinkram
+  bodenZeichnen(s, fein);
 
   // Gitterlinien nur beim Bauen einblenden
   const bauModus = state.werkzeug !== 'zeiger' && state.werkzeug !== 'abriss';
   if (bauModus) {
-    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
     ctx.lineWidth = 1 / z;
     ctx.beginPath();
-    for (let i = 0; i <= N; i++) {
-      ctx.moveTo(i * T, 0); ctx.lineTo(i * T, N * T);
-      ctx.moveTo(0, i * T); ctx.lineTo(N * T, i * T);
+    for (let y = s.y0; y <= s.y1 + 1; y++) {
+      ctx.moveTo(isoX(s.x0, y), isoY(s.x0, y) - H_LAND);
+      ctx.lineTo(isoX(s.x1 + 1, y), isoY(s.x1 + 1, y) - H_LAND);
+    }
+    for (let x = s.x0; x <= s.x1 + 1; x++) {
+      ctx.moveTo(isoX(x, s.y0), isoY(x, s.y0) - H_LAND);
+      ctx.lineTo(isoX(x, s.y1 + 1), isoY(x, s.y1 + 1) - H_LAND);
     }
     ctx.stroke();
   }
 
-  // --- Felder der Farmen (liegen unter den Gebäuden) ---
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  // Äcker, Truppen und Schiffe nach Kacheln sortieren, damit alles
+  // in der richtigen Tiefenreihenfolge gezeichnet werden kann
+  const aecker = new Map();
   for (const geb of gebaeude) {
     if (!geb.felder || !geb.felder.length) continue;
-    const [farbe, symbol] = FELD_DEKO[geb.typ];
-    for (const idx of geb.felder) {
-      const fx = (idx % N) * T, fy = ((idx / N) | 0) * T;
-      // Ackergrund
-      ctx.fillStyle = farbe;
-      rundRect(ctx, fx + 1, fy + 1, T - 2, T - 2, 3);
-      ctx.fill();
-      // Gepflügte Reihen
-      ctx.strokeStyle = 'rgba(120,95,60,0.35)';
-      ctx.lineWidth = Math.max(1, T * 0.04);
-      ctx.beginPath();
-      for (let i = 1; i < 5; i++) {
-        ctx.moveTo(fx + 2, fy + (T / 5) * i);
-        ctx.lineTo(fx + T - 2, fy + (T / 5) * i);
-      }
-      ctx.stroke();
-    }
-    ctx.font = `${T * 0.34}px sans-serif`;
-    for (const idx of geb.felder) {
-      const fx = (idx % N) * T, fy = ((idx / N) | 0) * T;
-      ctx.fillText(symbol, fx + T / 2, fy + T / 2 + 1);
-    }
+    for (const idx of geb.felder) aecker.set(idx, geb);
   }
-
-  // --- Gebäude ---
-  for (const geb of gebaeude) {
-    const def = GEBAEUDE[geb.typ];
-    const px = geb.x * T, py = geb.y * T, bw = def.w * T, bh = def.h * T;
-
-    // Das Bauwerk selbst
-    gebaeudeZeichnen(geb, def, px, py, bw, bh);
-
-    // Lebensbalken, sobald ein Gebäude beschädigt ist
-    if (geb.hp < geb.maxHp) {
-      const anteil = Math.max(0, geb.hp / geb.maxHp);
-      ctx.fillStyle = 'rgba(0,0,0,0.35)';
-      ctx.fillRect(px + 4, py + bh - 8, bw - 8, 4);
-      ctx.fillStyle = anteil > 0.5 ? '#16a34a' : anteil > 0.25 ? '#f59e0b' : '#dc2626';
-      ctx.fillRect(px + 4, py + bh - 8, (bw - 8) * anteil, 4);
-    }
-
-    // Besitzer-Fähnchen: farbiger Punkt oben links
-    ctx.beginPath();
-    ctx.arc(px + 7, py + 7, 4, 0, Math.PI * 2);
-    ctx.fillStyle = spieler[geb.spieler].farbe;
-    ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-
-    // Bedürfnis-Punkt an jedem Wohnhaus: grün = zufrieden, rot = nicht.
-    // Unzufriedene Häuser senden zusätzlich einen pulsierenden Ring aus.
-    if (geb.typ === 'wohnhaus') {
-      if (!geb.zufrieden) {
-        const puls = (performance.now() % 1100) / 1100;
-        ctx.beginPath();
-        ctx.arc(px + bw - 7, py + 7, 4.5 + puls * 10, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(220,38,38,${(1 - puls) * 0.9})`;
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
-      }
-      ctx.beginPath();
-      ctx.arc(px + bw - 7, py + 7, 4.5, 0, Math.PI * 2);
-      ctx.fillStyle = geb.zufrieden ? '#16a34a' : '#dc2626';
-      ctx.fill();
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 1.4;
-      ctx.stroke();
-    }
-
-    // Auswahl-Rahmen
-    if (state.auswahl === geb) {
-      rundRect(ctx, px + 1, py + 1, bw - 2, bh - 2, 7);
-      ctx.strokeStyle = '#16a34a';
-      ctx.lineWidth = 3 / Math.sqrt(z);
-      ctx.stroke();
-    }
-  }
-
-  // --- Heere und Flotten ---
+  const einheiten = new Map();
+  const merke = (idx, sache) => {
+    const l = einheiten.get(idx);
+    if (l) l.push(sache); else einheiten.set(idx, [sache]);
+  };
   for (const t of truppen) {
-    const px = t.x * T, py = t.y * T;
-    const farbe = spieler[t.spieler].farbe;
-    const gr = truppGroesse(t);
-
-    // Im Gefecht pulsiert ein roter Ring um den Stapel
-    if (t.kampf) {
-      const puls = (performance.now() % 900) / 900;
-      ctx.beginPath();
-      ctx.arc(px, py, T * 0.45 + puls * T * 0.45, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(220,38,38,${(1 - puls) * 0.9})`;
-      ctx.lineWidth = 3;
-      ctx.stroke();
+    const tx = Math.floor(t.x), ty = Math.floor(t.y);
+    if (tx >= 0 && ty >= 0 && tx < N && ty < N) merke(ty * N + tx, { art: 'trupp', t });
+  }
+  for (const sp of spieler)
+    if (sp.ki && sp.schiff && !sp.kontor) {
+      const tx = Math.floor(sp.schiff.x), ty = Math.floor(sp.schiff.y);
+      if (tx >= 0 && ty >= 0 && tx < N && ty < N)
+        merke(ty * N + tx, { art: 'schiff', s: sp.schiff, farbe: sp.farbe, gross: false });
     }
+  {
+    const tx = Math.floor(schiff.x), ty = Math.floor(schiff.y);
+    if (tx >= 0 && ty >= 0 && tx < N && ty < N)
+      merke(ty * N + tx, { art: 'schiff', s: schiff, gross: true,
+                           farbe: spieler[ICH] && spieler[ICH].farbe });
+  }
 
-    rundRect(ctx, px - T * 0.42, py - T * 0.42, T * 0.84, T * 0.84, 7);
-    ctx.fillStyle = 'rgba(255,255,255,0.92)';
-    ctx.fill();
-    ctx.strokeStyle = farbe;
-    ctx.lineWidth = state.truppAuswahl === t ? 4 : 2.5;
-    ctx.stroke();
+  // --- Alles Aufrechte von hinten nach vorn ---
+  const wippen = Math.sin(performance.now() / 650) * 1.5;
+  for (let y = s.y0; y <= s.y1; y++) {
+    for (let x = s.x0; x <= s.x1; x++) {
+      if (!imBild(s, x, y)) continue;
+      const idx = y * N + x;
 
-    ctx.font = `${T * 0.4}px sans-serif`;
-    ctx.fillText(t.art === 'flotte' ? '🚢' : '⚔️', px, py - T * 0.1);
-    ctx.font = `bold ${T * 0.3}px system-ui, sans-serif`;
-    ctx.fillStyle = '#1f2937';
-    ctx.fillText(Math.round(gr) + (t.fracht > 0 ? '+' + Math.round(t.fracht) : ''),
-                 px, py + T * 0.24);
-    // Kanonen als kleine Punkte am oberen Rand des Stapels
-    if (t.kanonen > 0) {
-      ctx.fillStyle = '#b45309';
-      for (let i = 0; i < t.kanonen; i++) {
-        ctx.beginPath();
-        ctx.arc(px - T * 0.2 + i * T * 0.14, py - T * 0.33, T * 0.05, 0, Math.PI * 2);
-        ctx.fill();
+      const ackerGeb = aecker.get(idx);
+      if (ackerGeb) ackerZeichnen(x, y, ackerGeb);
+
+      kachelAufbau(x, y, fein);
+
+      const geb = belegt[idx];
+      if (geb && geb.x === x && geb.y === y) {
+        gebaeudeZeichnen(geb);
+        gebaeudeMarken(geb, fein);
+      }
+
+      const liste = einheiten.get(idx);
+      if (liste) for (const e of liste) {
+        if (e.art === 'schiff')
+          segelschiff(isoX(e.s.x, e.s.y), isoY(e.s.x, e.s.y),
+                      KW * (e.gross ? 0.5 : 0.42), e.farbe, wippen);
+        else truppZeichnen(e.t);
       }
     }
   }
 
-  // Marschziel der ausgewählten Truppe als Linie andeuten
+  // --- Überlagerungen: Wege, Reichweiten, Vorschau ---
+  if (schiff.pfad.length) {
+    const p = schiff.pfad[schiff.pfad.length - 1];
+    zielFaehnchen(isoX(p.x + 0.5, p.y + 0.5), isoY(p.x + 0.5, p.y + 0.5));
+  }
   if (state.truppAuswahl && state.truppAuswahl.pfad.length) {
-    const tA = state.truppAuswahl, zielP = tA.pfad[tA.pfad.length - 1];
+    const tA = state.truppAuswahl, p = tA.pfad[tA.pfad.length - 1];
     ctx.beginPath();
-    ctx.moveTo(tA.x * T, tA.y * T);
-    ctx.lineTo(zielP.x * T, zielP.y * T);
-    ctx.strokeStyle = 'rgba(22,163,74,0.6)';
+    ctx.moveTo(isoX(tA.x, tA.y), isoY(tA.x, tA.y) - H_LAND);
+    ctx.lineTo(isoX(p.x + 0.5, p.y + 0.5), isoY(p.x + 0.5, p.y + 0.5) - H_LAND);
+    ctx.strokeStyle = 'rgba(22,163,74,0.7)';
     ctx.lineWidth = 2.5 / Math.sqrt(z);
     ctx.setLineDash([8 / z, 6 / z]);
     ctx.stroke();
     ctx.setLineDash([]);
   }
 
-  // --- Das Schiff (leicht auf den Wellen schaukelnd) ---
-  if (schiff.pfad.length) {   // Ziel-Fähnchen, solange gesegelt wird
-    const zielP = schiff.pfad[schiff.pfad.length - 1];
-    ctx.font = `${T * 0.5}px sans-serif`;
-    ctx.fillText('🚩', zielP.x * T, zielP.y * T - 6);
-  }
-  const wippen = Math.sin(performance.now() / 650) * 1.5;
-  // Zuerst die Schiffe der Gegner (mit farbigem Wimpel)
-  for (const sp of spieler) {
-    if (!sp.ki || !sp.schiff || sp.kontor) continue;
-    segelschiff(sp.schiff.x * T, sp.schiff.y * T, T * 0.9, sp.farbe, wippen);
-  }
-  segelschiff(schiff.x * T, schiff.y * T, T * 1.05,
-              spieler[ICH] && spieler[ICH].farbe, wippen);
-
-  // Beim Kontor-Bau: Baureichweite rund ums Schiff anzeigen
   if (state.werkzeug === 'kontor')
     kreisZeichnen({ x: schiff.x, y: schiff.y }, SIM.schiffBauRadius);
 
-  // Wirkungskreis des ausgewählten Gebäudes
   if (state.auswahl) {
     const def = GEBAEUDE[state.auswahl.typ];
     const radius = def.marktRadius || def.radius;
@@ -5185,7 +4904,7 @@ function zeichnen() {
       kreisZeichnen(zentrum(state.auswahl), radius);
   }
 
-  // --- Bau-Vorschau: schwebende (angetippte) Position oder Mauszeiger ---
+  // --- Bau-Vorschau ---
   if (bauModus) {
     let t = null;
     if (state.vorschau && state.vorschau.modus === 'bau')
@@ -5200,37 +4919,44 @@ function zeichnen() {
       if (radius && !FELD_FARMEN.has(state.werkzeug))
         kreisZeichnen({ x: a.x + def.w / 2, y: a.y + def.h / 2 }, radius);
 
-      // Bei Farmen: die künftigen Felder im 3×3 einblenden
       if (FELD_FARMEN.has(state.werkzeug)) {
         for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
           if (!dx && !dy) continue;
           const fx = a.x + dx, fy = a.y + dy;
           const k = kachel(fx, fy);
           if (!k) continue;
-          const frei = k.typ === 'gras' && !belegtAuf(fx, fy);
-          ctx.fillStyle = frei ? 'rgba(22,163,74,0.30)' : 'rgba(90,90,90,0.30)';
-          ctx.fillRect(fx * T + 2, fy * T + 2, T - 4, T - 4);
+          rautePfad(fx, fy, hoeheBei(fx, fy), 0);
+          ctx.fillStyle = (k.typ === 'gras' && !belegtAuf(fx, fy))
+            ? 'rgba(22,163,74,0.32)' : 'rgba(90,90,90,0.32)';
+          ctx.fill();
         }
       }
 
-      rundRect(ctx, a.x * T + 2, a.y * T + 2, def.w * T - 4, def.h * T - 4, 6);
-      ctx.fillStyle = ok ? 'rgba(22,163,74,0.35)' : 'rgba(220,38,38,0.35)';
-      ctx.fill();
+      // Grundriss der geplanten Stelle einfärben
+      for (let dy = 0; dy < def.h; dy++) for (let dx = 0; dx < def.w; dx++) {
+        rautePfad(a.x + dx, a.y + dy, hoeheBei(a.x, a.y), 0);
+        ctx.fillStyle = ok ? 'rgba(22,163,74,0.38)' : 'rgba(220,38,38,0.38)';
+        ctx.fill();
+      }
+      ctx.beginPath();
+      const hoch = hoeheBei(a.x, a.y);
+      ctx.moveTo(isoX(a.x, a.y), isoY(a.x, a.y) - hoch);
+      ctx.lineTo(isoX(a.x + def.w, a.y), isoY(a.x + def.w, a.y) - hoch);
+      ctx.lineTo(isoX(a.x + def.w, a.y + def.h), isoY(a.x + def.w, a.y + def.h) - hoch);
+      ctx.lineTo(isoX(a.x, a.y + def.h), isoY(a.x, a.y + def.h) - hoch);
+      ctx.closePath();
       ctx.strokeStyle = ok ? '#16a34a' : '#dc2626';
-      ctx.lineWidth = 2 / Math.sqrt(z);
+      ctx.lineWidth = 2 / z;
       ctx.stroke();
-      ctx.font = `${Math.min(def.w, def.h) * T * 0.55}px sans-serif`;
-      ctx.globalAlpha = 0.85;
-      ctx.fillText(def.emoji, (a.x + def.w / 2) * T, (a.y + def.h / 2) * T);
-      ctx.globalAlpha = 1;
 
-      // Voraussichtliche Auslastung direkt an der Vorschau anzeigen
+      // Voraussichtliche Auslastung über der Vorschau
       const effWert = effVorschau(state.werkzeug, a.x, a.y);
       if (effWert !== null) {
         const prozent = Math.round(effWert * 100);
         const groesse = 15 / Math.sqrt(z);
         ctx.font = `bold ${groesse}px system-ui, sans-serif`;
-        const tx = (a.x + def.w / 2) * T, ty = a.y * T - groesse * 0.7;
+        const tx = isoX(a.x + def.w / 2, a.y + def.h / 2);
+        const ty = isoY(a.x + def.w / 2, a.y + def.h / 2) - hoch - KH * 1.6;
         ctx.lineWidth = groesse * 0.28;
         ctx.strokeStyle = 'rgba(17,24,39,0.75)';
         ctx.strokeText(prozent + ' %', tx, ty);
@@ -5240,7 +4966,7 @@ function zeichnen() {
     }
   }
 
-  // Abriss-Vorschau: gewähltes bzw. überfahrenes Gebäude rot einfärben
+  // Abriss-Vorschau
   if (state.werkzeug === 'abriss') {
     let geb = null;
     if (state.vorschau && state.vorschau.modus === 'abriss') geb = state.vorschau.geb;
@@ -5250,17 +4976,128 @@ function zeichnen() {
     }
     if (geb) {
       const def = GEBAEUDE[geb.typ];
-      rundRect(ctx, geb.x * T + 2, geb.y * T + 2, def.w * T - 4, def.h * T - 4, 6);
-      ctx.fillStyle = 'rgba(220,38,38,0.4)';
+      const hoch = hoeheBei(geb.x, geb.y);
+      for (let dy = 0; dy < def.h; dy++) for (let dx = 0; dx < def.w; dx++) {
+        rautePfad(geb.x + dx, geb.y + dy, hoch, 0);
+        ctx.fillStyle = 'rgba(220,38,38,0.45)';
+        ctx.fill();
+      }
+    }
+  }
+}
+
+// Acker einer Farm: eingefärbte Raute mit Pflugfurchen
+function ackerZeichnen(x, y, geb) {
+  const [farbe, symbol] = FELD_DEKO[geb.typ];
+  const hoch = hoeheBei(x, y);
+  rautePfad(x, y, hoch, 0.4);
+  ctx.fillStyle = farbe;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(120,95,60,0.35)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  for (let i = 1; i < 4; i++) {
+    const t = i / 4;
+    ctx.moveTo(isoX(x + t, y), isoY(x + t, y) - hoch);
+    ctx.lineTo(isoX(x + t, y + 1), isoY(x + t, y + 1) - hoch);
+  }
+  ctx.stroke();
+  if (kamera.zoom > 0.6) {
+    ctx.font = `${KH * 0.6}px sans-serif`;
+    ctx.fillText(symbol, isoX(x + 0.5, y + 0.5), isoY(x + 0.5, y + 0.5) - hoch - KH * 0.2);
+  }
+}
+
+// Besitzerpunkt, Mangelring und Lebensbalken über einem Gebäude
+function gebaeudeMarken(geb, fein) {
+  const def = GEBAEUDE[geb.typ];
+  const hoch = hoeheBei(geb.x, geb.y);
+  const mx = isoX(geb.x + def.w / 2, geb.y + def.h / 2);
+  const my = isoY(geb.x + def.w / 2, geb.y + def.h / 2) - hoch - KH * (def.w > 1 ? 2.3 : 1.7);
+
+  if (geb.hp < geb.maxHp) {
+    const anteil = Math.max(0, geb.hp / geb.maxHp);
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillRect(mx - KW * 0.22, my + 6, KW * 0.44, 4);
+    ctx.fillStyle = anteil > 0.5 ? '#16a34a' : anteil > 0.25 ? '#f59e0b' : '#dc2626';
+    ctx.fillRect(mx - KW * 0.22, my + 6, KW * 0.44 * anteil, 4);
+  }
+  if (!fein) return;
+
+  ctx.beginPath();
+  ctx.arc(mx - KW * 0.16, my, 4, 0, Math.PI * 2);
+  ctx.fillStyle = spieler[geb.spieler].farbe;
+  ctx.fill();
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.stroke();
+
+  if (geb.typ === 'wohnhaus') {
+    if (!geb.zufrieden) {
+      const puls = (performance.now() % 1100) / 1100;
+      ctx.beginPath();
+      ctx.arc(mx + KW * 0.16, my, 4.5 + puls * 10, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(220,38,38,${(1 - puls) * 0.9})`;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(mx + KW * 0.16, my, 4, 0, Math.PI * 2);
+    ctx.fillStyle = geb.zufrieden ? '#16a34a' : '#dc2626';
+    ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.stroke();
+  }
+}
+
+// Heer oder Flotte als Spielstein
+function truppZeichnen(t) {
+  const px = isoX(t.x, t.y), py = isoY(t.x, t.y) - hoeheBei(Math.floor(t.x), Math.floor(t.y));
+  const farbe = spieler[t.spieler].farbe;
+  const gr = truppGroesse(t);
+  if (t.kampf) {
+    const puls = (performance.now() % 900) / 900;
+    ctx.beginPath();
+    ctx.ellipse(px, py, KW * 0.3 + puls * KW * 0.3, KH * 0.3 + puls * KH * 0.3, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(220,38,38,${(1 - puls) * 0.9})`;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+  rundRect(ctx, px - KW * 0.22, py - KH * 1.2, KW * 0.44, KH * 1.0, 6);
+  ctx.fillStyle = 'rgba(255,255,255,0.93)';
+  ctx.fill();
+  ctx.strokeStyle = farbe;
+  ctx.lineWidth = state.truppAuswahl === t ? 3.5 : 2;
+  ctx.stroke();
+  ctx.font = `${KH * 0.46}px sans-serif`;
+  ctx.fillText(t.art === 'flotte' ? '🚢' : '⚔️', px, py - KH * 0.88);
+  ctx.font = `bold ${KH * 0.36}px system-ui, sans-serif`;
+  ctx.fillStyle = '#1f2937';
+  ctx.fillText(Math.round(gr) + (t.fracht > 0 ? '+' + Math.round(t.fracht) : ''),
+               px, py - KH * 0.38);
+  if (t.kanonen > 0) {
+    ctx.fillStyle = '#b45309';
+    for (let i = 0; i < t.kanonen; i++) {
+      ctx.beginPath();
+      ctx.arc(px - KW * 0.14 + i * KW * 0.09, py - KH * 1.28, 2.6, 0, Math.PI * 2);
       ctx.fill();
     }
   }
 }
 
-// Halbtransparenter Wirkungskreis (für Reichweiten)
-function kreisZeichnen(mitte, radius) {
+function zielFaehnchen(px, py) {
+  pfosten(px, py, KH * 0.9, 2, '#6b5a46');
   ctx.beginPath();
-  ctx.arc(mitte.x * T, mitte.y * T, radius * T, 0, Math.PI * 2);
+  ctx.moveTo(px, py - KH * 0.9);
+  ctx.lineTo(px + KW * 0.18, py - KH * 0.78);
+  ctx.lineTo(px, py - KH * 0.66);
+  ctx.closePath();
+  ctx.fillStyle = '#dc2626'; ctx.fill();
+}
+
+// Halbtransparenter Wirkungskreis – im Schrägbild eine Ellipse
+function kreisZeichnen(mitte, radius) {
+  const px = isoX(mitte.x, mitte.y), py = isoY(mitte.x, mitte.y) - H_LAND;
+  ctx.beginPath();
+  ctx.ellipse(px, py, radius * Math.SQRT2 * KW / 2, radius * Math.SQRT2 * KH / 2,
+              0, 0, Math.PI * 2);
   ctx.fillStyle = 'rgba(22,163,74,0.08)';
   ctx.fill();
   ctx.strokeStyle = 'rgba(22,163,74,0.55)';
@@ -5277,7 +5114,18 @@ function bildschirmZuWelt(sx, sy) {
 }
 function bildschirmZuKachel(sx, sy) {
   const w = bildschirmZuWelt(sx, sy);
-  const x = Math.floor(w.x / T), y = Math.floor(w.y / T);
+  // Land liegt auf einem Plateau über dem Wasser, Berge noch höher.
+  // Darum jede mögliche Geländehöhe durchprobieren – von oben nach
+  // unten, weil hohe Kacheln die niedrigen dahinter verdecken – und
+  // die nehmen, bei der die getroffene Kachel wirklich so hoch ist.
+  for (const hoch of [H_LAND + H_BERG, H_LAND, H_LAND - 4, H_STRAND, 0]) {
+    const t = kachelVonWelt(w.x, w.y + hoch);
+    const x = Math.floor(t.x), y = Math.floor(t.y);
+    if (x < 0 || y < 0 || x >= N || y >= N) continue;
+    if (Math.abs(hoeheBei(x, y) - hoch) < 0.01) return { x, y };
+  }
+  const t = kachelVonWelt(w.x, w.y);
+  const x = Math.floor(t.x), y = Math.floor(t.y);
   if (x < 0 || y < 0 || x >= N || y >= N) return null;
   return { x, y };
 }
@@ -5285,9 +5133,9 @@ function bildschirmZuKachel(sx, sy) {
 function kameraBegrenzen() {
   const sb = leinwand.clientWidth / kamera.zoom;   // sichtbare Weltbreite
   const sh = leinwand.clientHeight / kamera.zoom;
-  const rand = 6 * T; // etwas Meer am Rand erlauben
-  kamera.x = Math.min(Math.max(kamera.x, -rand), N * T + rand - sb);
-  kamera.y = Math.min(Math.max(kamera.y, -rand), N * T + rand - sh);
+  const rand = 6 * KW; // etwas Meer am Rand erlauben
+  kamera.x = Math.min(Math.max(kamera.x, -rand), WELT_B + rand - sb);
+  kamera.y = Math.min(Math.max(kamera.y, -rand), WELT_H + rand - sh);
 }
 
 function zoomAuf(sx, sy, faktor) {
@@ -6294,23 +6142,26 @@ $('k-musik').addEventListener('click', musikUmschalten);
 
 /* ---------- 11. HAUPTSCHLEIFE --------------------------------- */
 
+// Die Kamera auf eine Kachel ausrichten (Kachelmitte in die Bildmitte)
+function kameraAuf(tx, ty) {
+  kamera.x = isoX(tx, ty) - leinwand.clientWidth / (2 * kamera.zoom);
+  kamera.y = isoY(tx, ty) - leinwand.clientHeight / (2 * kamera.zoom);
+  kameraBegrenzen();
+}
+
 function kameraStart() {
   // Start: Blick aufs Schiff, so weit herausgezoomt, dass man das Meer
   // und die nächsten Inseln gut sieht (auf ca. 30 Kacheln Sichtweite)
-  const wunsch = Math.min(leinwand.clientWidth, leinwand.clientHeight) / (30 * T);
+  const wunsch = Math.min(leinwand.clientWidth, leinwand.clientHeight) / (26 * KH);
   kamera.zoom = Math.min(1.1, Math.max(0.3, wunsch));
-  kamera.x = schiff.x * T - leinwand.clientWidth / (2 * kamera.zoom);
-  kamera.y = schiff.y * T - leinwand.clientHeight / (2 * kamera.zoom);
-  kameraBegrenzen();
+  kameraAuf(schiff.x, schiff.y);
 }
 
 // 🧭-Knopf: Kamera zurück zum Kontor (oder zum Schiff)
 function zentrieren() {
   const kontor = gebaeude.find(g => g.typ === 'kontor');
   const ziel = kontor ? zentrum(kontor) : { x: schiff.x, y: schiff.y };
-  kamera.x = ziel.x * T - leinwand.clientWidth / (2 * kamera.zoom);
-  kamera.y = ziel.y * T - leinwand.clientHeight / (2 * kamera.zoom);
-  kameraBegrenzen();
+  kameraAuf(ziel.x, ziel.y);
 }
 $('k-mitte').addEventListener('click', zentrieren);
 $('k-speichern').addEventListener('click', () => spielSpeichern(false));
