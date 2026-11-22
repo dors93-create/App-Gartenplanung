@@ -106,6 +106,8 @@ public/kegelpegel-vorschau.png
                         Vorschaubild für geteilte Links
 CLAUDE.md             Diese Übersicht
 KEGELPEGEL.md         Bedienung und Einrichtung des Olympiade-Punktestands
+MEHRSPIELER.md        Zu zweit im Inselspiel: Code vergeben, beitreten,
+                      Firebase-Freigabe
 ```
 
 ## Veröffentlichung
