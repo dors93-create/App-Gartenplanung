@@ -265,6 +265,15 @@
     box-shadow: var(--schatten); padding: 8px 16px;
     font-size: 13.5px; font-weight: 700; z-index: 12; display: none;
   }
+  #duerre-warnung {
+    position: absolute; top: calc(104px + var(--rand-oben)); left: 50%;
+    transform: translateX(-50%);
+    background: #fffbeb; color: #b45309; border-radius: 10px;
+    box-shadow: var(--schatten); padding: 7px 14px;
+    font-size: 13px; font-weight: 700; z-index: 11; display: none;
+    max-width: calc(100vw - 24px); text-align: center;
+  }
+
   /* Pulsierende Warnung, wenn den Einwohnern etwas fehlt */
   #mangel-warnung {
     position: absolute; top: calc(62px + var(--rand-oben)); left: 50%; transform: translateX(-50%);
@@ -314,6 +323,7 @@
   <span class="res" title="Stoffe – aus der Weberei, Bedürfnis ab Siedlern">🧵 <b id="r-stoffe">0</b></span>
   <span class="res" title="Alkohol – aus der Brennerei, Bedürfnis ab Siedlern (alle weiteren Waren: Kontor anklicken)">🥃 <b id="r-alkohol">0</b></span>
   <span class="trenner"></span>
+  <span class="res" title="Gunst – verdient durch dauerhaft zufriedene Bürger, nötig für Denkmäler">🏅 <b id="r-gunst">0</b></span>
   <span class="res" title="Einwohner (Pioniere + Siedler)">👥 <b id="r-einwohner">0</b></span>
   <span id="ziel" title="Ziel: 500 Siedler erreichen">
     <small style="color:var(--text-leise);font-size:10.5px">🎯 <b id="r-siedler">0</b>/500 Siedler</small>
@@ -337,6 +347,7 @@
 <div id="hinweis">⛵ Tippe aufs Wasser, um zu segeln. Such dir eine Insel aus und baue dort dein Kontor an der Küste!</div>
 <div id="bankrott-warnung"></div>
 <div id="mangel-warnung"></div>
+<div id="duerre-warnung"></div>
 
 <!-- Baumenü (wird per JavaScript gefüllt) -->
 <div id="baumenue"></div>
@@ -398,8 +409,8 @@ const TP = 26;  // Pixel je Kachel im Terrain-Puffer (kleiner als T, damit
 const SIM = {
   nahrungJeEinwohner: 0.004,   // Nahrung, die jede:r Einwohner:in isst
   // (Steuern und weiterer Verbrauch stehen je Bevölkerungsstufe in STUFEN)
-  wachstumsDauer:     6,       // Sekunden bis +1 Einwohner (bei Zufriedenheit)
-  aufstiegsDauer:     8,       // Sekunden erfüllte Bedürfnisse bis zum Aufstieg
+  wachstumsDauer:     11,      // Sekunden bis +1 Einwohner (bei Zufriedenheit)
+  aufstiegsDauer:     15,      // Sekunden erfüllte Bedürfnisse bis zum Aufstieg
   hungerBisWegzug:    14,      // Sekunden Hunger, bis jemand die Insel verlässt
   pleiteDauer:        60,      // Sekunden mit Gold < 0 bis zum Bankrott
   zielSiedler:        500,     // Siegbedingung
@@ -453,11 +464,12 @@ const PREISE = {
   kleidung:      { kauf: 14, verkauf: 6 },
   schmuck:       { kauf: 20, verkauf: 8 },
   waffen:        { kauf: 16, verkauf: 6 },
+  eisenerz:      { kauf: 7,  verkauf: 2 },
 };
 const WAREN_EMOJI = { gold: '💰', holz: '🪵', werkzeuge: '⚒️', ziegel: '🧱',
   nahrung: '🍞', wolle: '🧶', stoffe: '🧵', getreide: '🌾', mehl: '🥣',
   zuckerrohr: '🎋', alkohol: '🥃', tabakblaetter: '🍂', tabak: '🚬',
-  gewuerze: '🌶️', kleidung: '👕', schmuck: '💍', waffen: '🗡️' };
+  gewuerze: '🌶️', kleidung: '👕', schmuck: '💍', waffen: '🗡️', eisenerz: '🔩' };
 // Dynamischer Markt: jeder Kauf treibt den Preis einer Ware nach oben,
 // jeder Verkauf drückt ihn – und zwar für ALLE Spieler. Wer dieselben
 // Waren braucht wie die Konkurrenz, zahlt also drauf. Mit der Zeit
@@ -484,14 +496,14 @@ function handelAusfuehren(sp, ware, menge) {
     R.gold -= kosten;
     R[ware] += menge;
     sp.kontingent -= menge;
-    markt[ware] = Math.min(3, markt[ware] * (1 + 0.006 * menge));    // Nachfrage → teurer
+    markt[ware] = Math.min(6, markt[ware] * (1 + 0.009 * menge));    // Nachfrage → teurer
   } else {
     const anzahl = Math.min(-menge, Math.floor(R[ware]));
     if (anzahl <= 0) { handelFehler = 'Nichts zum Verkaufen da'; return false; }
     R[ware] -= anzahl;
     R.gold += verkaufspreis(ware) * anzahl;
     sp.kontingent -= anzahl;
-    markt[ware] = Math.max(0.5, markt[ware] * (1 - 0.004 * anzahl)); // Überangebot → billiger
+    markt[ware] = Math.max(0.4, markt[ware] * (1 - 0.005 * anzahl)); // Überangebot → billiger
   }
   return true;
 }
@@ -639,7 +651,7 @@ const WAREN_NAME = { holz: 'Holz', werkzeuge: 'Werkzeuge', ziegel: 'Ziegel',
   nahrung: 'Nahrung', wolle: 'Wolle', stoffe: 'Stoffe', getreide: 'Getreide',
   mehl: 'Mehl', zuckerrohr: 'Zuckerrohr', alkohol: 'Alkohol',
   tabakblaetter: 'Tabakblätter', tabak: 'Tabakwaren', gewuerze: 'Gewürze',
-  kleidung: 'Kleidung', schmuck: 'Schmuck', waffen: 'Waffen' };
+  kleidung: 'Kleidung', schmuck: 'Schmuck', waffen: 'Waffen', eisenerz: 'Eisenerz' };
 
 // Gebäudekatalog. Kosten in Gold/Holz/Werkzeugen, Unterhalt in Gold je Sekunde.
 // "dauer" = Sekunden je Produktionszyklus, "radius" = Wirkungs-/Suchradius in Kacheln.
@@ -670,43 +682,43 @@ const GEBAEUDE = {
   fischer: {
     name: 'Fischerhütte', emoji: '🎣', w: 1, h: 1, farbe: '#a9c3d6', abStufe: 0,
     kosten: { gold: 90, holz: 5, werkzeuge: 2 }, unterhalt: 0.06,
-    dauer: 4, radius: 3, brauchtKueste: true,
+    dauer: 6, radius: 3, brauchtKueste: true,
     beschr: 'Fängt Fisch (Nahrung). Muss direkt an der Küste stehen.',
   },
   holzfaeller: {
     name: 'Holzfällerhütte', emoji: '🪓', w: 1, h: 1, farbe: '#b99b74', abStufe: 0,
     kosten: { gold: 90, holz: 3, werkzeuge: 1 }, unterhalt: 0.06,
-    dauer: 5, radius: 4,
+    dauer: 8, radius: 4,
     beschr: 'Schlägt Holz. Braucht Wald in Reichweite – der Wald wächst langsam nach.',
   },
   jagd: {
     name: 'Jagdhütte', emoji: '🏹', w: 1, h: 1, farbe: '#a8b58a', abStufe: 0,
     kosten: { gold: 110, holz: 4, werkzeuge: 1 }, unterhalt: 0.07,
-    dauer: 5, radius: 5,
+    dauer: 8, radius: 5,
     beschr: 'Erlegt Wild (Nahrung). Braucht Wald in Reichweite, fällt aber keine Bäume.',
   },
   schaffarm: {
     name: 'Schaffarm', emoji: '🐑', w: 1, h: 1, farbe: '#cfd8b0', abStufe: 0,
     kosten: { gold: 180, holz: 6, werkzeuge: 2 }, unterhalt: 0.09,
-    dauer: 6, radius: 3,
+    dauer: 9, radius: 3,
     beschr: 'Erzeugt Wolle. Braucht freies Grasland als Weide im Umkreis.',
   },
   weberei: {
     name: 'Weberei', emoji: '🧶', w: 1, h: 1, farbe: '#d6b8c8', abStufe: 0,
     kosten: { gold: 240, holz: 8, werkzeuge: 3 }, unterhalt: 0.12,
-    dauer: 5,
+    dauer: 8,
     beschr: 'Webt Wolle zu Stoffen. Kette: Schaffarm → Weberei → Stoffe (Bedürfnis ab Siedlern).',
   },
   zuckerrohr: {
     name: 'Zuckerrohrplantage', emoji: '🎋', w: 1, h: 1, farbe: '#bcd6a0', abStufe: 0,
     kosten: { gold: 180, holz: 5, werkzeuge: 1 }, unterhalt: 0.08,
-    dauer: 5, radius: 3,
+    dauer: 8, radius: 3,
     beschr: 'Baut Zuckerrohr an. Braucht freie Felder im Umkreis – Rohstoff der Brennerei.',
   },
   brennerei: {
     name: 'Brennerei', emoji: '🥃', w: 1, h: 1, farbe: '#d9b06a', abStufe: 0,
     kosten: { gold: 300, holz: 10, werkzeuge: 3 }, unterhalt: 0.14,
-    dauer: 5,
+    dauer: 8,
     beschr: 'Brennt Alkohol aus Zuckerrohr. Kette: Plantage → Brennerei (Bedürfnis ab Siedlern).',
   },
   kapelle: {
@@ -716,34 +728,46 @@ const GEBAEUDE = {
     beschr: 'Stillt das Bedürfnis nach Glauben. Nötig, damit Pioniere zu Siedlern aufsteigen.',
   },
   // ---------- ab Siedlern (abStufe 1) ----------
+  eisenmine: {
+    name: 'Eisenmine', emoji: '⛏️', w: 1, h: 1, farbe: '#9aa4ad', abStufe: 0,
+    kosten: { gold: 220, holz: 10, werkzeuge: 3 }, unterhalt: 0.10,
+    dauer: 12, radius: 4,
+    beschr: 'Fördert Eisenerz aus den Bergen. Eisen ist die Grundlage für Werkzeuge und Waffen – ohne Berge keine eigene Industrie.',
+  },
+  goldmine: {
+    name: 'Goldmine', emoji: '🪙', w: 1, h: 1, farbe: '#e0c77a', abStufe: 1,
+    kosten: { gold: 700, holz: 15, werkzeuge: 6, ziegel: 8 }, unterhalt: 0.25,
+    dauer: 15, radius: 4,
+    beschr: 'Schürft Goldmünzen aus einer Goldader. Gold gibt es nur auf einer einzigen Insel der Welt.',
+  },
   ziegelei: {
     name: 'Ziegelei', emoji: '🧱', w: 1, h: 1, farbe: '#cf9a86', abStufe: 1,
     kosten: { gold: 250, holz: 8, werkzeuge: 2 }, unterhalt: 0.12,
-    dauer: 6, radius: 5,
+    dauer: 9, radius: 5,
     beschr: 'Brennt Ziegel – das Baumaterial für höhere Häuser und Prunkbauten. Braucht Gestein (Berge) in der Nähe.',
   },
   schmiede: {
     name: 'Werkzeugschmiede', emoji: '⚒️', w: 1, h: 1, farbe: '#b8b8b8', abStufe: 1,
     kosten: { gold: 280, holz: 10, werkzeuge: 2 }, unterhalt: 0.15,
-    dauer: 8, radius: 5,
-    beschr: 'Fertigt Werkzeuge aus Holz. Braucht ein Gesteinsvorkommen (Berge) in der Nähe. Bis dahin: Werkzeuge im Kontor kaufen.',
+    dauer: 12, radius: 5,
+    beschr: 'Schmiedet Werkzeuge aus Eisenerz. Ohne Eisenmine (oder Zukauf im Kontor) geht nichts.',
   },
   getreidefarm: {
     name: 'Getreidefarm', emoji: '🌾', w: 1, h: 1, farbe: '#e0d29a', abStufe: 1,
     kosten: { gold: 200, holz: 6, werkzeuge: 2 }, unterhalt: 0.09,
-    dauer: 5, radius: 3,
+    dauer: 8, radius: 3,
     beschr: 'Baut Getreide an. Braucht freie Felder (Grasland) im Umkreis.',
   },
   muehle: {
     name: 'Mühle', emoji: '⚙️', w: 1, h: 1, farbe: '#d8cdb8', abStufe: 1,
     kosten: { gold: 250, holz: 8, werkzeuge: 2 }, unterhalt: 0.10,
-    dauer: 4,
+    dauer: 6,
     beschr: 'Mahlt Getreide zu Mehl. Kette: Getreidefarm → Mühle → Bäckerei.',
   },
   baeckerei: {
     name: 'Bäckerei', emoji: '🥖', w: 1, h: 1, farbe: '#e2c398', abStufe: 1,
     kosten: { gold: 300, holz: 8, werkzeuge: 3 }, unterhalt: 0.12,
-    dauer: 4,
+    dauer: 6,
     beschr: 'Backt aus Mehl reichlich Brot – die ergiebigste Nahrungsquelle.',
   },
   schule: {
@@ -756,25 +780,25 @@ const GEBAEUDE = {
   rinderfarm: {
     name: 'Rinderfarm', emoji: '🐄', w: 1, h: 1, farbe: '#d3c4a2', abStufe: 2,
     kosten: { gold: 250, holz: 8, werkzeuge: 2 }, unterhalt: 0.10,
-    dauer: 7, radius: 3,
+    dauer: 10, radius: 3,
     beschr: 'Züchtet Rinder auf der Weide – liefert kräftige Fleischrationen (Nahrung).',
   },
   tabakplantage: {
     name: 'Tabakplantage', emoji: '🍂', w: 1, h: 1, farbe: '#c9b884', abStufe: 2,
     kosten: { gold: 280, holz: 8, werkzeuge: 2 }, unterhalt: 0.11,
-    dauer: 5, radius: 3,
+    dauer: 8, radius: 3,
     beschr: 'Baut Tabak an. Braucht freie Felder im Umkreis – Rohstoff für Tabakwaren.',
   },
   tabakladen: {
     name: 'Tabakwaren-Manufaktur', emoji: '🚬', w: 1, h: 1, farbe: '#bfa98e', abStufe: 2,
     kosten: { gold: 350, holz: 10, werkzeuge: 3, ziegel: 5 }, unterhalt: 0.15,
-    dauer: 5,
+    dauer: 8,
     beschr: 'Rollt Tabakblätter zu Tabakwaren (Bedürfnis ab Bürgern).',
   },
   gewuerzplantage: {
     name: 'Gewürzplantage', emoji: '🌶️', w: 1, h: 1, farbe: '#d1a48a', abStufe: 2,
     kosten: { gold: 300, holz: 8, werkzeuge: 2 }, unterhalt: 0.11,
-    dauer: 6, radius: 3,
+    dauer: 9, radius: 3,
     beschr: 'Erntet feurige Gewürze (Bedürfnis ab Bürgern). Braucht freie Felder im Umkreis.',
   },
   badehaus: {
@@ -787,14 +811,33 @@ const GEBAEUDE = {
   schneiderei: {
     name: 'Schneiderei', emoji: '👕', w: 1, h: 1, farbe: '#d6c2d8', abStufe: 3,
     kosten: { gold: 450, holz: 10, werkzeuge: 4, ziegel: 8 }, unterhalt: 0.18,
-    dauer: 6,
+    dauer: 9,
     beschr: 'Näht feine Kleidung aus Stoffen (Bedürfnis ab Kaufleuten).',
   },
   goldschmiede: {
     name: 'Goldschmiede', emoji: '💍', w: 1, h: 1, farbe: '#e2cf9a', abStufe: 3,
     kosten: { gold: 600, holz: 10, werkzeuge: 5, ziegel: 10 }, unterhalt: 0.22,
-    dauer: 9, radius: 5,
+    dauer: 14, radius: 5,
     beschr: 'Fertigt Schmuck aus Golderz (Bedürfnis der Aristokraten). Golderz gibt es nur auf einer einzigen Insel der Welt – besiedle sie zuerst!',
+  },
+  // ---------- Denkmäler: nur mit Gunst zufriedener Bürger ----------
+  statue: {
+    name: 'Statue', emoji: '🗿', w: 1, h: 1, farbe: '#cfc9bd', abStufe: 1,
+    kosten: { gold: 1200, ziegel: 20, werkzeuge: 6 }, unterhalt: 0.05,
+    gunst: 1, einmalig: true, bonus: 'steuern', bonusWert: 0.12, hp: 200,
+    beschr: 'Ein Denkmal zu Ehren deiner Siedlung: +12 % Steuereinnahmen. Kostet eine Gunst, die du durch dauerhaft zufriedene Bürger verdienst.',
+  },
+  ruhmeshalle: {
+    name: 'Ruhmeshalle', emoji: '🏛️', w: 2, h: 2, farbe: '#ded6c4', abStufe: 2,
+    kosten: { gold: 2500, ziegel: 40, werkzeuge: 12, holz: 25 }, unterhalt: 0.15,
+    gunst: 2, einmalig: true, bonus: 'kontingent', bonusWert: 0.25, hp: 300,
+    beschr: 'Dein Ruf eilt dir voraus: +25 % Handelskontingent. Kostet zwei Gunst.',
+  },
+  triumphbogen: {
+    name: 'Triumphbogen', emoji: '🏟️', w: 2, h: 2, farbe: '#d8ccb4', abStufe: 3,
+    kosten: { gold: 4000, ziegel: 60, werkzeuge: 20, holz: 40 }, unterhalt: 0.20,
+    gunst: 3, einmalig: true, bonus: 'wachstum', bonusWert: 0.3, hp: 350,
+    beschr: 'Die Menschen strömen in deine Stadt: 30 % schnelleres Bevölkerungswachstum. Kostet drei Gunst.',
   },
   theater: {
     name: 'Theater', emoji: '🎭', w: 2, h: 2, farbe: '#e0c9d4', abStufe: 3,
@@ -806,8 +849,8 @@ const GEBAEUDE = {
   waffenschmiede: {
     name: 'Waffenschmiede', emoji: '🗡️', w: 1, h: 1, farbe: '#b0a0a0', abStufe: 1,
     kosten: { gold: 320, holz: 10, werkzeuge: 4 }, unterhalt: 0.16,
-    dauer: 6,
-    beschr: 'Schmiedet Waffen aus Werkzeugen. Waffen braucht man für Soldaten und Kriegsschiffe – oder man verkauft sie teuer.',
+    dauer: 9,
+    beschr: 'Schmiedet Waffen aus Eisenerz. Waffen braucht man für Soldaten und Kriegsschiffe – oder man verkauft sie teuer.',
   },
   wachturm: {
     name: 'Wachturm', emoji: '🗼', w: 1, h: 1, farbe: '#a8a8a8', abStufe: 1,
@@ -867,29 +910,34 @@ const GEB_INFO = {
   bruecke:         { produziert: 'Flussübergang für die Marktversorgung', standort: 'Auf einem Fluss' },
   marktplatz:      { produziert: 'Marktversorgung (Radius 9)' },
   wohnhaus:        { verbraucht: '🍞, höhere Stufen auch 🧵 🥃 🚬 🌶️ 👕 💍', produziert: '💰 Steuern' },
-  fischer:         { produziert: '1 🍞 alle 4 s', standort: 'Meer oder Fluss im Umkreis (R 3)' },
-  holzfaeller:     { produziert: '1 🪵 alle 5 s', standort: 'Wald im Umkreis (R 4)' },
-  jagd:            { produziert: '1 🍞 alle 5 s', standort: 'Wald im Umkreis (R 5)' },
-  schaffarm:       { produziert: '1 🧶 alle 6 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
-  weberei:         { produziert: '1 🧵 alle 5 s', verbraucht: '1 🧶 Wolle' },
-  zuckerrohr:      { produziert: '1 🎋 alle 5 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
-  brennerei:       { produziert: '1 🥃 alle 5 s', verbraucht: '1 🎋 Zuckerrohr' },
+  fischer:         { produziert: '1 🍞 alle 6 s', standort: 'Meer oder Fluss im Umkreis (R 3)' },
+  holzfaeller:     { produziert: '1 🪵 alle 8 s', standort: 'Wald im Umkreis (R 4)' },
+  jagd:            { produziert: '1 🍞 alle 8 s', standort: 'Wald im Umkreis (R 5)' },
+  schaffarm:       { produziert: '1 🧶 alle 9 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
+  weberei:         { produziert: '1 🧵 alle 8 s', verbraucht: '1 🧶 Wolle' },
+  zuckerrohr:      { produziert: '1 🎋 alle 8 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
+  brennerei:       { produziert: '1 🥃 alle 8 s', verbraucht: '1 🎋 Zuckerrohr' },
   kapelle:         { produziert: 'Glaube (Radius 9)' },
-  ziegelei:        { produziert: '1 🧱 alle 6 s', verbraucht: 'Gestein', standort: 'Berge im Umkreis (R 5)' },
-  schmiede:        { produziert: '1 ⚒️ alle 8 s', verbraucht: '1 🪵 Holz + Gestein', standort: 'Berge im Umkreis (R 5)' },
-  getreidefarm:    { produziert: '1 🌾 alle 5 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
-  muehle:          { produziert: '1 🥣 alle 4 s', verbraucht: '1 🌾 Getreide' },
-  baeckerei:       { produziert: '2 🍞 alle 4 s', verbraucht: '1 🥣 Mehl' },
+  eisenmine:       { produziert: '1 🔩 alle 12 s', verbraucht: 'Eisenvorkommen', standort: '🔩 Eisen im Umkreis (R 4)' },
+  goldmine:        { produziert: '25 💰 je Förderung', verbraucht: 'Goldader', standort: '🪙 Gold im Umkreis (R 4) – nur auf der Goldinsel' },
+  ziegelei:        { produziert: '1 🧱 alle 9 s', verbraucht: 'Gestein', standort: 'Berge im Umkreis (R 5)' },
+  schmiede:        { produziert: '1 ⚒️ alle 12 s', verbraucht: '1 🔩 Eisenerz' },
+  getreidefarm:    { produziert: '1 🌾 alle 8 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
+  muehle:          { produziert: '1 🥣 alle 6 s', verbraucht: '1 🌾 Getreide' },
+  baeckerei:       { produziert: '2 🍞 alle 6 s', verbraucht: '1 🥣 Mehl' },
   schule:          { produziert: 'Bildung (Radius 9)' },
-  rinderfarm:      { produziert: '2 🍞 alle 7 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
-  tabakplantage:   { produziert: '1 🍂 alle 5 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
-  tabakladen:      { produziert: '1 🚬 alle 5 s', verbraucht: '1 🍂 Tabakblätter' },
-  gewuerzplantage: { produziert: '1 🌶️ alle 6 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
+  rinderfarm:      { produziert: '2 🍞 alle 10 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
+  tabakplantage:   { produziert: '1 🍂 alle 8 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
+  tabakladen:      { produziert: '1 🚬 alle 8 s', verbraucht: '1 🍂 Tabakblätter' },
+  gewuerzplantage: { produziert: '1 🌶️ alle 9 s', standort: 'Eigene Felder im 3×3 – 6 Felder = 100 %' },
   badehaus:        { produziert: 'Erholung (Radius 9)' },
-  schneiderei:     { produziert: '1 👕 alle 6 s', verbraucht: '1 🧵 Stoffe' },
-  goldschmiede:    { produziert: '1 💍 alle 9 s', verbraucht: 'Golderz', standort: '🪙 Goldvorkommen (R 5) – nur auf der Goldinsel!' },
+  schneiderei:     { produziert: '1 👕 alle 9 s', verbraucht: '1 🧵 Stoffe' },
+  goldschmiede:    { produziert: '1 💍 alle 14 s', verbraucht: 'Golderz', standort: '🪙 Goldvorkommen (R 5) – nur auf der Goldinsel!' },
   theater:         { produziert: 'Kultur (Radius 9)' },
-  waffenschmiede:  { produziert: '1 🗡️ alle 6 s', verbraucht: '1 ⚒️ Werkzeug' },
+  statue:          { produziert: '+12 % Steuern', verbraucht: '1 Gunst' },
+  ruhmeshalle:     { produziert: '+25 % Handelskontingent', verbraucht: '2 Gunst' },
+  triumphbogen:    { produziert: '+30 % Wachstum', verbraucht: '3 Gunst' },
+  waffenschmiede:  { produziert: '1 🗡️ alle 9 s', verbraucht: '1 🔩 Eisenerz' },
   wachturm:        { produziert: 'Verteidigung (Radius 5)' },
   kaserne:         { produziert: `Soldaten (${TRUPP_MANN} Mann je Aushebung)`, verbraucht: '💰 🗡️ und Einwohner' },
   werft:           { produziert: 'Kriegsschiffe', verbraucht: '💰 🪵 🗡️', standort: 'An der Küste' },
@@ -900,11 +948,13 @@ const MENUE_GRUPPEN = [
   { titel: 'Siedlung',
     typen: ['kontor', 'marktplatz', 'wohnhaus', 'bruecke', 'kapelle', 'schule', 'badehaus', 'theater'] },
   { titel: 'Rohstoffe',
-    typen: ['holzfaeller', 'fischer', 'jagd', 'ziegelei', 'schmiede'] },
+    typen: ['holzfaeller', 'fischer', 'jagd', 'ziegelei', 'eisenmine', 'goldmine', 'schmiede'] },
   { titel: 'Anbau',
     typen: ['schaffarm', 'getreidefarm', 'zuckerrohr', 'tabakplantage', 'gewuerzplantage', 'rinderfarm'] },
   { titel: 'Verarbeitung',
     typen: ['weberei', 'muehle', 'baeckerei', 'brennerei', 'tabakladen', 'schneiderei', 'goldschmiede'] },
+  { titel: 'Denkmäler',
+    typen: ['statue', 'ruhmeshalle', 'triumphbogen'] },
   { titel: 'Militär',
     typen: ['waffenschmiede', 'wachturm', 'kaserne', 'werft'] },
 ];
@@ -912,7 +962,7 @@ const MENUE_GRUPPEN = [
 /* ---------- 2. SPIELZUSTAND ---------------------------------- */
 
 // Bauplan, den die KI-Spieler Schritt für Schritt abarbeiten
-const KI_PLAN = ['wohnhaus', 'fischer', 'wohnhaus', 'holzfaeller', 'wohnhaus',
+const KI_PLAN = ['wohnhaus', 'fischer', 'wohnhaus', 'holzfaeller', 'eisenmine', 'wohnhaus',
   'jagd', 'wohnhaus', 'kapelle', 'schaffarm', 'weberei', 'wohnhaus', 'wohnhaus',
   'zuckerrohr', 'brennerei', 'fischer', 'wohnhaus', 'ziegelei', 'schule',
   'wohnhaus', 'wohnhaus', 'marktplatz', 'getreidefarm', 'muehle', 'baeckerei',
@@ -921,7 +971,7 @@ const KI_PLAN = ['wohnhaus', 'fischer', 'wohnhaus', 'holzfaeller', 'wohnhaus',
   'theater', 'wohnhaus', 'wohnhaus', 'wohnhaus'];
 
 // Ab welcher eigenen Höchststufe eine KI diese Ware im Handel einkauft
-const KI_EINKAUF = { nahrung: 0, holz: 0, stoffe: 0, alkohol: 0, ziegel: 1,
+const KI_EINKAUF = { nahrung: 0, holz: 0, eisenerz: 0, stoffe: 0, alkohol: 0, ziegel: 1,
   tabak: 1, gewuerze: 1, waffen: 1, kleidung: 2, schmuck: 3 };
 
 // Alle Spieler: du (Index 0) und drei Konkurrent:innen mit eigener Kasse,
@@ -937,19 +987,24 @@ function neuerSpieler(id, name, farbe, ki, start) {
     handelsMalus: 0, handelsBonus: 0,
     embargo: [false, false, false, false],   // gegen wen läuft ein Embargo?
     ueberfallen: false,                      // hat ohne Kriegserklärung angegriffen?
+    gunst: 0, zufriedenZeit: 0,              // Gunst durch dauerhaft zufriedene Bürger
+    boni: { steuern: 1, kontingent: 1, wachstum: 1 },
+    schiff: null, zielInsel: -1,             // eigenes Segelschiff (auch für die KI)
     plan: ki ? [...KI_PLAN] : null,   // Bauplan nur für die KI
     aggression: 0.6 + id * 0.25,      // wie stark die KI aufrüstet
     res: { gold: 10000, holz: 40, werkzeuge: 20, ziegel: 0, nahrung: 40,
            wolle: 0, stoffe: 0, getreide: 0, mehl: 0, zuckerrohr: 0,
            alkohol: 0, tabakblaetter: 0, tabak: 0, gewuerze: 0,
-           kleidung: 0, schmuck: 0, waffen: 0 },
+           kleidung: 0, schmuck: 0, waffen: 0, eisenerz: 10 },
   };
 }
 const spieler = [
   neuerSpieler(0, 'Du',       '#16a34a', false, 0),
-  neuerSpieler(1, 'Isabella', '#dc2626', true,  25),
-  neuerSpieler(2, 'Wilhelm',  '#2563eb', true,  70),
-  neuerSpieler(3, 'Giovanna', '#d97706', true,  120),
+  // Alle liegen am selben Startpunkt; die Gegner stechen 15 Sekunden
+  // später in See – du hast also einen fairen Vorsprung bei der Inselwahl.
+  neuerSpieler(1, 'Isabella', '#dc2626', true,  15),
+  neuerSpieler(2, 'Wilhelm',  '#2563eb', true,  15),
+  neuerSpieler(3, 'Giovanna', '#d97706', true,  15),
 ];
 const res = spieler[0].res;   // Kurzname für die eigenen Vorräte
 
@@ -957,8 +1012,37 @@ let karte = [];      // N*N Kacheln: { typ, baum, stein, var }
 let belegt = [];     // N*N: welches Gebäude steht hier? (oder null)
 let gebaeude = [];   // Liste aller Gebäude
 let naechsteId = 1;
-let inselMarke = null;    // je Kachel: Nummer der Landfläche (Insel) oder -1
-let inselGroessen = [];   // Größe jeder Insel in Kacheln
+let inselMarke = null;      // je Kachel: Nummer der Landfläche (Insel) oder -1
+let inselGroessen = [];     // Größe jeder Insel in Kacheln
+let inselBoden = [];        // je Insel: Ertragsfaktor je Feldfrucht
+const duerre = { insel: -1, bis: 0, naechste: 150 };   // laufende Dürre
+
+// Diese Betriebe hängen vom Boden ab – auf der einen Insel gedeiht
+// Getreide prächtig, auf der anderen eher Tabak.
+const BODEN_FRUECHTE = ['getreidefarm', 'zuckerrohr', 'tabakplantage',
+                        'gewuerzplantage', 'schaffarm', 'rinderfarm'];
+
+// Bodenqualität einer Insel für einen Betrieb (1 = normal)
+function bodenFaktor(insel, typ) {
+  if (insel < 0 || !inselBoden[insel]) return 1;
+  return inselBoden[insel][typ] || 1;
+}
+function bodenText(faktor) {
+  return faktor >= 1.4 ? 'sehr fruchtbar' : faktor >= 1.15 ? 'gut geeignet'
+       : faktor <= 0.6 ? 'karg' : 'durchschnittlich';
+}
+
+// Würfelt für jede Insel aus, was dort besonders gut bzw. schlecht wächst
+function boedenWuerfeln() {
+  inselBoden = inselGroessen.map(() => {
+    const werte = {};
+    const misch = [...BODEN_FRUECHTE].sort(() => Math.random() - 0.5);
+    werte[misch[0]] = 1.6;                 // eine Spezialität
+    werte[misch[1]] = 1.3;
+    werte[misch[misch.length - 1]] = 0.5;  // und ein Sorgenkind
+    return werte;
+  });
+}
 
 const state = {
   werkzeug: 'kontor',     // aktives Werkzeug: 'zeiger', 'abriss' oder Gebäudetyp
@@ -1060,7 +1144,7 @@ function weltErzeugen() {
         else if (hoehe < 0.62) typ = 'gras';
         else                   typ = 'berg';
 
-        const k = { typ, baum: 0, stein: 0, golderz: 0, var: rnd() };
+        const k = { typ, baum: 0, stein: 0, golderz: 0, eisen: 0, var: rnd() };
         if (typ === 'berg') k.stein = 200 + Math.round(rnd() * 300);
         karte.push(k);
         belegt.push(null);
@@ -1178,9 +1262,16 @@ function weltErzeugen() {
       if (marke[i] === goldInsel && karte[i].typ === 'berg')
         karte[i].golderz = 120 + Math.round(rnd() * 180);
 
+    // Eisen liegt breiter gestreut: gut zwei Drittel aller übrigen Berge
+    // führen Erz – aber eben nur Berge, und die hat nicht jede Insel.
+    for (let i = 0; i < N * N; i++)
+      if (karte[i].typ === 'berg' && !karte[i].golderz && rnd() < 0.68)
+        karte[i].eisen = 200 + Math.round(rnd() * 300);
+
     // Insel-Kennzeichnung für die KI-Besiedlung aufheben
     inselMarke = marke;
     inselGroessen = flaechen.map(f => f.groesse);
+    boedenWuerfeln();
     return; // Welt angenommen
   }
   // Notnagel (praktisch nie nötig): letzte gewürfelte Welt behalten
@@ -1243,6 +1334,22 @@ function segelWeg(zx, zy) {
 }
 
 // Das Schiff fährt seinen Weg Punkt für Punkt ab
+// Bewegt die Schiffe der Gegner (deines steuert schiffUpdate)
+function kiSchiffeUpdate(dt) {
+  for (const sp of spieler) {
+    const s = sp.schiff;
+    if (!sp.ki || !s || !s.pfad.length) continue;
+    let strecke = SIM.schiffTempo * dt;
+    while (strecke > 0 && s.pfad.length) {
+      const ziel = s.pfad[0];
+      const dx = ziel.x - s.x, dy = ziel.y - s.y;
+      const d = Math.hypot(dx, dy);
+      if (d <= strecke) { s.x = ziel.x; s.y = ziel.y; s.pfad.shift(); strecke -= d; }
+      else { s.x += dx / d * strecke; s.y += dy / d * strecke; strecke = 0; }
+    }
+  }
+}
+
 function schiffUpdate(dt) {
   let strecke = SIM.schiffTempo * dt;
   while (strecke > 0 && schiff.pfad.length) {
@@ -1279,6 +1386,7 @@ function belegtAuf(x, y) {
 // Stand auch bei 140×140 Kacheln bequem hineinpasst.
 
 const STAND_SCHLUESSEL = 'inselgruender-stand-v1';
+const STAND_FASSUNG = 2;   // bei Regeländerungen erhöhen
 const KACHEL_TYPEN = ['wasser', 'strand', 'gras', 'wald', 'berg', 'fluss'];
 
 // Inseln neu durchnummerieren (nach dem Laden nötig)
@@ -1312,19 +1420,20 @@ function inselnMarkieren() {
 
 function standSammeln() {
   // Karte als vier kompakte Zahlenfelder
-  const typen = [], baeume = [], steine = [], erze = [], varianten = [];
+  const typen = [], baeume = [], steine = [], erze = [], eisen = [], varianten = [];
   for (const k of karte) {
     typen.push(KACHEL_TYPEN.indexOf(k.typ));
     baeume.push(Math.round(k.baum * 100));
     steine.push(k.stein | 0);
     erze.push(k.golderz | 0);
+    eisen.push(k.eisen | 0);
     varianten.push(Math.round(k.var * 255));
   }
   return {
-    fassung: 1,
+    fassung: STAND_FASSUNG,
     zeit: Date.now(),
     spielzeit: state.spielzeit,
-    karte: { typen, baeume, steine, erze, varianten },
+    karte: { typen, baeume, steine, erze, eisen, varianten },
     gebaeude: gebaeude.map(g => ({
       typ: g.typ, x: g.x, y: g.y, spieler: g.spieler,
       hp: g.hp, maxHp: g.maxHp, ausbau: g.ausbau,
@@ -1343,8 +1452,10 @@ function standSammeln() {
       res: sp.res, maxStufe: sp.maxStufe, planIdx: sp.planIdx, extra: sp.extra,
       kontingent: sp.kontingent, kontingentMax: sp.kontingentMax,
       embargo: sp.embargo, aggression: sp.aggression, timer: sp.timer,
+      gunst: sp.gunst, zufriedenZeit: sp.zufriedenZeit, zielInsel: sp.zielInsel,
+      schiff: sp.schiff ? { x: sp.schiff.x, y: sp.schiff.y, pfad: sp.schiff.pfad } : null,
     })),
-    feindschaft, diploEffekte, markt, autoHandel,
+    feindschaft, diploEffekte, markt, autoHandel, inselBoden, duerre,
     schiff: { x: schiff.x, y: schiff.y, pfad: schiff.pfad },
     kontorGebaut: state.kontorGebaut,
     gewonnen: state.gewonnen, rennenVorbei: state.rennenVorbei,
@@ -1363,13 +1474,20 @@ function spielSpeichern(still) {
 }
 
 function standVorhanden() {
-  try { return !!localStorage.getItem(STAND_SCHLUESSEL); } catch (e) { return false; }
+  try {
+    const roh = localStorage.getItem(STAND_SCHLUESSEL);
+    if (!roh) return false;
+    return JSON.parse(roh).fassung === STAND_FASSUNG;
+  } catch (e) { return false; }
 }
 
 function spielLaden(still) {
   let d;
   try { d = JSON.parse(localStorage.getItem(STAND_SCHLUESSEL)); } catch (e) { d = null; }
-  if (!d || d.fassung !== 1) { if (!still) melden('Kein passender Spielstand gefunden'); return false; }
+  if (!d || d.fassung !== STAND_FASSUNG) {
+    if (!still) melden('Der gespeicherte Stand stammt aus einer älteren Fassung');
+    return false;
+  }
 
   // Karte zurückbauen
   karte = [];
@@ -1380,6 +1498,7 @@ function spielLaden(still) {
       baum: d.karte.baeume[i] / 100,
       stein: d.karte.steine[i],
       golderz: d.karte.erze[i],
+      eisen: d.karte.eisen ? d.karte.eisen[i] : 0,
       var: d.karte.varianten[i] / 255,
     });
   }
@@ -1412,12 +1531,18 @@ function spielLaden(still) {
       maxStufe: gesp.maxStufe, planIdx: gesp.planIdx, extra: gesp.extra,
       kontingent: gesp.kontingent, kontingentMax: gesp.kontingentMax,
       embargo: gesp.embargo, aggression: gesp.aggression, timer: gesp.timer,
+      gunst: gesp.gunst || 0, zufriedenZeit: gesp.zufriedenZeit || 0,
+      zielInsel: gesp.zielInsel === undefined ? -1 : gesp.zielInsel,
+      schiff: gesp.schiff ? { x: gesp.schiff.x, y: gesp.schiff.y, pfad: gesp.schiff.pfad || [] }
+                          : { x: schiff.x, y: schiff.y, pfad: [] },
     });
     spieler[i].kontor = gebaeude.find(g => g.typ === 'kontor' && g.spieler === i) || null;
   });
 
   feindschaft = d.feindschaft;
   diploEffekte = d.diploEffekte || [];
+  if (d.inselBoden) inselBoden = d.inselBoden; else boedenWuerfeln();
+  if (d.duerre) Object.assign(duerre, d.duerre);
   Object.assign(markt, d.markt);
   Object.assign(autoHandel, d.autoHandel);
   schiff.x = d.schiff.x; schiff.y = d.schiff.y; schiff.pfad = d.schiff.pfad || [];
@@ -1512,6 +1637,13 @@ function steinKachelImUmkreis(cx, cy, radius) {
   return fund;
 }
 
+// Eisenvorkommen mit Restbestand im Umkreis finden
+function eisenKachelImUmkreis(cx, cy, radius) {
+  let fund = null;
+  imUmkreis(cx, cy, radius, (k) => { if (k.eisen > 0 && !fund) fund = k; });
+  return fund;
+}
+
 // Goldvorkommen mit Restbestand im Umkreis finden (nur auf der Goldinsel)
 function goldKachelImUmkreis(cx, cy, radius) {
   let fund = null;
@@ -1533,6 +1665,15 @@ function flussDazwischen(ax, ay, bx, by) {
       if (!b || b.typ !== 'bruecke') return true;
     }
   }
+  return false;
+}
+
+// Hat dieser Spieler ein Kontor auf der angegebenen Insel?
+function kontorAufInsel(sid, insel) {
+  if (insel < 0) return false;
+  for (const g of gebaeude)
+    if (g.typ === 'kontor' && g.spieler === sid &&
+        inselMarke[g.y * N + g.x] === insel) return true;
   return false;
 }
 
@@ -1607,6 +1748,10 @@ function platzOK(typ, ax, ay, sid = 0) {
   const def = GEBAEUDE[typ];
   if (spieler[sid].maxStufe < def.abStufe)
     return { ok: false, grund: 'Erst ab ' + STUFEN[def.abStufe].name + 'n verfügbar' };
+  if (def.einmalig && gebaeude.some(g => g.typ === typ && g.spieler === sid))
+    return { ok: false, grund: `${def.name}: gibt es nur einmal je Siedlung` };
+  if (def.gunst && spieler[sid].gunst < def.gunst)
+    return { ok: false, grund: `Dafür brauchst du ${def.gunst} 🏅 Gunst (du hast ${spieler[sid].gunst}) – halte deine Bürger zufrieden` };
   if (ax < 0 || ay < 0 || ax + def.w > N || ay + def.h > N)
     return { ok: false, grund: 'Außerhalb der Karte' };
 
@@ -1622,6 +1767,12 @@ function platzOK(typ, ax, ay, sid = 0) {
     if (belegtAuf(x, y)) return { ok: false, grund: 'Hier steht bereits ein Gebäude' };
   }
 
+  // Ohne eigenes Kontor auf der Insel wird dort nicht gebaut
+  if (typ !== 'kontor' && inselMarke) {
+    const insel = inselMarke[ay * N + ax];
+    if (!kontorAufInsel(sid, insel))
+      return { ok: false, grund: 'Kein eigenes Kontor auf dieser Insel – zuerst besiedeln' };
+  }
   if (def.brauchtKueste && !kuesteNah(ax, ay, def, typ === 'fischer'))
     return { ok: false, grund: typ === 'fischer'
       ? 'Muss an Küste oder Fluss liegen' : 'Muss an der Küste liegen' };
@@ -1636,9 +1787,12 @@ function platzOK(typ, ax, ay, sid = 0) {
     return { ok: false, grund: 'Kein Wald in Reichweite' };
   if (typ === 'jagd' && baeumeImUmkreis(cx, cy, def.radius) < 0.5)
     return { ok: false, grund: 'Kein Wald in Reichweite' };
-  if ((typ === 'schmiede' || typ === 'ziegelei') &&
-      !steinKachelImUmkreis(cx, cy, def.radius))
+  if (typ === 'ziegelei' && !steinKachelImUmkreis(cx, cy, def.radius))
     return { ok: false, grund: 'Kein Gesteinsvorkommen (Berge) in der Nähe' };
+  if (typ === 'eisenmine' && !eisenKachelImUmkreis(cx, cy, def.radius))
+    return { ok: false, grund: 'Kein Eisenvorkommen 🔩 in der Nähe – such einen Berg' };
+  if (typ === 'goldmine' && !goldKachelImUmkreis(cx, cy, def.radius))
+    return { ok: false, grund: 'Kein Goldvorkommen 🪙 – das gibt es nur auf der Goldinsel!' };
   if (typ === 'goldschmiede' && !goldKachelImUmkreis(cx, cy, def.radius))
     return { ok: false, grund: 'Kein Goldvorkommen 🪙 – das gibt es nur auf der Goldinsel!' };
   if (typ === 'wohnhaus' && !marktAnbindung(cx, cy, sid))
@@ -1666,6 +1820,7 @@ function platziere(typ, tx, ty, sid = 0) {
   const def = GEBAEUDE[typ];
   const R = spieler[sid].res;
   for (const [ware, menge] of Object.entries(gebKosten(typ, sid))) R[ware] -= menge;
+  if (def.gunst) spieler[sid].gunst -= def.gunst;
 
   const geb = {
     id: naechsteId++, typ, x: ax, y: ay, spieler: sid,
@@ -1749,21 +1904,48 @@ function abreissen(geb) {
 
 // Größte noch unbesiedelte Insel suchen und dort das Kontor errichten
 function kiSiedeln(sp) {
-  const besetzt = new Set();
-  for (const g of gebaeude)
-    if (g.typ === 'kontor') besetzt.add(inselMarke[g.y * N + g.x]);
-  let insel = -1, groesse = 0;
-  for (let i = 0; i < inselGroessen.length; i++)
-    if (!besetzt.has(i) && inselGroessen[i] > groesse) { insel = i; groesse = inselGroessen[i]; }
-  if (insel < 0) return;
-  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-    if (inselMarke[y * N + x] !== insel) continue;
-    const a = ankerVon('kontor', x, y);
-    if (platzOK('kontor', a.x, a.y, sp.id).ok && platziere('kontor', x, y, sp.id)) {
-      melden(`⛵ ${sp.name} hat eine Insel besiedelt!`, 'ki-siedeln');
+  const s = sp.schiff;
+  if (!s || s.pfad.length) return;      // noch auf See
+
+  // Noch kein Ziel? Die größte freie Insel ansteuern.
+  if (sp.zielInsel < 0) {
+    const besetzt = new Set();
+    for (const g of gebaeude)
+      if (g.typ === 'kontor') besetzt.add(inselMarke[g.y * N + g.x]);
+    for (const andere of spieler)
+      if (andere !== sp && andere.zielInsel >= 0) besetzt.add(andere.zielInsel);
+    let insel = -1, groesse = 0;
+    for (let i = 0; i < inselGroessen.length; i++)
+      if (!besetzt.has(i) && inselGroessen[i] > groesse) { insel = i; groesse = inselGroessen[i]; }
+    if (insel < 0) return;
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      if (inselMarke[y * N + x] !== insel) continue;
+      const hafen = freiesFeldNeben(x + 0.5, y + 0.5, seeFrei);
+      if (!hafen) continue;
+      const weg = wegSuche(Math.floor(s.x), Math.floor(s.y),
+                           Math.floor(hafen.x), Math.floor(hafen.y), seeFrei);
+      if (!weg) continue;
+      sp.zielInsel = insel;
+      s.pfad = weg;
+      melden(`⛵ ${sp.name} sticht in See!`, 'ki-start-' + sp.id);
       return;
     }
+    return;
   }
+
+  // Angekommen: Kontor in Ufernähe errichten
+  for (let r = 1; r <= 10; r++)
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      const x = Math.floor(s.x) + dx, y = Math.floor(s.y) + dy;
+      if (x < 0 || y < 0 || x >= N || y >= N) continue;
+      if (inselMarke[y * N + x] !== sp.zielInsel) continue;
+      const a = ankerVon('kontor', x, y);
+      if (platzOK('kontor', a.x, a.y, sp.id).ok && platziere('kontor', x, y, sp.id)) {
+        melden(`⚓ ${sp.name} hat eine Insel besiedelt!`, 'ki-siedeln');
+        return;
+      }
+    }
+  sp.zielInsel = -1;   // dort ging nichts – neues Ziel suchen
 }
 
 // Bauplatz möglichst nah am eigenen Kontor suchen
@@ -2031,7 +2213,8 @@ function diploSchritt(dt, unterhaltJe) {
     const kontore = gebaeude.reduce((n, g) =>
       n + (g.typ === 'kontor' && g.spieler === sp.id ? 1 : 0), 0);
     const basis = HANDEL.basis + sp.einwohner * HANDEL.jeEinwohner + kontore * HANDEL.jeKontor;
-    sp.kontingentMax = Math.max(40, Math.round(basis * (1 + sp.handelsBonus - sp.handelsMalus)));
+    sp.kontingentMax = Math.max(40, Math.round(
+      basis * sp.boni.kontingent * (1 + sp.handelsBonus - sp.handelsMalus)));
     sp.kontingent = Math.min(sp.kontingentMax,
       sp.kontingent + sp.kontingentMax / HANDEL.erholung * dt);
   }
@@ -2544,12 +2727,18 @@ function simSchritt(dt) {
     // Kleine Helfer für die zwei Produktions-Bauarten:
     // Sammler ernten aus der Umgebung, Verarbeiter wandeln eine Ware um.
     // Liefert true, wenn in diesem Schritt eine Einheit fertig wurde.
+    // Boden und Wetter wirken auf alle Feldbetriebe
+    const insel = inselMarke ? inselMarke[geb.y * N + geb.x] : -1;
+    const wetter = (duerre.insel === insel && state.spielzeit < duerre.bis) ? 0.35 : 1;
+    const boden = BODEN_FRUECHTE.includes(geb.typ)
+      ? bodenFaktor(insel, geb.typ) * wetter : 1;
+
     const sammler = (eff, ware, menge = 1) => {
       geb.eff = eff;
       geb.fortschritt += dt * eff;
       if (geb.fortschritt >= def.dauer) {
         geb.fortschritt -= def.dauer;
-        R[ware] += menge * ausbauFaktor(geb);
+        R[ware] += menge * ausbauFaktor(geb) * boden;
         return true;
       }
       return false;
@@ -2611,7 +2800,7 @@ function simSchritt(dt) {
       case 'baeckerei':   verarbeiter('mehl', 'nahrung', 2); break;
       case 'tabakladen':  verarbeiter('tabakblaetter', 'tabak'); break;
       case 'schneiderei': verarbeiter('stoffe', 'kleidung'); break;
-      case 'waffenschmiede': verarbeiter('werkzeuge', 'waffen'); break;
+      case 'waffenschmiede': verarbeiter('eisenerz', 'waffen'); break;
 
       // --- Betriebe am Gestein ---
       case 'ziegelei': {
@@ -2623,14 +2812,31 @@ function simSchritt(dt) {
         } else geb.eff = Math.max(0, geb.eff - dt);
         break;
       }
-      case 'schmiede': {
-        const stein = steinKachelImUmkreis(z.x, z.y, def.radius);
-        if (R.holz >= 1 && stein) {
+      case 'schmiede': verarbeiter('eisenerz', 'werkzeuge'); break;
+
+      case 'eisenmine': {
+        const erz = eisenKachelImUmkreis(z.x, z.y, def.radius);
+        if (erz) {
           geb.eff = Math.min(1, geb.eff + dt);
           geb.fortschritt += dt;
           if (geb.fortschritt >= def.dauer) {
             geb.fortschritt -= def.dauer;
-            R.holz -= 1; R.werkzeuge += ausbauFaktor(geb); stein.stein -= 1;
+            R.eisenerz += ausbauFaktor(geb);
+            erz.eisen -= 1;
+          }
+        } else geb.eff = Math.max(0, geb.eff - dt);
+        break;
+      }
+
+      case 'goldmine': {
+        const ader = goldKachelImUmkreis(z.x, z.y, def.radius);
+        if (ader) {
+          geb.eff = Math.min(1, geb.eff + dt);
+          geb.fortschritt += dt;
+          if (geb.fortschritt >= def.dauer) {
+            geb.fortschritt -= def.dauer;
+            R.gold += 25 * ausbauFaktor(geb);
+            ader.golderz -= 1;
           }
         } else geb.eff = Math.max(0, geb.eff - dt);
         break;
@@ -2656,8 +2862,8 @@ function simSchritt(dt) {
         geb.zufrieden = markt && warenOK;
 
         // Steuern: Unzufriedene zahlen nur die Hälfte
-        steuernJe[geb.spieler] +=
-          geb.ew * st.steuer * mietFaktor(geb) * (geb.zufrieden ? 1 : 0.5) * dt;
+        steuernJe[geb.spieler] += geb.ew * st.steuer * mietFaktor(geb) *
+          sp.boni.steuern * (geb.zufrieden ? 1 : 0.5) * dt;
 
         // Hunger: nach einer Weile ziehen Leute weg
         if (sp.hunger) {
@@ -2671,7 +2877,9 @@ function simSchritt(dt) {
         // Wachstum bei Zufriedenheit
         if (geb.zufrieden && geb.ew < geb.maxEw) {
           geb.wachsZeit += dt;
-          if (geb.wachsZeit >= SIM.wachstumsDauer) { geb.wachsZeit = 0; geb.ew += 1; }
+          if (geb.wachsZeit >= SIM.wachstumsDauer / sp.boni.wachstum) {
+            geb.wachsZeit = 0; geb.ew += 1;
+          }
         } else geb.wachsZeit = 0;
 
         // Aufstieg zur nächsten Stufe: Haus gut gefüllt, die Waren der
@@ -2710,6 +2918,47 @@ function simSchritt(dt) {
     }
   }
 
+  // --- Gunst: wer seine Bürger dauerhaft zufrieden hält, wird belohnt ---
+  for (const sp of spieler) {
+    const haeuser = gebaeude.filter(g => g.typ === 'wohnhaus' && g.spieler === sp.id);
+    const alleFroh = haeuser.length >= 3 && haeuser.every(h => h.zufrieden);
+    if (alleFroh) {
+      sp.zufriedenZeit += dt;
+      if (sp.zufriedenZeit >= 90) {
+        sp.zufriedenZeit = 0;
+        sp.gunst++;
+        if (sp.id === 0)
+          melden('🏅 Deine Bürger sind rundum zufrieden – du erhältst eine Gunst! Baue ein Denkmal.');
+      }
+    } else sp.zufriedenZeit = Math.max(0, sp.zufriedenZeit - dt * 0.5);
+
+    // Denkmals-Boni neu zusammenrechnen
+    sp.boni = { steuern: 1, kontingent: 1, wachstum: 1 };
+    for (const g of gebaeude) {
+      if (g.spieler !== sp.id) continue;
+      const def = GEBAEUDE[g.typ];
+      if (def.bonus) sp.boni[def.bonus] += def.bonusWert;
+    }
+  }
+
+  // --- Wetter: hin und wieder trocknet eine Insel aus ---
+  if (state.spielzeit > duerre.naechste && inselGroessen.length) {
+    // Nur bewohnte Inseln trifft es – sonst merkt es niemand
+    const bewohnt = [...new Set(gebaeude.map(g => inselMarke[g.y * N + g.x]))]
+      .filter(i => i >= 0);
+    if (bewohnt.length) {
+      duerre.insel = bewohnt[(Math.random() * bewohnt.length) | 0];
+      duerre.bis = state.spielzeit + 70 + Math.random() * 50;
+      const meine = gebaeude.some(g => g.spieler === 0 &&
+        inselMarke[g.y * N + g.x] === duerre.insel);
+      melden(meine
+        ? '🌵 Dürre auf deiner Insel! Die Felder bringen nur noch ein Drittel.'
+        : '🌵 Eine Dürre sucht eine Nachbarinsel heim.');
+    }
+    duerre.naechste = state.spielzeit + 180 + Math.random() * 180;
+  }
+  if (duerre.insel >= 0 && state.spielzeit >= duerre.bis) duerre.insel = -1;
+
   // --- Wirtschaftskrieg: Sanktionen, Kontingente, Stimmung ---
   diploSchritt(dt, unterhaltJe);
 
@@ -2725,7 +2974,7 @@ function simSchritt(dt) {
 
   // --- Marktpreise pendeln langsam zum Normalwert zurück ---
   for (const ware of Object.keys(markt))
-    markt[ware] += (1 - markt[ware]) * 0.01 * dt;
+    markt[ware] += (1 - markt[ware]) * 0.005 * dt;
 
   // --- Auto-Handel: dein Lager nach deinen Regeln auffüllen/leeren ---
   state.autoTimer = (state.autoTimer || 0) + dt;
@@ -2835,6 +3084,9 @@ function kachelInhalt(x, y) {
     if (k.golderz > 0) {
       tctx.font = `${TP * 0.32}px sans-serif`;
       tctx.fillText('🪙', px + TP * 0.72, py + TP * 0.75);
+    } else if (k.eisen > 0) {
+      tctx.font = `${TP * 0.3}px sans-serif`;
+      tctx.fillText('🔩', px + TP * 0.72, py + TP * 0.75);
     } else if (k.stein > 0 && k.var > 0.5) {
       tctx.font = `${TP * 0.28}px sans-serif`;
       tctx.fillText('🪨', px + TP * 0.75, py + TP * 0.78);
@@ -3058,6 +3310,20 @@ function zeichnen() {
     ctx.fillText('🚩', zielP.x * T, zielP.y * T - 6);
   }
   const wippen = Math.sin(performance.now() / 650) * 1.5;
+  // Zuerst die Schiffe der Gegner (mit farbigem Wimpel)
+  for (const sp of spieler) {
+    if (!sp.ki || !sp.schiff || sp.kontor) continue;
+    const sx = sp.schiff.x * T, sy = sp.schiff.y * T;
+    ctx.font = `${T * 0.8}px sans-serif`;
+    ctx.fillText('⛵', sx, sy - 4 + wippen);
+    ctx.beginPath();
+    ctx.arc(sx + T * 0.3, sy - T * 0.3, T * 0.13, 0, Math.PI * 2);
+    ctx.fillStyle = sp.farbe;
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
   ctx.font = `${T * 0.9}px sans-serif`;
   ctx.fillText('⛵', schiff.x * T, schiff.y * T - 4 + wippen);
 
@@ -3650,6 +3916,7 @@ function uiAktualisieren() {
     rangliste.map(sp => `<div class="punkte-zeile">` +
       `<span><span style="color:${sp.farbe}">●</span> ${sp.name}</span>` +
       `<span>${sp.kontor ? STUFEN[sp.maxStufe].emoji + ' ' + sp.siedlerEw : '⛵ …'}</span></div>`).join('');
+  $('r-gunst').textContent = spieler[0].gunst || 0;
   $('r-einwohner').textContent = state.einwohner || 0;
   $('r-siedler').textContent = state.siedlerEw || 0;
   $('ziel-balken').firstElementChild.style.width =
@@ -3663,6 +3930,17 @@ function uiAktualisieren() {
     warnung.textContent = '⚠️ Kasse leer! Bankrott in ' +
       Math.ceil(SIM.pleiteDauer - state.pleiteZeit) + ' s – Unterhalt senken oder Steuern steigern!';
   } else warnung.style.display = 'none';
+
+  // Dürre-Hinweis (eigene Insel betroffen?)
+  const duerreLeiste = $('duerre-warnung');
+  const eigeneDuerre = duerre.insel >= 0 && state.spielzeit < duerre.bis &&
+    gebaeude.some(g => g.spieler === 0 && inselMarke &&
+      inselMarke[g.y * N + g.x] === duerre.insel);
+  if (eigeneDuerre) {
+    duerreLeiste.style.display = 'block';
+    duerreLeiste.textContent = '🌵 Dürre – deine Felder bringen nur 35 % (noch ' +
+      Math.ceil(duerre.bis - state.spielzeit) + ' s)';
+  } else duerreLeiste.style.display = 'none';
 
   // Pulsierende Mangel-Warnung: welche Waren fehlen den Einwohnern?
   const mangelWaren = Object.keys(state.mangel || {});
@@ -3688,8 +3966,9 @@ function effVorschau(typ, ax, ay) {
     case 'fischer':     return Math.min(1, wasserImUmkreis(cx, cy, def.radius) / 6);
     case 'jagd':        return Math.min(1, baeumeImUmkreis(cx, cy, def.radius) / 5);
     case 'holzfaeller': return Math.min(1, baeumeImUmkreis(cx, cy, def.radius) / 4);
-    case 'ziegelei': case 'schmiede':
-      return steinKachelImUmkreis(cx, cy, def.radius) ? 1 : 0;
+    case 'ziegelei':  return steinKachelImUmkreis(cx, cy, def.radius) ? 1 : 0;
+    case 'eisenmine': return eisenKachelImUmkreis(cx, cy, def.radius) ? 1 : 0;
+    case 'goldmine':  return goldKachelImUmkreis(cx, cy, def.radius) ? 1 : 0;
     case 'goldschmiede':
       return goldKachelImUmkreis(cx, cy, def.radius) ? 1 : 0;
     default: return null;
@@ -3714,8 +3993,14 @@ function auslastungGrund(geb) {
     case 'holzfaeller':
       return `Waldbestand im Umkreis: ${baeumeImUmkreis(z.x, z.y, def.radius).toFixed(1)} von 4 nötig (Bäume wachsen langsam nach)`;
     case 'schaffarm': case 'getreidefarm': case 'zuckerrohr':
-    case 'tabakplantage': case 'gewuerzplantage': case 'rinderfarm':
-      return `${(geb.felder || []).length} von 6 eigenen Feldern (3×3) angelegt`;
+    case 'tabakplantage': case 'gewuerzplantage': case 'rinderfarm': {
+      const insel = inselMarke ? inselMarke[geb.y * N + geb.x] : -1;
+      const bf = bodenFaktor(insel, geb.typ);
+      const trocken = duerre.insel === insel && state.spielzeit < duerre.bis;
+      return `${(geb.felder || []).length} von 6 eigenen Feldern (3×3) angelegt · ` +
+             `Boden: ×${bf.toFixed(2).replace('.', ',')} (${bodenText(bf)})` +
+             (trocken ? ' · <b style="color:var(--rot)">🌵 Dürre: nur 35 %</b>' : '');
+    }
     case 'ziegelei':
       return steinKachelImUmkreis(z.x, z.y, def.radius)
         ? 'Gesteinsvorkommen in Reichweite – volle Leistung'
@@ -3724,9 +4009,16 @@ function auslastungGrund(geb) {
       return goldKachelImUmkreis(z.x, z.y, def.radius)
         ? '🪙 Goldvorkommen in Reichweite – volle Leistung'
         : 'Kein Golderz mehr in Reichweite – Produktion steht!';
-    case 'schmiede':
-      return (steinKachelImUmkreis(z.x, z.y, def.radius) ? 'Gestein vorhanden' : 'Kein Gestein in Reichweite!') +
-             `, Holz im Lager: ${Math.floor(lager.holz)}`;
+    case 'eisenmine': {
+      const erz = eisenKachelImUmkreis(z.x, z.y, def.radius);
+      return erz ? `Eisenvorkommen in Reichweite (noch ${erz.eisen} Erz)`
+                 : 'Kein Eisen mehr in Reichweite – Förderung steht!';
+    }
+    case 'goldmine': {
+      const ader = goldKachelImUmkreis(z.x, z.y, def.radius);
+      return ader ? `Goldader in Reichweite (noch ${ader.golderz})`
+                  : 'Die Goldader ist erschöpft!';
+    }
     default: {
       const rein = VERARBEITER_REIN[geb.typ];
       if (rein) return `Läuft nur, solange ${WAREN_EMOJI[rein]} ${WAREN_NAME[rein]} im Lager ist (${Math.floor(lager[rein])} vorrätig)`;
@@ -3869,7 +4161,7 @@ function panelZeigen() {
             `</div>`;
 
     html += '<hr><b style="font-size:12px">⚖️ Handel</b>' +
-      '<div class="beschr" style="margin:2px 0 4px">Preise je Stück (Kauf/Verkauf) folgen der Nachfrage – auch die Konkurrenz kauft hier ein! ▲ teuer · ▼ günstig. Mit den 🔄-Knöpfen handelt dein Kontor automatisch.</div>';
+      '<div class="beschr" style="margin:2px 0 4px">Preise je Stück (Kauf/Verkauf) folgen der Nachfrage und können bis auf das Sechsfache steigen – auch die Konkurrenz kauft hier ein! ▲ teuer · ▼ günstig. Mit den 🔄-Knöpfen handelt dein Kontor automatisch.</div>';
     for (const ware of Object.keys(PREISE)) {
       const f = markt[ware];
       const trend = f > 1.15 ? ' <span style="color:#dc2626">▲</span>'
@@ -4178,6 +4470,7 @@ function schleife(jetzt) {
   const laeuft = !state.pause && !state.vorbei && (!state.gewonnen || state.weiterspielen);
   if (laeuft) {
     schiffUpdate(dt * state.tempo);
+    kiSchiffeUpdate(dt * state.tempo);
     simSchritt(dt * state.tempo);
   }
 
@@ -4207,6 +4500,8 @@ for (const ware of Object.keys(PREISE)) {
 feindschaft = spieler.map((_, a) => spieler.map((_, b) => (a === b ? 0 : 25)));
 weltErzeugen();
 schiffStart();
+// Jede Partei bekommt ihr eigenes Schiff – alle liegen am selben Punkt
+for (const sp of spieler) sp.schiff = { x: schiff.x, y: schiff.y, pfad: [] };
 menueBauen();
 kameraStart();
 leinwand.classList.add('bauen');   // Start-Werkzeug ist das Kontor
