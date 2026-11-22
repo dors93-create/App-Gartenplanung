@@ -6,7 +6,8 @@ Kegelpegel-Punktestand nutzt (`kegeltour-45451`).
 
 ## So spielt ihr zusammen
 
-1. **Beide** öffnen das Spiel:
+1. **Beide** öffnen das Spiel und laden die Seite einmal neu, damit auf
+   beiden Geräten dieselbe Fassung läuft:
    `https://dors93-create.github.io/App-Gartenplanung/inselspiel.html`
 2. Eine Person tippt oben auf **🌐** → **„Partie eröffnen"**.
    Es erscheint ein fünfstelliger Code, zum Beispiel `K7PQM`.
@@ -18,6 +19,11 @@ Kegelpegel-Punktestand nutzt (`kegeltour-45451`).
 rechnet das ganze Spiel. Es muss offen bleiben – wird es geschlossen
 oder gesperrt, pausiert das Spiel für beide. Der Gast sieht dann den
 Hinweis „Der Gastgeber ist gerade nicht erreichbar".
+
+**Am einfachsten in einer neuen Welt:** Der Gastgeber beginnt eine neue
+Welt und eröffnet die Partie gleich zu Beginn – der Mitspieler übernimmt
+dann den Platz der ersten Computergegnerin. Meldet das Spiel beim
+Beitreten eine „andere Spielfassung", hilft Neuladen auf beiden Geräten.
 
 ## Was technisch passiert
 
