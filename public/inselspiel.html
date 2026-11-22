@@ -1144,6 +1144,11 @@ function wertRauschen(rnd, gitter) {
 // Hauptinsel (genug Platz, Wald und Gestein) herauskommt.
 let weltSaat = 0;   // Startwert der aktuellen Welt (für den Mehrspieler-Modus)
 
+// Fassung der Weltgenerierung. Erhöhen, sobald sich ändert, welche Welt
+// aus einem Startwert entsteht – im Mehrspieler bauen beide Geräte die
+// Karte selbst, da müssen sie nach denselben Regeln würfeln.
+const WELT_FASSUNG = 2;    // 2: Flüsse entspringen am Berg und münden ineinander
+
 function weltErzeugen(vorgabe) {
   for (let versuch = 0; versuch < 80; versuch++) {
     const saat = vorgabe !== undefined ? vorgabe : (Math.random() * 1e9) | 0;
@@ -1232,33 +1237,65 @@ function weltErzeugen(vorgabe) {
         }
       }
     }
-    // 3–5 Quellen tief im Landesinneren; jeder Lauf fließt bergab zum Meer
-    const flussZahl = 3 + Math.floor(rnd() * 3);
-    for (let f = 0; f < flussZahl; f++) {
+    // Flüsse entspringen am Fuß eines Berges: als Quelle kommt nur Land
+    // in Frage, das direkt an eine Bergkachel grenzt und ein Stück vom
+    // Meer entfernt liegt. Inseln ohne Gebirge haben keine Flüsse.
+    const quellPlaetze = [];
+    for (let i = 0; i < N * N; i++) {
+      const t = karte[i].typ;
+      if ((t !== 'gras' && t !== 'wald') || seeDist[i] < 4) continue;
+      const x = i % N, y = (i / N) | 0;
+      for (const [ax, ay] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const n = kachel(x + ax, y + ay);
+        if (n && n.typ === 'berg') { quellPlaetze.push(i); break; }
+      }
+    }
+    // 4–6 Flüsse; jeder Lauf fließt bergab zum Meer
+    const flussZahl = 4 + Math.floor(rnd() * 3);
+    const quellen = [];
+    for (let f = 0; f < flussZahl && quellPlaetze.length; f++) {
       let quelle = -1;
-      for (let probe = 0; probe < 400; probe++) {
-        const i = (rnd() * N * N) | 0;
-        if (karte[i].typ !== 'wasser' && karte[i].typ !== 'berg' && seeDist[i] >= 6) { quelle = i; break; }
+      for (let probe = 0; probe < 80; probe++) {
+        const i = quellPlaetze[(rnd() * quellPlaetze.length) | 0];
+        if (karte[i].typ === 'fluss') continue;
+        const x = i % N, y = (i / N) | 0;
+        // Quellen nicht dicht nebeneinander und nicht direkt an einem
+        // schon vorhandenen Flusslauf
+        if (quellen.some(q => Math.hypot(q.x - x, q.y - y) < 7)) continue;
+        let amFluss = false;
+        for (let dy = -1; dy <= 1 && !amFluss; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const n = kachel(x + dx, y + dy);
+          if (n && n.typ === 'fluss') { amFluss = true; break; }
+        }
+        if (amFluss) continue;
+        quelle = i; quellen.push({ x, y });
+        break;
       }
       if (quelle < 0) continue;
-      let j = quelle;
+
+      let j = quelle, vorher = -1;
       for (let schritt = 0; schritt < 150; schritt++) {
         const k = karte[j];
         if (k.typ === 'wasser') break;   // Mündung erreicht
-        if (k.typ !== 'berg') { k.typ = 'fluss'; k.baum = 0; }
+        k.typ = 'fluss'; k.baum = 0;
         const x = j % N, y = (j / N) | 0;
-        let best = -1, bestD = seeDist[j];
+        // Den tiefsten freien Nachbarn suchen. Berge umfließt der Fluss,
+        // und trifft er auf einen anderen Lauf, mündet er dort ein –
+        // so entstehen saubere Zusammenflüsse statt paralleler Rinnen.
+        let muendet = false, best = -1, bestD = seeDist[j] + 1;
         for (const [ax, ay] of [[1,0],[-1,0],[0,1],[0,-1]]) {
           const nx = x + ax, ny = y + ay;
           if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
           const ni = ny * N + nx;
-          if (karte[ni].typ === 'fluss') continue;   // nicht zurückfließen
-          if (seeDist[ni] < bestD || (seeDist[ni] === bestD && rnd() < 0.4)) {
+          if (ni === vorher) continue;
+          if (karte[ni].typ === 'fluss') { muendet = true; continue; }
+          if (karte[ni].typ === 'berg') continue;
+          if (seeDist[ni] < bestD || (seeDist[ni] === bestD && rnd() < 0.5)) {
             bestD = seeDist[ni]; best = ni;
           }
         }
-        if (best < 0) break;
-        j = best;
+        if (muendet || best < 0) break;
+        vorher = j; j = best;
       }
     }
 
@@ -1682,7 +1719,7 @@ async function partieEroeffnen() {
     MP.code = mpCodeErzeugen();
     MP.pfad = 'inselspiel/' + MP.code;
     await fb.set(fb.ref(MP.db, MP.pfad), {
-      welt: { saat: weltSaat, erstellt: Date.now() },
+      welt: { saat: weltSaat, fassung: WELT_FASSUNG, erstellt: Date.now() },
       meta: { puls: Date.now(), gast: false },
     });
     MP.an = true; MP.rolle = 'gastgeber';
@@ -1721,6 +1758,12 @@ async function partieBeitreten(code) {
     MP.pfad = 'inselspiel/' + code;
     const welt = (await fb.get(fb.ref(MP.db, MP.pfad + '/welt'))).val();
     if (!welt) { mpStatus('Keine Partie mit diesem Code gefunden'); return; }
+    // Aus demselben Startwert entsteht nur dann dieselbe Welt, wenn beide
+    // Geräte dieselbe Spielfassung geladen haben.
+    if (welt.fassung !== WELT_FASSUNG) {
+      mpStatus('Die Partie läuft mit einer anderen Spielfassung – bitte auf beiden Geräten die Seite neu laden');
+      return;
+    }
 
     // Dieselbe Welt aus demselben Startwert aufbauen
     weltErzeugen(welt.saat);
@@ -3423,7 +3466,7 @@ function simSchritt(dt) {
 /* ---------- 7. ZEICHNEN --------------------------------------- */
 
 const leinwand = document.getElementById('karte');
-const ctx = leinwand.getContext('2d');
+let ctx = leinwand.getContext('2d');   // umschaltbar: siehe uebersichtBauen()
 let dpr = 1;
 
 /* ---------- Isometrische Projektion ---------------------------
@@ -3438,7 +3481,12 @@ let dpr = 1;
    ist die Nordecke der Kachel (3,4), isoX(4,5) ihre Südecke.
    --------------------------------------------------------------- */
 const KW = 64;                  // Breite einer Kachelraute
-const KH = 32;                  // Höhe einer Kachelraute
+const KH = 40;                  // Höhe einer Kachelraute. Bei 32 wäre es das
+                                // klassische 2:1-Schrägbild; 40 schaut steiler
+                                // von oben, die Karte wirkt weniger gestaucht.
+const HE = 30;                  // Höheneinheit für alles Aufrechte (Wände, Türme,
+                                // Bäume). Bewusst unabhängig von KH: je steiler
+                                // der Blick, desto kürzer erscheinen Wände.
 const XV = N * KW / 2;          // Nullpunktverschiebung
 const WELT_B = N * KW;          // Weltbreite in Pixeln
 const WELT_H = N * KH;          // Welthöhe in Pixeln
@@ -3446,7 +3494,8 @@ const WELT_H = N * KH;          // Welthöhe in Pixeln
 // Wie hoch liegt Land über dem Meeresspiegel (in Bildschirmpixeln)?
 const H_STRAND = 5;
 const H_LAND = 9;
-const H_BERG = 26;
+const BERG_STUFE = 30;          // Höhengewinn je Kachelreihe ins Gebirge hinein
+const BERG_MAX = 128;           // höher wird kein Grat
 
 function isoX(tx, ty) { return (tx - ty) * (KW / 2) + XV; }
 function isoY(tx, ty) { return (tx + ty) * (KH / 2); }
@@ -3463,13 +3512,12 @@ function kachelVonWelt(wx, wy) {
 function kachelHoehe(k) {
   if (!k || k.typ === 'wasser') return 0;
   if (k.typ === 'strand') return H_STRAND;
-  if (k.typ === 'fluss') return H_LAND - 4;
-  if (k.typ === 'berg') return H_LAND + H_BERG;
-  return H_LAND;
-}
+  return H_LAND;      // auch für Berge: ihr FUSS steht auf dem Plateau,
+}                     // das Gebirge selbst wird als eigene Fläche gezeichnet
 function hoeheBei(x, y) {
   if (x < 0 || y < 0 || x >= N || y >= N) return 0;
-  return hoehCache ? hoehCache[y * N + x] : kachelHoehe(karte[y * N + x]);
+  if (cacheKarte !== karte || !hoehCache) geländeCacheBauen();
+  return hoehCache[y * N + x];
 }
 
 // Mittelpunkt einer Kachel auf dem Bildschirm (mit Höhe)
@@ -3572,36 +3620,188 @@ function meerFarbe(wert) {
 // Deckfarben und Höhen ändern sich nur, wenn sich die Karte ändert.
 // Darum werden sie einmal berechnet und gemerkt – das spart in jedem
 // Bild tausende Farbrechnungen.
-let farbCache = null, hoehCache = null;
+let hoehCache = null;
+let cacheKarte = null;    // für welche Karte gilt der Cache? Wird die Welt
+                          // ausgetauscht (neues Spiel, Laden, Mehrspieler-
+                          // Beitritt), ist „karte" ein anderes Feld – dann
+                          // wird alles neu berechnet, ganz ohne Merker.
+let farbListe = null;     // alle vorkommenden Deckfarben – erst Wasser, dann
+                          // Strand, dann Land (das ist auch die Malreihenfolge)
+let farbNummer = null;    // je Kachel: welche Farbe aus der Liste
+let bergTiefe = null;     // wie tief liegt eine Bergkachel im Massiv? (0 = kein Berg)
+let eckHoehe = null;      // Höhe jedes Gitterpunkts (nur im Gebirge über H_LAND)
+let gipfelHoehe = null;   // Höhe der Kachelmitte im Gebirge
+let bergFarben = null;    // je Bergkachel die Farben ihrer vier Hangflächen
+
+// Fester Zufallswert 0…1 aus zwei Zahlen – immer derselbe für dieselbe
+// Stelle, damit das Gebirge nicht bei jedem Bild anders aussieht.
+function zufallAus(a, b) {
+  const w = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+  return w - Math.floor(w);
+}
+
+// Stimmt der Cache noch? Sonst neu aufbauen. Billig genug, um es vor
+// jedem Zugriff zu fragen.
+function gelaendeBereit() {
+  if (cacheKarte !== karte || !hoehCache || !farbListe) geländeCacheBauen();
+}
+
 function geländeCacheBauen() {
-  farbCache = new Array(N * N);
+  tiefenFeldRechnen();                   // Meerestiefen gehören zur Karte dazu
+  cacheKarte = karte;
+  uebersichtAlt = true;                  // das Übersichtsbild ist damit überholt
   hoehCache = new Float32Array(N * N);
+  const NACHBARN4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+  // --- Höhen der Deckflächen ---
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const i = y * N + x, k = karte[i];
+    let hoch = kachelHoehe(k);
+    if (k.typ === 'fluss') {
+      // Läuft der Fluss über den Strand, liegt er auf Strandhöhe
+      let strand = 0, land = 0;
+      for (const [dx, dy] of NACHBARN4) {
+        const n = kachel(x + dx, y + dy);
+        if (!n || n.typ === 'wasser' || n.typ === 'strand') strand++;
+        else if (n.typ !== 'fluss') land++;
+      }
+      if (strand > 0 && land === 0) hoch = H_STRAND;
+    }
+    hoehCache[i] = hoch;
+  }
+
+  // --- Gebirge: Randkacheln bekommen Tiefe 1, jede Reihe weiter
+  //     innen eins mehr. Daraus wächst das Massiv zur Mitte hin an. ---
+  bergTiefe = new Uint8Array(N * N);
+  let rand = [];
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    if (karte[y * N + x].typ !== 'berg') continue;
+    let aussen = false;
+    for (let dy = -1; dy <= 1 && !aussen; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const n = kachel(x + dx, y + dy);
+      if (!n || n.typ !== 'berg') { aussen = true; break; }
+    }
+    if (aussen) { bergTiefe[y * N + x] = 1; rand.push(y * N + x); }
+  }
+  for (let tiefe = 2; rand.length; tiefe++) {
+    const weiter = [];
+    for (const j of rand) {
+      const x = j % N, y = (j / N) | 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
+        const ni = ny * N + nx;
+        if (karte[ni].typ === 'berg' && !bergTiefe[ni]) { bergTiefe[ni] = tiefe; weiter.push(ni); }
+      }
+    }
+    rand = weiter;
+  }
+
+  // --- Höhen der Gitterpunkte: am Gebirgsrand bleibt alles am Boden,
+  //     innen steigt es mit der Tiefe (plus etwas Zufall für Zacken) ---
+  const E = N + 1;
+  eckHoehe = new Float32Array(E * E).fill(H_LAND);
+  for (let vy = 1; vy < N; vy++) for (let vx = 1; vx < N; vx++) {
+    const a = bergTiefe[(vy - 1) * N + vx - 1], b = bergTiefe[(vy - 1) * N + vx];
+    const c = bergTiefe[vy * N + vx - 1],       d = bergTiefe[vy * N + vx];
+    if (!a || !b || !c || !d) continue;
+    const mittel = (a + b + c + d) / 4;
+    eckHoehe[vy * E + vx] = Math.min(BERG_MAX,
+      H_LAND + BERG_STUFE * (mittel - 0.45) * (0.8 + 0.4 * zufallAus(vx, vy)));
+  }
+
+  // --- Gipfel in der Kachelmitte und Farben der vier Hänge ---
+  gipfelHoehe = new Float32Array(N * N);
+  bergFarben = new Array(N * N);
   for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
     const i = y * N + x;
-    farbCache[i] = deckFarbe(karte[i], x, y);
-    hoehCache[i] = kachelHoehe(karte[i]);
+    if (!bergTiefe[i]) continue;
+    const hN = eckHoehe[y * E + x],           hO = eckHoehe[y * E + x + 1];
+    const hS = eckHoehe[(y + 1) * E + x + 1], hW = eckHoehe[(y + 1) * E + x];
+    // Die Kachelmitte folgt im Massiv dem Hang und ragt nur leicht
+    // heraus – selten etwas mehr, das sind die Gipfel. Steht ein Fels
+    // dagegen einzeln (alle Ecken am Boden), wird er selbst zur Kuppe.
+    const zc = zufallAus(x + 0.5, y + 0.5);
+    const hC = Math.max(hN, hO, hS, hW) <= H_LAND
+      ? H_LAND + BERG_STUFE * (0.6 + 0.45 * zc)
+      : Math.min(BERG_MAX + 14, (hN + hO + hS + hW) / 4
+                 + BERG_STUFE * (0.06 + 0.42 * Math.pow(zc, 2.2)));
+    gipfelHoehe[i] = hC;
+    const z = zufallAus(x * 3.1, y * 1.7);
+    bergFarben[i] = [
+      hangFarbe(0, 1, hW, 0, 0, hN, hC, z),    // hinten links  (W–N)
+      hangFarbe(0, 0, hN, 1, 0, hO, hC, z),    // hinten rechts (N–O)
+      hangFarbe(1, 1, hS, 0, 1, hW, hC, z),    // vorn links    (S–W)
+      hangFarbe(1, 0, hO, 1, 1, hS, hC, z),    // vorn rechts   (O–S)
+    ];
   }
+
+  // --- Deckfarben (brauchen die fertigen Höhen) ---
+  // Jede Farbe kommt nur einmal in die Liste; die Kacheln merken sich
+  // ihre Nummer. So lassen sich später alle Kacheln einer Farbe in
+  // einem einzigen Rutsch füllen statt jede einzeln.
+  const nummern = new Map();
+  farbListe = [];
+  farbNummer = new Uint16Array(N * N);
+  for (const stufe of [0, H_STRAND, H_LAND]) {
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const i = y * N + x;
+      if (hoehCache[i] !== stufe) continue;
+      const farbe = deckFarbe(karte[i], x, y);
+      let nr = nummern.get(farbe);
+      if (nr === undefined) { nr = farbListe.length; farbListe.push(farbe); nummern.set(farbe, nr); }
+      farbNummer[i] = nr;
+    }
+  }
+}
+
+// Farbe einer Hangfläche: Dreieck aus zwei Ecken (a, b) und der
+// Kachelmitte. Helligkeit nach der Neigung zum Licht (von links vorn),
+// Farbton nach der Höhe: unten bewachsenes Geröll, oben Fels, ganz
+// oben Schnee.
+function hangFarbe(ax, ay, az, bx, by, bz, cz, zufall) {
+  const S = 36;                         // so viele Pixel Höhe = eine Kachelbreite
+  const ux = bx - ax, uy = by - ay, uz = (bz - az) / S;
+  const vx = 0.5 - ax, vy = 0.5 - ay, vz = (cz - az) / S;
+  let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+  if (nz < 0) { nx = -nx; ny = -ny; nz = -nz; }
+  const laenge = Math.hypot(nx, ny, nz) || 1;
+  const licht = (nx * -0.5 + ny * 0.45 + nz * 0.74) / laenge;
+  const hell = 0.64 + 0.6 * Math.max(0, licht) + (zufall - 0.5) * 0.07;
+  const hoch = (az + bz + cz) / 3;
+  // unten bewachsenes Geröll, darüber Fels, ganz oben Schnee
+  let farbe = mischen([150, 141, 128], [122, 132, 90], Math.max(0, 1 - (hoch - H_LAND) / 20) * 0.5);
+  farbe = mischen(farbe, [244, 246, 250], Math.max(0, Math.min(1, (hoch - 72) / 24)) * 0.9);
+  return `rgb(${Math.min(255, Math.round(farbe[0] * hell))},${
+               Math.min(255, Math.round(farbe[1] * hell))},${
+               Math.min(255, Math.round(farbe[2] * hell))})`;
 }
 
 // Grundfarbe der Deckfläche einer Kachel
 function deckFarbe(k, x, y) {
-  const v = (k.var - 0.5) * 9;
+  // drei Helligkeitsstufen je Geländeart, das Meer in feinen Tiefenstufen
+  const v = (Math.round(k.var * 2) - 1) * 2.5;
   switch (k.typ) {
-    case 'wasser': return ton(meerFarbe(tiefenFeld ? tiefenFeld[y * N + x] : 5.5), v * 0.3);
+    case 'wasser': return ton(meerFarbe(
+                     Math.round((tiefenFeld ? tiefenFeld[y * N + x] : 5.5) * 4) / 4), 0);
     case 'strand': return ton(PALETTE.sand, v);
-    case 'fluss':  return ton(PALETTE.fluss, v * 0.5);
+    // Flusskacheln sind Uferwiese bzw. Strand – das Wasser selbst
+    // wird als durchgehendes Band darübergelegt (siehe flussZeichnen)
+    case 'fluss':  return hoehCache && hoehCache[y * N + x] === H_STRAND
+                     ? ton(PALETTE.sand, v) : ton(PALETTE.gras, v - 6);
     case 'wald':   return ton(PALETTE.wald, v * 0.6);
-    case 'berg':   return ton(PALETTE.bergHell, v);
+    case 'berg':   return ton(mischen(PALETTE.berg, [112, 128, 86], 0.6), v);
     default:       return ton(PALETTE.gras, v);
   }
 }
 
-// Farbe der Steilkante unter einer Kachel (Erde, Sand oder Fels)
-function kantenFarbe(k, dunkler) {
-  const basis = k.typ === 'berg' ? PALETTE.berg
-              : k.typ === 'strand' ? PALETTE.sandDunkel : PALETTE.erde;
-  return ton(basis, dunkler ? -26 : 0);
-}
+// Farben der Steilkanten: je Bodenart erst die dunkle rechte, dann
+// die helle linke Flanke (Fels, Sand, Erde)
+const KANTEN_FARBEN = [
+  ton(PALETTE.berg, -26), ton(PALETTE.berg, 0),
+  ton(PALETTE.sandDunkel, -26), ton(PALETTE.sandDunkel, 0),
+  ton(PALETTE.erde, -26), ton(PALETTE.erde, 0),
+];
 
 /* ---------- Sichtbarer Ausschnitt ------------------------------ */
 // Welche Kacheln liegen überhaupt im Bild? Alles andere wird
@@ -3617,10 +3817,10 @@ function sichtBereich() {
     y0 = Math.min(y0, t.y); y1 = Math.max(y1, t.y);
   }
   return {
-    x0: Math.max(0, Math.floor(x0) - 1), x1: Math.min(N - 1, Math.ceil(x1) + 3),
-    y0: Math.max(0, Math.floor(y0) - 1), y1: Math.min(N - 1, Math.ceil(y1) + 3),
+    x0: Math.max(0, Math.floor(x0) - 1), x1: Math.min(N - 1, Math.ceil(x1) + 4),
+    y0: Math.max(0, Math.floor(y0) - 1), y1: Math.min(N - 1, Math.ceil(y1) + 4),
     links: kamera.x - KW, rechts: kamera.x + b + KW,
-    oben: kamera.y - KH * 4, unten: kamera.y + h + KH * 2,
+    oben: kamera.y - KH * 2, unten: kamera.y + h + BERG_MAX + KH,
   };
 }
 
@@ -3634,18 +3834,42 @@ function imBild(s, x, y) {
 // Erst alle Deckflächen, dann alle Steilkanten: so verdeckt keine
 // später gezeichnete Kachel die Kante ihres Nachbarn.
 function bodenZeichnen(s, fein) {
-  if (!farbCache) geländeCacheBauen();
+  gelaendeBereit();
 
-  // 1. Deckflächen
+  // 1. Deckflächen: alle Kacheln derselben Farbe wandern in einen
+  //    gemeinsamen Pfad und werden zusammen gefüllt. Das sind statt
+  //    tausender Füllungen nur ein paar Dutzend je Bild.
+  //    Gebündelt wird je Kachelreihe: riesige Pfade über das ganze Bild
+  //    wären für den Browser wieder langsamer als viele kleine.
+  const pfade = new Array(farbListe.length);
+  const benutzt = [];
+  const wachs = 0.6;                                // hauchdünn überlappen
   for (let y = s.y0; y <= s.y1; y++) {
+    benutzt.length = 0;
     for (let x = s.x0; x <= s.x1; x++) {
       if (!imBild(s, x, y)) continue;
-      const i = y * N + x;
-      rautePfad(x, y, hoehCache[i], 0.6);
-      ctx.fillStyle = farbCache[i];
-      ctx.fill();
+      const i = y * N + x, nr = farbNummer[i];
+      const nx = (x - y) * (KW / 2) + XV, ny = (x + y) * (KH / 2) - hoehCache[i];
+      let p = pfade[nr];
+      if (!p) { p = pfade[nr] = new Path2D(); benutzt.push(nr); }
+      p.moveTo(nx, ny - wachs);
+      p.lineTo(nx + KW / 2 + wachs, ny + KH / 2);
+      p.lineTo(nx, ny + KH + wachs);
+      p.lineTo(nx - KW / 2 - wachs, ny + KH / 2);
+      p.closePath();
+    }
+    // Reihe abschließen – in Listenreihenfolge (Wasser, Strand, Land),
+    // weil höher liegende Kacheln ihre Nachbarn leicht überdecken
+    benutzt.sort((a, b) => a - b);
+    for (const nr of benutzt) {
+      ctx.fillStyle = farbListe[nr];
+      ctx.fill(pfade[nr]);
+      pfade[nr] = null;
     }
   }
+
+  // 1b. Flüsse als durchgehendes Band über den Uferkacheln
+  const faelle = flussZeichnen(s, fein);
 
   // 2. Struktur: alle Striche in EINEM Pfad, das ist deutlich schneller
   if (fein) {
@@ -3679,123 +3903,371 @@ function bodenZeichnen(s, fein) {
     ctx.stroke();
   }
 
-  // 3. Steilkanten nach Südosten und Südwesten
+  // 3. Steilkanten nach Südosten und Südwesten – ebenfalls gebündelt:
+  //    je Bodenart (Fels, Sand, Erde) eine dunkle und eine helle Flanke
+  const kanten = [null, null, null, null, null, null];
   for (let y = s.y0; y <= s.y1; y++) {
     for (let x = s.x0; x <= s.x1; x++) {
-      if (!imBild(s, x, y)) continue;
-      const k = karte[y * N + x];
-      const hoch = hoehCache[y * N + x];
+      const i = y * N + x;
+      const hoch = hoehCache[i];
       if (hoch <= 0) continue;
       const hO = hoeheBei(x + 1, y);      // Nachbar nach rechts/unten (Ost)
       const hS = hoeheBei(x, y + 1);      // Nachbar nach links/unten (Süd)
       if (hO >= hoch && hS >= hoch) continue;
-      // rechte Flanke: Kante Ostecke -> Südecke
-      if (hO < hoch) {
-        const ax = isoX(x + 1, y), ay = isoY(x + 1, y);
-        const bx = isoX(x + 1, y + 1), by = isoY(x + 1, y + 1);
-        ctx.beginPath();
-        ctx.moveTo(ax, ay - hoch); ctx.lineTo(bx, by - hoch);
-        ctx.lineTo(bx, by - hO); ctx.lineTo(ax, ay - hO);
-        ctx.closePath();
-        ctx.fillStyle = kantenFarbe(k, true);
-        ctx.fill();
+      if (!imBild(s, x, y)) continue;
+      const k = karte[i];
+      const art = k.typ === 'berg' ? 0 : (hoch === H_STRAND ? 2 : 4);
+      const nx = (x - y) * (KW / 2) + XV, ny = (x + y) * (KH / 2);
+      if (hO < hoch) {                    // rechte Flanke: Ostecke -> Südecke
+        const p = kanten[art] || (kanten[art] = new Path2D());
+        p.moveTo(nx + KW / 2, ny + KH / 2 - hoch); p.lineTo(nx, ny + KH - hoch);
+        p.lineTo(nx, ny + KH - hO); p.lineTo(nx + KW / 2, ny + KH / 2 - hO);
+        p.closePath();
       }
-      // linke Flanke: Kante Südecke -> Westecke
-      if (hS < hoch) {
-        const ax = isoX(x + 1, y + 1), ay = isoY(x + 1, y + 1);
-        const bx = isoX(x, y + 1), by = isoY(x, y + 1);
-        ctx.beginPath();
-        ctx.moveTo(ax, ay - hoch); ctx.lineTo(bx, by - hoch);
-        ctx.lineTo(bx, by - hS); ctx.lineTo(ax, ay - hS);
-        ctx.closePath();
-        ctx.fillStyle = kantenFarbe(k, false);
-        ctx.fill();
+      if (hS < hoch) {                    // linke Flanke: Südecke -> Westecke
+        const p = kanten[art + 1] || (kanten[art + 1] = new Path2D());
+        p.moveTo(nx, ny + KH - hoch); p.lineTo(nx - KW / 2, ny + KH / 2 - hoch);
+        p.lineTo(nx - KW / 2, ny + KH / 2 - hS); p.lineTo(nx, ny + KH - hS);
+        p.closePath();
       }
+    }
+  }
+  for (let f = 0; f < 6; f++) {
+    if (!kanten[f]) continue;
+    ctx.fillStyle = KANTEN_FARBEN[f];
+    ctx.fill(kanten[f]);
+  }
+
+  // 4. Mündungen: das Flusswasser stürzt über die Uferkante ins Meer
+  for (let i = 0; i < faelle.length; i += 3) {
+    const px = faelle[i], py = faelle[i + 1], hoch = faelle[i + 2];
+    ctx.fillStyle = ton(PALETTE.fluss, 18);
+    ctx.fillRect(px - KH * 0.17, py - 1, KH * 0.34, hoch + 1);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.beginPath();
+    ctx.ellipse(px, py + hoch, KH * 0.26, KH * 0.1, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// Ein Fluss ist kein Kachelmuster, sondern ein durchgehendes Band:
+// jede Flusskachel wird mit ihren Nachbarn verbunden, Biegungen werden
+// rund ausgefahren. An der Quelle kommt das Band aus dem Berg heraus,
+// an der Mündung läuft es bis an die Uferkante.
+// Je Richtung: Nachbar (dx, dy) und Mitte der gemeinsamen Kante (ex, ey).
+const FLUSS_RICHTUNGEN = [[1, 0, 1, 0.5], [-1, 0, 0, 0.5], [0, 1, 0.5, 1], [0, -1, 0.5, 0]];
+function flussZeichnen(s, fein) {
+  const faelle = [];
+  let etwas = false;
+  ctx.beginPath();
+  for (let y = s.y0; y <= s.y1; y++) for (let x = s.x0; x <= s.x1; x++) {
+    if (karte[y * N + x].typ !== 'fluss' || !imBild(s, x, y)) continue;
+    etwas = true;
+    const hoch = hoehCache[y * N + x];
+    const mx = isoX(x + 0.5, y + 0.5), my = isoY(x + 0.5, y + 0.5) - hoch;
+    const an = [];            // Anschlusspunkte, paarweise x, y
+    let berg = null;
+    for (const [dx, dy, ex, ey] of FLUSS_RICHTUNGEN) {
+      const n = kachel(x + dx, y + dy);
+      if (!n) continue;
+      // Der Übergang zur Nachbarkachel liegt nicht stur in der Kanten-
+      // mitte, sondern ein Stück daneben. Beide Kacheln rechnen aus
+      // der Kante denselben Versatz – so schlängelt sich der Lauf.
+      const kx = x + (dx > 0 ? 1 : 0), ky = y + (dy > 0 ? 1 : 0);
+      const versatz = (zufallAus(kx * 1.7 + (dx ? 0.31 : 0.77), ky * 2.3) - 0.5) * 0.5;
+      const gx = x + ex + (dy ? versatz : 0), gy = y + ey + (dx ? versatz : 0);
+      const px = isoX(gx, gy), py = isoY(gx, gy) - hoch;
+      if (n.typ === 'fluss' || n.typ === 'wasser') {
+        an.push(px, py);
+        // Mündung an einer sichtbaren (vorderen) Uferkante: Wasserfall
+        if (n.typ === 'wasser' && (dx > 0 || dy > 0)) faelle.push(px, py, hoch);
+      } else if (n.typ === 'berg' && !berg) berg = [px, py];
+    }
+    // Quelle: nur ein Anschluss, daneben ein Berg – das Wasser kommt
+    // sichtbar aus dem Bergfuß
+    if (an.length === 2 && berg) an.push(berg[0], berg[1]);
+
+    if (an.length === 4) {                // zwei Anschlüsse: runde Biegung
+      // auch der Scheitel der Biegung sitzt leicht neben der Kachelmitte
+      const sx = mx + (zufallAus(x * 2.1, y * 3.3) - 0.5) * KW * 0.2;
+      const sy = my + (zufallAus(x * 3.7, y * 1.9) - 0.5) * KH * 0.2;
+      ctx.moveTo(an[0], an[1]);
+      ctx.quadraticCurveTo(sx, sy, an[2], an[3]);
+    } else if (an.length) {               // Ende oder Zusammenfluss
+      for (let i = 0; i < an.length; i += 2) { ctx.moveTo(mx, my); ctx.lineTo(an[i], an[i + 1]); }
+    } else {                              // einzelner Tümpel
+      ctx.moveTo(mx - 1, my); ctx.lineTo(mx + 1, my);
+    }
+  }
+  if (!etwas) return faelle;
+
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = 'rgba(70,92,74,0.5)';         // feuchte Uferböschung
+  ctx.lineWidth = KH * 0.56;
+  ctx.stroke();
+  ctx.strokeStyle = ton(PALETTE.fluss, 0);        // das Wasser
+  ctx.lineWidth = KH * 0.4;
+  ctx.stroke();
+  if (fein) {                                     // wandernde Lichtstreifen
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([7, 13]);
+    ctx.lineDashOffset = -((performance.now() / 55) % 20);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
+  }
+  ctx.lineCap = 'butt'; ctx.lineJoin = 'miter';
+  return faelle;
+}
+
+// Höhe der Geländeoberfläche an einer beliebigen Stelle (gebrochene
+// Kachelkoordinaten). Auf ebenem Land ist das die Plateauhöhe, im
+// Gebirge wird zwischen Kachelmitte und den zwei nächsten Ecken
+// gemittelt – genau so, wie die Hänge gezeichnet werden.
+function oberflaeche(fx, fy) {
+  const x = Math.floor(fx), y = Math.floor(fy);
+  if (x < 0 || y < 0 || x >= N || y >= N) return -999;   // außerhalb der Karte: nie ein Treffer
+  const i = y * N + x;
+  if (!bergTiefe[i]) return hoehCache[i];
+  const E = N + 1, u = fx - x - 0.5, v = fy - y - 0.5;
+  const hC = gipfelHoehe[i];
+  const hN = eckHoehe[y * E + x],           hO = eckHoehe[y * E + x + 1];
+  const hS = eckHoehe[(y + 1) * E + x + 1], hW = eckHoehe[(y + 1) * E + x];
+  if (Math.abs(u) > Math.abs(v)) {
+    return u > 0 ? hC + (u - v) * (hO - hC) + (u + v) * (hS - hC)      // Osthang
+                 : hC + (-u - v) * (hN - hC) + (v - u) * (hW - hC);    // Westhang
+  }
+  return v > 0 ? hC + (u + v) * (hS - hC) + (v - u) * (hW - hC)        // Südhang
+               : hC + (-u - v) * (hN - hC) + (u - v) * (hO - hC);      // Nordhang
+}
+
+/* ---------- Gebirge ------------------------------------------- */
+// Jede Bergkachel besteht aus vier Hängen, die von den Ecken zur
+// Kachelmitte ansteigen. Weil benachbarte Kacheln sich die Ecken
+// teilen, wachsen sie zu einem durchgehenden Massiv zusammen:
+// am Rand flach auslaufend, innen hoch, mit Graten und Gipfeln.
+function bergKachel(x, y, fein) {
+  const E = N + 1, i = y * N + x;
+  const farben = bergFarben[i];
+  const nX = isoX(x, y),         nY = isoY(x, y) - eckHoehe[y * E + x];
+  const oX = isoX(x + 1, y),     oY = isoY(x + 1, y) - eckHoehe[y * E + x + 1];
+  const sX = isoX(x + 1, y + 1), sY = isoY(x + 1, y + 1) - eckHoehe[(y + 1) * E + x + 1];
+  const wX = isoX(x, y + 1),     wY = isoY(x, y + 1) - eckHoehe[(y + 1) * E + x];
+  const cX = isoX(x + 0.5, y + 0.5), cY = isoY(x + 0.5, y + 0.5) - gipfelHoehe[i];
+  // Jedes Dreieck wird um einen halben Pixel nach außen gedehnt –
+  // sonst blitzen zwischen den Flächen haarfeine Fugen auf.
+  const hang = (ax, ay, bx, by, farbe) => {
+    const mx = (ax + bx + cX) / 3, my = (ay + by + cY) / 3, d = 0.035;
+    ctx.beginPath();
+    ctx.moveTo(ax + (ax - mx) * d, ay + (ay - my) * d);
+    ctx.lineTo(bx + (bx - mx) * d, by + (by - my) * d);
+    ctx.lineTo(cX + (cX - mx) * d, cY + (cY - my) * d);
+    ctx.closePath();
+    ctx.fillStyle = farbe;
+    ctx.fill();
+  };
+  hang(wX, wY, nX, nY, farben[0]);      // erst die abgewandten Hänge …
+  hang(nX, nY, oX, oY, farben[1]);
+  hang(sX, sY, wX, wY, farben[2]);      // … dann die zugewandten davor
+  hang(oX, oY, sX, sY, farben[3]);
+
+  const k = karte[i];
+  if (fein && kamera.zoom > 0.7 && (k.golderz > 0 || k.eisen > 0)) {
+    // Erzadern als Einsprengsel auf dem vorderen Hang (Süd–West–Mitte):
+    // Gold funkelt deutlich, Eisen schimmert nur zurückhaltend
+    const gold = k.golderz > 0;
+    ctx.fillStyle = gold ? '#f2c744' : '#7f93a8';
+    for (let j = 0; j < (gold ? 3 : 2); j++) {
+      const a = 0.2 + 0.5 * zufallAus(i + j, 1.3);
+      const b = (1 - a) * (0.15 + 0.6 * zufallAus(i + j, 2.9));
+      ctx.beginPath();
+      ctx.arc(cX + a * (sX - cX) + b * (wX - cX), cY + a * (sY - cY) + b * (wY - cY),
+              gold ? 2.3 : 1.5, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 }
 
-/* ---------- Aufbauten einer Kachel: Fels und Bäume ------------- */
-function kachelAufbau(x, y, fein) {
-  const k = karte[y * N + x];
-  if (k.typ === 'berg') {
-    // Felszacken auf dem Bergplateau
-    const m = kachelMitte(x, y);
-    const gr = KW * (0.2 + ((k.var * 17) % 1) * 0.12);
-    const hoehe = KH * (0.6 + ((k.var * 23) % 1) * 0.7);
-    const vx = ((k.var * 31) % 1 - 0.5) * KW * 0.2;
-    ctx.beginPath();
-    ctx.moveTo(m.x + vx, m.y - hoehe);
-    ctx.lineTo(m.x + vx + gr, m.y + gr * 0.4);
-    ctx.lineTo(m.x + vx - gr, m.y + gr * 0.4);
-    ctx.closePath();
-    ctx.fillStyle = ton(PALETTE.berg, (k.var - 0.5) * 10);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(m.x + vx, m.y - hoehe);
-    ctx.lineTo(m.x + vx, m.y + gr * 0.4);
-    ctx.lineTo(m.x + vx - gr, m.y + gr * 0.4);
-    ctx.closePath();
-    ctx.fillStyle = ton(PALETTE.bergHell, (k.var - 0.5) * 8);
-    ctx.fill();
-    if (fein) {
-      const erz = k.golderz > 0 ? '#e9c04a' : k.eisen > 0 ? '#9fb3c8' : null;
-      if (erz) {
-        ctx.fillStyle = erz;
-        for (let i = 0; i < 3; i++) {
-          ctx.beginPath();
-          ctx.arc(m.x + vx - gr * 0.3 + i * gr * 0.3,
-                  m.y - hoehe * (0.1 + i * 0.18), 1.8, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-    }
-    return;
-  }
+/* ---------- Bäume ---------------------------------------------- */
+// Ein Wald besteht aus hunderten Bäumen. Jeden einzeln zu füllen wäre
+// zu langsam – darum werden die Bäume einer Kachelreihe gesammelt
+// (alle Schatten in einen Pfad, alle Stämme, alle Kronen …) und dann
+// mit wenigen Füllungen auf einmal gemalt. Steht ein Gebäude in der
+// Reihe, wird vorher gemalt, damit die Verdeckung stimmt.
+const BAUM_FARBEN = {
+  schatten: 'rgba(40,50,28,0.22)', stamm: '#6b4a2c',
+  dunkel: ton(PALETTE.waldDunkel, 0),
+  hell: [ton([104, 148, 70], -8), ton([112, 158, 76], 8)],
+  glanz: ton([136, 178, 94], 0),
+};
+const baumStapel = { da: false, schatten: null, stamm: null, dunkel: null, hell: [null, null], glanz: null };
 
-  if (k.baum > 0.02) {
-    const m = kachelMitte(x, y);
-    const anzahl = Math.max(1, Math.round(k.baum * 3));
-    for (let i = 0; i < anzahl; i++) {
-      const ox = ((k.var * 7 + i * 2.6) % 1 - 0.5) * KW * 0.55;
-      const oy = ((k.var * 13 + i * 3.7) % 1 - 0.5) * KH * 0.55;
-      const gr = KH * (0.38 + k.baum * 0.2) * (0.8 + ((k.var * 29 + i * 1.9) % 1) * 0.45);
-      const bx = m.x + ox, by = m.y + oy;
-      // Schatten
-      ctx.fillStyle = 'rgba(40,50,28,0.22)';
-      ctx.beginPath();
-      ctx.ellipse(bx + gr * 0.2, by, gr * 0.5, gr * 0.22, 0, 0, Math.PI * 2);
-      ctx.fill();
-      // Stamm
-      ctx.fillStyle = '#6b4a2c';
-      ctx.fillRect(bx - gr * 0.08, by - gr * 0.55, gr * 0.16, gr * 0.6);
-      // Krone
-      ctx.fillStyle = ton(PALETTE.waldDunkel, 0);
-      ctx.beginPath();
-      ctx.arc(bx, by - gr * 0.72, gr * 0.52, 0, Math.PI * 2);
-      ctx.fill();
-      if (fein) {
-        ctx.fillStyle = ton([111, 154, 74], ((k.var * 37 + i * 2.1) % 1 - 0.5) * 24);
-        ctx.beginPath();
-        ctx.arc(bx - gr * 0.13, by - gr * 0.88, gr * 0.37, 0, Math.PI * 2);
-        ctx.fill();
-      }
+// So viele Bäume stehen sichtbar auf einer Kachel
+function baumZahl(k) { return k.baum > 0.02 ? Math.max(1, Math.round(k.baum * 3)) : 0; }
+
+function baeumeSammeln(x, y, k, fein, nah) {
+  const st = baumStapel;
+  if (!st.da) {
+    st.da = true;
+    st.schatten = new Path2D(); st.stamm = new Path2D(); st.dunkel = new Path2D();
+    st.hell[0] = new Path2D(); st.hell[1] = new Path2D(); st.glanz = new Path2D();
+  }
+  const m = kachelMitte(x, y);
+  const anzahl = baumZahl(k);
+  const voll = Math.PI * 2;
+  for (let i = 0; i < anzahl; i++) {
+    const bx = m.x + ((k.var * 7 + i * 2.6) % 1 - 0.5) * KW * 0.55;
+    const by = m.y + ((k.var * 13 + i * 3.7) % 1 - 0.5) * KH * 0.55;
+    const gr = HE * (0.38 + k.baum * 0.2) * (0.8 + ((k.var * 29 + i * 1.9) % 1) * 0.45);
+    if (fein) {                                   // Schatten am Boden
+      st.schatten.moveTo(bx + gr * 0.7, by);
+      st.schatten.ellipse(bx + gr * 0.2, by, gr * 0.5, gr * 0.22, 0, 0, voll);
+    }
+    if (nah) st.stamm.rect(bx - gr * 0.08, by - gr * 0.55, gr * 0.16, gr * 0.6);
+    st.dunkel.moveTo(bx + gr * 0.52, by - gr * 0.72);              // Krone
+    st.dunkel.arc(bx, by - gr * 0.72, gr * 0.52, 0, voll);
+    const p = st.hell[((k.var * 37 + i * 2.1) % 1) < 0.5 ? 0 : 1];  // Lichtseite
+    p.moveTo(bx - gr * 0.12 + gr * 0.39, by - gr * 0.85);
+    p.arc(bx - gr * 0.12, by - gr * 0.85, gr * 0.39, 0, voll);
+    if (nah) {                                                      // Glanzlicht
+      st.glanz.moveTo(bx - gr * 0.2 + gr * 0.19, by - gr * 0.99);
+      st.glanz.arc(bx - gr * 0.2, by - gr * 0.99, gr * 0.19, 0, voll);
     }
   }
+}
+
+function baeumeMalen() {
+  const st = baumStapel;
+  if (!st.da) return;
+  st.da = false;
+  ctx.fillStyle = BAUM_FARBEN.schatten; ctx.fill(st.schatten);
+  ctx.fillStyle = BAUM_FARBEN.stamm;    ctx.fill(st.stamm);
+  ctx.fillStyle = BAUM_FARBEN.dunkel;   ctx.fill(st.dunkel);
+  ctx.fillStyle = BAUM_FARBEN.hell[0];  ctx.fill(st.hell[0]);
+  ctx.fillStyle = BAUM_FARBEN.hell[1];  ctx.fill(st.hell[1]);
+  ctx.fillStyle = BAUM_FARBEN.glanz;    ctx.fill(st.glanz);
+}
+
+// Nur die Landschaft (Berge und Wälder), ohne Gebäude – fürs Übersichtsbild
+function landschaftZeichnen(s, fein) {
+  for (let y = s.y0; y <= s.y1; y++) {
+    for (let x = s.x0; x <= s.x1; x++) {
+      const k = karte[y * N + x];
+      if (k.typ === 'berg') { baeumeMalen(); bergKachel(x, y, fein); }
+      else if (k.baum > 0.02) baeumeSammeln(x, y, k, fein, false);
+    }
+    baeumeMalen();
+  }
+}
+
+/* ---------- Übersichtsbild für die Fernsicht -------------------
+   Weit herausgezoomt wären zehntausende Kacheln zu zeichnen – jedes
+   Bild aufs Neue. Stattdessen wird die ganze Welt (Boden, Gebirge,
+   Flüsse, Wälder) einmal verkleinert in ein unsichtbares Bild gemalt
+   und in der Fernsicht nur noch als Ganzes gestempelt. Gebäude und
+   Schiffe kommen weiterhin frisch obendrauf.
+   --------------------------------------------------------------- */
+const FERN_ZOOM = 0.3;        // unterhalb davon gilt die Fernsicht
+const UE = 0.4;               // Maßstab des Übersichtsbilds
+const UE_RAND = 48;           // Luft nach oben für Gipfel am Kartenrand
+let uebersicht = null;
+let uebersichtAlt = true;                 // ganze Welt neu malen (Karte gewechselt)?
+const uebersichtSchmutz = new Set();      // einzelne Kacheln, deren Bäume sich geändert haben
+let uebersichtBaeume = null;              // wie viele Bäume je Kachel im Bild stecken
+function uebersichtBauen() {
+  if (!uebersicht) {
+    uebersicht = document.createElement('canvas');
+    uebersicht.width = Math.ceil(WELT_B * UE);
+    uebersicht.height = Math.ceil((WELT_H + UE_RAND + 16) * UE);
+  }
+  gelaendeBereit();
+  const haupt = ctx;
+  ctx = uebersicht.getContext('2d');      // alle Zeichenfunktionen malen jetzt hierhin
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#1a4764';
+  ctx.fillRect(0, 0, uebersicht.width, uebersicht.height);
+  ctx.setTransform(UE, 0, 0, UE, 0, UE_RAND * UE);
+  const alles = { x0: 0, x1: N - 1, y0: 0, y1: N - 1,
+                  links: -1e9, rechts: 1e9, oben: -1e9, unten: 1e9 };
+  bodenZeichnen(alles, false);
+  landschaftZeichnen(alles, false);
+  ctx = haupt;
+  uebersichtAlt = false;
+  uebersichtSchmutz.clear();
+  uebersichtBaeume = new Uint8Array(N * N);
+  for (let i = 0; i < N * N; i++) uebersichtBaeume[i] = baumZahl(karte[i]);
+}
+
+// Gemeldete Baumänderungen ins Übersichtsbild übernehmen. Die meisten
+// Meldungen sind unsichtbar (ein Baum ist nur ein wenig gewachsen) –
+// gezählt wird nur, wo sich die ANZAHL der Bäume geändert hat. Wenige
+// solche Stellen werden einzeln ausgebessert: ein kleines Fenster um
+// die Kachel, in dem Boden und Landschaft frisch gezeichnet werden.
+// Sind es viele, ist einmal alles neu malen schneller.
+function uebersichtPflegen() {
+  const echt = [];
+  for (const idx of uebersichtSchmutz)
+    if (baumZahl(karte[idx]) !== uebersichtBaeume[idx]) echt.push(idx);
+  uebersichtSchmutz.clear();
+  if (!echt.length) return;
+  if (echt.length > 50) { uebersichtBauen(); return; }
+
+  gelaendeBereit();
+  const haupt = ctx;
+  ctx = uebersicht.getContext('2d');
+  const alles = { links: -1e9, rechts: 1e9, oben: -1e9, unten: 1e9 };
+  for (const idx of echt) {
+    uebersichtBaeume[idx] = baumZahl(karte[idx]);
+    const x = idx % N, y = (idx / N) | 0;
+    const cx = isoX(x + 0.5, y + 0.5), cy = isoY(x + 0.5, y + 0.5);
+    ctx.save();
+    ctx.setTransform(UE, 0, 0, UE, 0, UE_RAND * UE);
+    ctx.beginPath();
+    ctx.rect(cx - 46, cy - H_LAND - 46, 92, 46 + H_LAND + KH * 0.5);
+    ctx.clip();
+    // Nach vorn (größere x/y) weiter ausholen: von dort ragen Berge
+    // und Bäume in das Fenster hinein
+    const s = Object.assign({ x0: Math.max(0, x - 2), x1: Math.min(N - 1, x + 5),
+                              y0: Math.max(0, y - 2), y1: Math.min(N - 1, y + 5) }, alles);
+    bodenZeichnen(s, false);
+    landschaftZeichnen(s, false);
+    ctx.restore();
+  }
+  ctx = haupt;
+}
+
+// Einfaches Haus für die Fernsicht: Wände, Dach und ein Punkt in der
+// Farbe des Besitzers – so erkennt man auf einen Blick, wem was gehört.
+function gebaeudeFern(geb) {
+  const def = GEBAEUDE[geb.typ];
+  const hoch = hoeheBei(geb.x, geb.y);
+  const cx = isoX(geb.x + def.w / 2, geb.y + def.h / 2);
+  const cy = isoY(geb.x + def.w / 2, geb.y + def.h / 2) - hoch;
+  const hw = (def.w + def.h) * KW / 4 * 0.8, hh = (def.w + def.h) * KH / 4 * 0.8;
+  if (geb.typ === 'bruecke') { isoKasten(cx, cy, hw * 1.2, hh * 1.2, 3, '#a8814f'); return; }
+  const st = stilVon(geb);
+  if (geb.typ === 'marktplatz') isoKasten(cx, cy, hw * 1.15, hh * 1.15, 2, '#cbb48d');
+  else {
+    const wandH = HE * 0.6 * st.hoch * (def.w > 1 ? 1.3 : 1);
+    isoKasten(cx, cy, hw, hh, wandH, st.wand);
+    isoSattel(cx, cy, hw * 1.1, hh * 1.1, wandH, HE * 0.5, st.dach);
+  }
+  const r = 3.2 / kamera.zoom;
+  ctx.beginPath();
+  ctx.arc(cx, cy - HE * 1.4, r, 0, Math.PI * 2);
+  ctx.fillStyle = spieler[geb.spieler].farbe;
+  ctx.fill();
 }
 
 // Das Terrain wird jedes Bild frisch gezeichnet; dieser Rest bleibt
 // nur, damit die Simulation weiter „Kachel geändert" melden kann.
 const schmutzKacheln = new Set();
-function kachelSchmutzig(x, y) {
-  schmutzKacheln.add(y * N + x);
-  if (farbCache) {                       // nur diese eine Kachel auffrischen
-    const i = y * N + x;
-    farbCache[i] = deckFarbe(karte[i], x, y);
-    hoehCache[i] = kachelHoehe(karte[i]);
-  }
+function kachelSchmutzig(x, y) { schmutzKacheln.add(y * N + x); uebersichtSchmutz.add(y * N + x); }
+function terrainZeichnen() {
+  farbListe = null; hoehCache = null;      // Gelände-Cache neu aufbauen lassen
+  state.terrainAlt = false;
 }
-function terrainZeichnen() { tiefenFeldRechnen(); farbCache = null; state.terrainAlt = false; }
 
 // Abgerundetes Rechteck (eigene Hilfsfunktion, läuft überall)
 function rundRect(c, x, y, w, h, r) {
@@ -4048,8 +4520,8 @@ function stilVon(geb) {
 // cx/cy: Mitte der Bodenraute, hw/hh: halbe Rautenmaße.
 // Liefert die Firsthöhe zurück, damit Aufbauten darauf passen.
 function isoHaus(st, cx, cy, hw, hh, opt = {}) {
-  const wandH = (opt.wandH === undefined ? KH * 0.62 : opt.wandH) * st.hoch;
-  const dachH = opt.dachH === undefined ? KH * 0.52 : opt.dachH;
+  const wandH = (opt.wandH === undefined ? HE * 0.62 : opt.wandH) * st.hoch;
+  const dachH = opt.dachH === undefined ? HE * 0.52 : opt.dachH;
   const ueber = opt.ueber === undefined ? 1.12 : opt.ueber;      // Dachüberstand
 
   if (st.sockel) isoKasten(cx, cy, hw * 1.04, hh * 1.04, wandH * 0.22, st.sockel);
@@ -4084,9 +4556,9 @@ function isoHaus(st, cx, cy, hw, hh, opt = {}) {
   // Fenster auf der rechten Wand
   if (opt.fenster !== false && hw > 12) {
     ctx.fillStyle = 'rgba(74,100,126,0.92)';
-    for (const t of (wandH > KH * 0.8 ? [0.3, 0.7] : [0.5])) {
+    for (const t of (wandH > HE * 0.8 ? [0.3, 0.7] : [0.5])) {
       const px = cx + hw * t, py = cy + hh * (1 - t);
-      for (const hy of (wandH > KH * 0.8 ? [0.35, 0.72] : [0.55])) {
+      for (const hy of (wandH > HE * 0.8 ? [0.35, 0.72] : [0.55])) {
         ctx.beginPath();
         ctx.moveTo(px - hw * 0.08, py + hh * 0.08 - wandH * hy);
         ctx.lineTo(px + hw * 0.08, py - hh * 0.08 - wandH * hy);
@@ -4116,7 +4588,7 @@ function isoHaus(st, cx, cy, hw, hh, opt = {}) {
     if (opt.rauch) isoRauch(sx, sy - dachH * 0.8, hw * 0.16);
   }
   if (st.fahne && opt.fahne !== false)
-    isoFahne(cx - hw * 0.45, cy - wandH - dachH * 0.2, KH * 0.9, opt.fahnenFarbe || st.gold);
+    isoFahne(cx - hw * 0.45, cy - wandH - dachH * 0.2, HE * 0.9, opt.fahnenFarbe || st.gold);
   return { wandH, dachH, first: wandH + dachH, dach };
 }
 
@@ -4130,7 +4602,7 @@ function werkHof(st, cx, cy, hw, hh, arbeit, opt = {}) {
   isoHaus(st, cx - hw * (1 - f) * 0.55, cy - hh * (1 - f) * 0.55,
           hw * f, hh * f, Object.assign({ fahne: false }, opt));
   arbeit(cx + hw * (1 - f) * 0.55, cy + hh * (1 - f) * 0.55, hw * (1 - f), hh * (1 - f), st);
-  if (st.fahne) isoFahne(cx - hw * 0.7, cy, KH, st.gold);
+  if (st.fahne) isoFahne(cx - hw * 0.7, cy, HE, st.gold);
 }
 
 // Zaun um eine Fläche
@@ -4164,21 +4636,21 @@ const BAU_ZEICHNER = {
                       { fahne: false, schornstein: false });
     // Kran am Steg
     const kx = cx + hw * 0.5, ky = cy + hh * 0.2;
-    pfosten(kx, ky, KH * 1.5, 3, '#7a5f3c');
+    pfosten(kx, ky, HE * 1.5, 3, '#7a5f3c');
     ctx.strokeStyle = '#7a5f3c'; ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(kx, ky - KH * 1.5); ctx.lineTo(kx - hw * 0.45, ky - KH * 1.25);
+    ctx.moveTo(kx, ky - HE * 1.5); ctx.lineTo(kx - hw * 0.45, ky - HE * 1.25);
     ctx.stroke();
     ctx.strokeStyle = 'rgba(40,30,20,0.6)'; ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.moveTo(kx - hw * 0.43, ky - KH * 1.26); ctx.lineTo(kx - hw * 0.43, ky - KH * 0.6);
+    ctx.moveTo(kx - hw * 0.43, ky - HE * 1.26); ctx.lineTo(kx - hw * 0.43, ky - HE * 0.6);
     ctx.stroke();
-    isoKasten(kx - hw * 0.43, ky - KH * 0.6, hw * 0.1, hh * 0.1, 5, '#8a6a44');
+    isoKasten(kx - hw * 0.43, ky - HE * 0.6, hw * 0.1, hh * 0.1, 5, '#8a6a44');
     // Fässer am Kai
     for (let i = 0; i < 3; i++)
       isoZylinder(cx - hw * 0.1 + i * hw * 0.22, cy + hh * 0.5 + i * hh * 0.04,
                   hw * 0.07, 5, '#9c6b3e');
-    isoFahne(cx - hw * 0.55, cy - hh * 0.2 - r.first, KH * 1.1,
+    isoFahne(cx - hw * 0.55, cy - hh * 0.2 - r.first, HE * 1.1,
              spieler[geb.spieler] && spieler[geb.spieler].farbe);
   },
 
@@ -4194,8 +4666,8 @@ const BAU_ZEICHNER = {
     ctx.closePath();
     ctx.fillStyle = '#8a5f38'; ctx.fill();
     ctx.strokeStyle = '#5e4125'; ctx.lineWidth = 1.2; ctx.stroke();
-    pfosten(sx, sy - 6, KH * 1.1, 2.5, '#6b4a2e');
-    for (const dx of [-0.38, 0.38]) pfosten(sx + hw * dx, sy, KH * 0.8, 2, '#8a6a44');
+    pfosten(sx, sy - 6, HE * 1.1, 2.5, '#6b4a2e');
+    for (const dx of [-0.38, 0.38]) pfosten(sx + hw * dx, sy, HE * 0.8, 2, '#8a6a44');
   },
 
   marktplatz(geb, st, cx, cy, hw, hh) {
@@ -4210,10 +4682,10 @@ const BAU_ZEICHNER = {
     const stand = (ox, oy, f1) => {
       const bx = cx + hw * ox, by = cy + hh * oy;
       const sw = hw * 0.3, sh = hh * 0.3;
-      isoKasten(bx, by, sw, sh, KH * 0.35, '#8a6a44');          // Tisch
+      isoKasten(bx, by, sw, sh, HE * 0.35, '#8a6a44');          // Tisch
       for (const d of [[-1, 0], [1, 0], [0, -1], [0, 1]])
-        pfosten(bx + sw * d[0], by + sh * d[1], KH * 0.95, 2, '#6b4a2e');
-      const py = by - KH * 0.95;                                  // Plane
+        pfosten(bx + sw * d[0], by + sh * d[1], HE * 0.95, 2, '#6b4a2e');
+      const py = by - HE * 0.95;                                  // Plane
       ctx.beginPath();
       ctx.moveTo(bx, py - sh * 1.25); ctx.lineTo(bx + sw * 1.25, py);
       ctx.lineTo(bx, py + sh * 1.25); ctx.lineTo(bx - sw * 1.25, py);
@@ -4226,12 +4698,12 @@ const BAU_ZEICHNER = {
       ctx.moveTo(bx, py + sh * 1.25); ctx.lineTo(bx - sw * 1.25, py);
       ctx.lineTo(bx, py); ctx.closePath();
       ctx.fillStyle = f1; ctx.fill();
-      isoKugel(bx - sw * 0.3, by - KH * 0.35, sw * 0.2, '#c76b2e');  // Waren
-      isoKugel(bx + sw * 0.3, by - KH * 0.35, sw * 0.2, '#7aa845');
+      isoKugel(bx - sw * 0.3, by - HE * 0.35, sw * 0.2, '#c76b2e');  // Waren
+      isoKugel(bx + sw * 0.3, by - HE * 0.35, sw * 0.2, '#7aa845');
     };
     stand(-0.38, -0.12, '#c0392b');
     stand(0.32, 0.24, '#2d7a5f');
-    if (st.fahne) isoFahne(cx + hw * 0.55, cy - hh * 0.3, KH, st.gold);
+    if (st.fahne) isoFahne(cx + hw * 0.55, cy - hh * 0.3, HE, st.gold);
   },
 
   bruecke(geb, st, cx, cy, hw, hh) {
@@ -4261,7 +4733,7 @@ const BAU_ZEICHNER = {
                       { schornstein: true, rauch: false });
     if ((geb.stufe || 0) >= 2 && hw > 16)        // Anbau ab Bürgern
       isoHaus(st, cx + hw * 0.5, cy + hh * 0.18, hw * 0.3, hh * 0.3,
-              { fahne: false, schornstein: false, wandH: KH * 0.4, dachH: KH * 0.3, gauben: false });
+              { fahne: false, schornstein: false, wandH: HE * 0.4, dachH: HE * 0.3, gauben: false });
     if ((geb.stufe || 0) >= 3 && hw > 18) {      // Vorgarten
       ctx.beginPath();
       ctx.ellipse(cx - hw * 0.45, cy + hh * 0.4, hw * 0.18, hh * 0.18, 0, 0, Math.PI * 2);
@@ -4274,18 +4746,18 @@ const BAU_ZEICHNER = {
     // Kirchenschiff
     isoHaus(st, cx + hw * 0.16, cy + hh * 0.16, hw * 0.6, hh * 0.6,
             { fahne: false, gauben: false, schornstein: false, tuer: false,
-              wandH: KH * 0.9, dachH: KH * 0.62 });
+              wandH: HE * 0.9, dachH: HE * 0.62 });
     // Glockenturm
     const tx = cx - hw * 0.42, ty = cy - hh * 0.42;
-    isoKasten(tx, ty, hw * 0.2, hh * 0.2, KH * 1.5, st.wand);
+    isoKasten(tx, ty, hw * 0.2, hh * 0.2, HE * 1.5, st.wand);
     ctx.fillStyle = 'rgba(40,40,45,0.7)';
-    ctx.fillRect(tx - hw * 0.07, ty - KH * 1.35, hw * 0.14, KH * 0.3);
-    isoKegel(tx, ty - KH * 1.5, hw * 0.24, KH * 1.1, st.dach);
+    ctx.fillRect(tx - hw * 0.07, ty - HE * 1.35, hw * 0.14, HE * 0.3);
+    isoKegel(tx, ty - HE * 1.5, hw * 0.24, HE * 1.1, st.dach);
     ctx.strokeStyle = st.gold || '#e8dfc8';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(tx, ty - KH * 2.6); ctx.lineTo(tx, ty - KH * 3.0);
-    ctx.moveTo(tx - 4, ty - KH * 2.88); ctx.lineTo(tx + 4, ty - KH * 2.88);
+    ctx.moveTo(tx, ty - HE * 2.6); ctx.lineTo(tx, ty - HE * 3.0);
+    ctx.moveTo(tx - 4, ty - HE * 2.88); ctx.lineTo(tx + 4, ty - HE * 2.88);
     ctx.stroke();
     // Rundbogenfenster am Schiff
     if (hw > 24) {
@@ -4293,13 +4765,13 @@ const BAU_ZEICHNER = {
       for (let i = 0; i < 3; i++) {
         const t = 0.25 + i * 0.25;
         const px = cx + hw * 0.16 - hw * 0.6 * t, py = cy + hh * 0.16 + hh * 0.6 * (1 - t);
-        ctx.fillRect(px - 2, py - KH * 0.75, 4, KH * 0.4);
+        ctx.fillRect(px - 2, py - HE * 0.75, 4, HE * 0.4);
       }
     }
   },
 
   schule(geb, st, cx, cy, hw, hh) {
-    const r = isoHaus(st, cx, cy, hw * 0.82, hh * 0.82, { wandH: KH * 0.78 });
+    const r = isoHaus(st, cx, cy, hw * 0.82, hh * 0.82, { wandH: HE * 0.78 });
     // Uhrengiebel über dem Eingang
     const gx = cx - hw * 0.25, gy = cy + hh * 0.25 - r.wandH - r.dachH * 0.2;
     ctx.beginPath();
@@ -4328,18 +4800,18 @@ const BAU_ZEICHNER = {
 
   theater(geb, st, cx, cy, hw, hh) {
     isoHaus(st, cx - hw * 0.12, cy - hh * 0.12, hw * 0.7, hh * 0.7,
-            { fahne: false, tuer: false, wandH: KH * 0.85 });
+            { fahne: false, tuer: false, wandH: HE * 0.85 });
     // Säulenvorbau
     const vx = cx + hw * 0.3, vy = cy + hh * 0.3;
     for (let i = 0; i < 5; i++) {
       const t = i / 4;
       pfosten(vx - hw * 0.35 + hw * 0.7 * t, vy - hh * 0.35 + hh * 0.7 * t,
-              KH * 0.8, 3.5, st.wand);
+              HE * 0.8, 3.5, st.wand);
     }
-    isoKasten(vx, vy - KH * 0.8, hw * 0.44, hh * 0.44, 6, st.dach);
+    isoKasten(vx, vy - HE * 0.8, hw * 0.44, hh * 0.44, 6, st.dach);
     if (st.fahne) {
-      isoFahne(cx - hw * 0.5, cy - hh * 0.1, KH * 1.1, '#8e44ad');
-      isoFahne(cx + hw * 0.1, cy - hh * 0.5, KH * 1.1, '#c0392b');
+      isoFahne(cx - hw * 0.5, cy - hh * 0.1, HE * 1.1, '#8e44ad');
+      isoFahne(cx + hw * 0.1, cy - hh * 0.5, HE * 1.1, '#c0392b');
     }
   },
 
@@ -4348,13 +4820,13 @@ const BAU_ZEICHNER = {
     // Säulenreihe ringsum
     for (let i = 0; i < 5; i++) {
       const t = i / 4;
-      pfosten(cx - hw * 0.8 + hw * 0.8 * t, cy - 5 + hh * 0.8 * t, KH * 0.85, 4, st.wand);
-      pfosten(cx + hw * 0.8 * t, cy - 5 + hh * 0.8 - hh * 0.8 * t, KH * 0.85, 4, schattiert(st.wand, 0.84));
+      pfosten(cx - hw * 0.8 + hw * 0.8 * t, cy - 5 + hh * 0.8 * t, HE * 0.85, 4, st.wand);
+      pfosten(cx + hw * 0.8 * t, cy - 5 + hh * 0.8 - hh * 0.8 * t, HE * 0.85, 4, schattiert(st.wand, 0.84));
     }
-    isoKasten(cx, cy - KH * 0.85, hw * 0.88, hh * 0.88, 5, st.wand);
-    isoWalm(cx, cy - KH * 0.85 - 5, hw * 0.88, hh * 0.88, 0, KH * 0.75, st.dach);
+    isoKasten(cx, cy - HE * 0.85, hw * 0.88, hh * 0.88, 5, st.wand);
+    isoWalm(cx, cy - HE * 0.85 - 5, hw * 0.88, hh * 0.88, 0, HE * 0.75, st.dach);
     ctx.beginPath();
-    ctx.arc(cx, cy - KH * 0.85 - 5 - KH * 0.75, hw * 0.1, 0, Math.PI * 2);
+    ctx.arc(cx, cy - HE * 0.85 - 5 - HE * 0.75, hw * 0.1, 0, Math.PI * 2);
     ctx.fillStyle = st.gold || '#cbb27a'; ctx.fill();
   },
 
@@ -4362,11 +4834,11 @@ const BAU_ZEICHNER = {
     const sockel = st.sockel || '#a89e8c';
     isoKasten(cx, cy, hw * 0.9, hh * 0.9, 5, sockel);          // Plattform
     // Zwei Pfeiler, dazwischen bleibt der Durchgang frei
-    isoKasten(cx - hw * 0.44, cy + hh * 0.44 - 5, hw * 0.24, hh * 0.24, KH * 1.25, st.wand);
-    isoKasten(cx + hw * 0.44, cy - hh * 0.44 - 5, hw * 0.24, hh * 0.24, KH * 1.25, st.wand);
-    isoKasten(cx, cy - 5 - KH * 1.25, hw * 0.7, hh * 0.7, KH * 0.35, st.wand);
-    isoKasten(cx, cy - 5 - KH * 1.6, hw * 0.74, hh * 0.74, 5, schattiert(st.wand, 0.86));
-    isoKasten(cx, cy - 5 - KH * 1.75, hw * 0.26, hh * 0.26, KH * 0.4, st.gold || '#cbb27a');
+    isoKasten(cx - hw * 0.44, cy + hh * 0.44 - 5, hw * 0.24, hh * 0.24, HE * 1.25, st.wand);
+    isoKasten(cx + hw * 0.44, cy - hh * 0.44 - 5, hw * 0.24, hh * 0.24, HE * 1.25, st.wand);
+    isoKasten(cx, cy - 5 - HE * 1.25, hw * 0.7, hh * 0.7, HE * 0.35, st.wand);
+    isoKasten(cx, cy - 5 - HE * 1.6, hw * 0.74, hh * 0.74, 5, schattiert(st.wand, 0.86));
+    isoKasten(cx, cy - 5 - HE * 1.75, hw * 0.26, hh * 0.26, HE * 0.4, st.gold || '#cbb27a');
   },
 
   statue(geb, st, cx, cy, hw, hh) {
@@ -4381,22 +4853,22 @@ const BAU_ZEICHNER = {
       basis += 4;
     }
     ctx.save(); ctx.translate(0, -basis);
-    isoKasten(cx, cy, hw * 0.26, hh * 0.26, KH * 0.7, stein);
+    isoKasten(cx, cy, hw * 0.26, hh * 0.26, HE * 0.7, stein);
     ctx.restore();
-    const fy = cy - basis - KH * 0.7;
+    const fy = cy - basis - HE * 0.7;
     ctx.fillStyle = gold;                            // Figur
     ctx.beginPath();
     ctx.moveTo(cx - hw * 0.12, fy);
-    ctx.lineTo(cx - hw * 0.08, fy - KH * 0.75);
-    ctx.lineTo(cx + hw * 0.08, fy - KH * 0.75);
+    ctx.lineTo(cx - hw * 0.08, fy - HE * 0.75);
+    ctx.lineTo(cx + hw * 0.08, fy - HE * 0.75);
     ctx.lineTo(cx + hw * 0.12, fy);
     ctx.closePath(); ctx.fill();
     ctx.beginPath();
-    ctx.arc(cx, fy - KH * 0.92, hw * 0.12, 0, Math.PI * 2);
+    ctx.arc(cx, fy - HE * 0.92, hw * 0.12, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = gold; ctx.lineWidth = Math.max(2, hw * 0.07);
     ctx.beginPath();
-    ctx.moveTo(cx - hw * 0.06, fy - KH * 0.6); ctx.lineTo(cx - hw * 0.3, fy - KH * 1.1);
+    ctx.moveTo(cx - hw * 0.06, fy - HE * 0.6); ctx.lineTo(cx - hw * 0.3, fy - HE * 1.1);
     ctx.stroke();
   },
 
@@ -4404,7 +4876,7 @@ const BAU_ZEICHNER = {
     const a = geb.ausbau || 1;
     const holz = a <= 2;
     const r = hw * (0.4 + a * 0.03);
-    const hoehe = KH * (1.05 + a * 0.15);
+    const hoehe = HE * (1.05 + a * 0.15);
     isoKasten(cx, cy, r, r * KH / KW, hoehe, holz ? '#9b7a4f' : (st.sockel || '#a8a08f'));
     ctx.fillStyle = 'rgba(40,40,45,0.75)';           // Schießscharte
     ctx.fillRect(cx - r * 0.12, cy - hoehe * 0.55, r * 0.24, hoehe * 0.2);
@@ -4420,13 +4892,13 @@ const BAU_ZEICHNER = {
     };
     zinne(0, -r * 1.1 * KH / KW); zinne(r * 1.1, 0);
     zinne(0, r * 1.1 * KH / KW); zinne(-r * 1.1, 0);
-    isoFahne(cx, cy - hoehe - 10, KH * 0.9,
+    isoFahne(cx, cy - hoehe - 10, HE * 0.9,
              spieler[geb.spieler] && spieler[geb.spieler].farbe);
   },
 
   kaserne(geb, st, cx, cy, hw, hh) {
     const mauer = st.sockel || '#a8a08f';
-    const mh = KH * 1.15;
+    const mh = HE * 1.15;
     isoKasten(cx, cy, hw * 0.86, hh * 0.86, mh, mauer);
     // Zinnen auf den beiden vorderen Mauerkronen
     for (let i = 0; i <= 4; i++) {
@@ -4440,8 +4912,8 @@ const BAU_ZEICHNER = {
     }
     // Ecktürme
     for (const [ox, oy] of [[-0.86, 0], [0.86, 0], [0, -0.86], [0, 0.86]]) {
-      isoKasten(cx + hw * ox, cy + hh * oy, hw * 0.16, hh * 0.16, KH * 1.6, mauer);
-      isoKegel(cx + hw * ox, cy + hh * oy - KH * 1.6, hw * 0.2, KH * 0.7,
+      isoKasten(cx + hw * ox, cy + hh * oy, hw * 0.16, hh * 0.16, HE * 1.6, mauer);
+      isoKegel(cx + hw * ox, cy + hh * oy - HE * 1.6, hw * 0.2, HE * 0.7,
                schattiert(st.dach, 0.95));
     }
     // Tor an der Vorderseite
@@ -4450,10 +4922,10 @@ const BAU_ZEICHNER = {
     ctx.beginPath();
     ctx.moveTo(px - hw * 0.1, py + hh * 0.1);
     ctx.lineTo(px + hw * 0.1, py - hh * 0.1);
-    ctx.lineTo(px + hw * 0.1, py - hh * 0.1 - KH * 0.8);
-    ctx.lineTo(px - hw * 0.1, py + hh * 0.1 - KH * 0.8);
+    ctx.lineTo(px + hw * 0.1, py - hh * 0.1 - HE * 0.8);
+    ctx.lineTo(px - hw * 0.1, py + hh * 0.1 - HE * 0.8);
     ctx.closePath(); ctx.fill();
-    isoFahne(cx, cy - hh * 0.9 - KH * 1.3, KH * 1.2,
+    isoFahne(cx, cy - hh * 0.9 - HE * 1.3, HE * 1.2,
              spieler[geb.spieler] && spieler[geb.spieler].farbe);
   },
 
@@ -4463,9 +4935,9 @@ const BAU_ZEICHNER = {
       for (let r = 0; r < 2; r++) for (let i = 0; i < 3 - r; i++)
         isoZylinder(bx - bw * 0.3 + i * bw * 0.3, by + bh * 0.2 - r * 5 - i * bh * 0.1,
                     bw * 0.16, 5, '#a07a4c');
-      pfosten(bx + bw * 0.4, by - bh * 0.3, KH * 0.4, 3, '#6b4a2e');
+      pfosten(bx + bw * 0.4, by - bh * 0.3, HE * 0.4, 3, '#6b4a2e');
       ctx.fillStyle = '#c3cbd3';
-      ctx.fillRect(bx + bw * 0.32, by - bh * 0.3 - KH * 0.45, bw * 0.2, 4);
+      ctx.fillRect(bx + bw * 0.32, by - bh * 0.3 - HE * 0.45, bw * 0.2, 4);
     });
   },
 
@@ -4480,15 +4952,15 @@ const BAU_ZEICHNER = {
       ctx.fillStyle = '#3f7fa6'; ctx.fill();
       ctx.strokeStyle = '#27536e'; ctx.lineWidth = 1.2; ctx.stroke();
       // Netz am Gestell
-      for (const dx of [-0.45, 0.45]) pfosten(bx + bw * dx, by - bh * 0.3, KH * 0.7, 2.5, '#7a5f3c');
+      for (const dx of [-0.45, 0.45]) pfosten(bx + bw * dx, by - bh * 0.3, HE * 0.7, 2.5, '#7a5f3c');
       ctx.strokeStyle = 'rgba(248,246,236,0.95)'; ctx.lineWidth = 1;
       ctx.beginPath();
       for (let i = 0; i <= 3; i++) {
         const t = i / 3;
-        ctx.moveTo(bx - bw * 0.45 + bw * 0.9 * t, by - bh * 0.3 - KH * 0.7);
-        ctx.lineTo(bx - bw * 0.45 + bw * 0.9 * t, by - bh * 0.3 - KH * 0.2);
-        ctx.moveTo(bx - bw * 0.45, by - bh * 0.3 - KH * (0.7 - t * 0.5));
-        ctx.lineTo(bx + bw * 0.45, by - bh * 0.3 - KH * (0.7 - t * 0.5));
+        ctx.moveTo(bx - bw * 0.45 + bw * 0.9 * t, by - bh * 0.3 - HE * 0.7);
+        ctx.lineTo(bx - bw * 0.45 + bw * 0.9 * t, by - bh * 0.3 - HE * 0.2);
+        ctx.moveTo(bx - bw * 0.45, by - bh * 0.3 - HE * (0.7 - t * 0.5));
+        ctx.lineTo(bx + bw * 0.45, by - bh * 0.3 - HE * (0.7 - t * 0.5));
       }
       ctx.stroke();
     });
@@ -4496,9 +4968,9 @@ const BAU_ZEICHNER = {
 
   jagd(geb, st, cx, cy, hw, hh) {
     werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
-      for (const dx of [-0.45, 0.45]) pfosten(bx + bw * dx, by + bh * 0.1, KH * 0.8, 2.5, '#7a5f3c');
+      for (const dx of [-0.45, 0.45]) pfosten(bx + bw * dx, by + bh * 0.1, HE * 0.8, 2.5, '#7a5f3c');
       ctx.beginPath();
-      ctx.ellipse(bx, by + bh * 0.1 - KH * 0.5, bw * 0.38, KH * 0.3, 0, 0, Math.PI * 2);
+      ctx.ellipse(bx, by + bh * 0.1 - HE * 0.5, bw * 0.38, HE * 0.3, 0, 0, Math.PI * 2);
       ctx.fillStyle = '#a9743f'; ctx.fill();
       ctx.strokeStyle = '#e8ddc4'; ctx.lineWidth = 1.2; ctx.stroke();
     });
@@ -4506,12 +4978,12 @@ const BAU_ZEICHNER = {
 
   weberei(geb, st, cx, cy, hw, hh) {
     werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
-      for (const dx of [-0.45, 0.45]) pfosten(bx + bw * dx, by - bh * 0.2, KH * 0.75, 2.5, '#7a5f3c');
+      for (const dx of [-0.45, 0.45]) pfosten(bx + bw * dx, by - bh * 0.2, HE * 0.75, 2.5, '#7a5f3c');
       ctx.strokeStyle = '#cfd8e2'; ctx.lineWidth = 1;
       ctx.beginPath();
       for (let i = 1; i < 6; i++) {
         const px = bx - bw * 0.45 + bw * 0.9 * (i / 6);
-        ctx.moveTo(px, by - bh * 0.2 - KH * 0.75); ctx.lineTo(px, by - bh * 0.2 - KH * 0.1);
+        ctx.moveTo(px, by - bh * 0.2 - HE * 0.75); ctx.lineTo(px, by - bh * 0.2 - HE * 0.1);
       }
       ctx.stroke();
       for (let i = 0; i < 3; i++)
@@ -4521,26 +4993,26 @@ const BAU_ZEICHNER = {
 
   schneiderei(geb, st, cx, cy, hw, hh) {
     werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
-      for (const dx of [-0.45, 0.45]) pfosten(bx + bw * dx, by, KH * 0.8, 2.5, '#8a7a60');
+      for (const dx of [-0.45, 0.45]) pfosten(bx + bw * dx, by, HE * 0.8, 2.5, '#8a7a60');
       ctx.strokeStyle = '#8a7a60'; ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(bx - bw * 0.45, by - KH * 0.8); ctx.lineTo(bx + bw * 0.45, by - KH * 0.8);
+      ctx.moveTo(bx - bw * 0.45, by - HE * 0.8); ctx.lineTo(bx + bw * 0.45, by - HE * 0.8);
       ctx.stroke();
       ctx.fillStyle = '#4a6fa5';
-      ctx.fillRect(bx - bw * 0.35, by - KH * 0.78, bw * 0.3, KH * 0.45);
+      ctx.fillRect(bx - bw * 0.35, by - HE * 0.78, bw * 0.3, HE * 0.45);
       ctx.fillStyle = '#b5495b';
-      ctx.fillRect(bx + bw * 0.05, by - KH * 0.78, bw * 0.3, KH * 0.45);
+      ctx.fillRect(bx + bw * 0.05, by - HE * 0.78, bw * 0.3, HE * 0.45);
     });
   },
 
   tabakladen(geb, st, cx, cy, hw, hh) {
     werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
-      for (const dx of [-0.45, 0.45]) pfosten(bx + bw * dx, by - bh * 0.2, KH * 0.7, 2.5, '#7a5f3c');
+      for (const dx of [-0.45, 0.45]) pfosten(bx + bw * dx, by - bh * 0.2, HE * 0.7, 2.5, '#7a5f3c');
       ctx.fillStyle = '#8a5a2c';
       for (let i = 0; i < 4; i++) {
         ctx.beginPath();
-        ctx.ellipse(bx - bw * 0.35 + i * bw * 0.23, by - bh * 0.2 - KH * 0.45,
-                    bw * 0.09, KH * 0.22, 0, 0, Math.PI * 2);
+        ctx.ellipse(bx - bw * 0.35 + i * bw * 0.23, by - bh * 0.2 - HE * 0.45,
+                    bw * 0.09, HE * 0.22, 0, 0, Math.PI * 2);
         ctx.fill();
       }
       for (let i = 0; i < 2; i++)
@@ -4558,7 +5030,7 @@ const BAU_ZEICHNER = {
         const gx = bx - bw * 0.3 + i * bw * 0.3, gy = by + bh * 0.1 + i * bh * 0.08;
         ctx.beginPath();
         ctx.moveTo(gx - bw * 0.12, gy);
-        ctx.lineTo(gx, gy - KH * 0.8);
+        ctx.lineTo(gx, gy - HE * 0.8);
         ctx.lineTo(gx + bw * 0.12, gy);
         ctx.closePath(); ctx.fill();
       }
@@ -4571,7 +5043,7 @@ const BAU_ZEICHNER = {
       ctx.beginPath();
       for (let i = 0; i < 5; i++) {
         const gx = bx - bw * 0.35 + i * bw * 0.18;
-        ctx.moveTo(gx, by + bh * 0.2); ctx.lineTo(gx + bw * 0.06, by + bh * 0.2 - KH * 0.9);
+        ctx.moveTo(gx, by + bh * 0.2); ctx.lineTo(gx + bw * 0.06, by + bh * 0.2 - HE * 0.9);
       }
       ctx.stroke();
     });
@@ -4579,12 +5051,12 @@ const BAU_ZEICHNER = {
 
   tabakplantage(geb, st, cx, cy, hw, hh) {
     scheuneMitGut(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
-      for (const dx of [-0.4, 0.4]) pfosten(bx + bw * dx, by + bh * 0.2, KH * 0.8, 2.5, '#7a5f3c');
+      for (const dx of [-0.4, 0.4]) pfosten(bx + bw * dx, by + bh * 0.2, HE * 0.8, 2.5, '#7a5f3c');
       ctx.fillStyle = '#9c6a30';
       for (let r = 0; r < 2; r++) for (let i = 0; i < 3; i++) {
         ctx.beginPath();
-        ctx.ellipse(bx - bw * 0.28 + i * bw * 0.28, by + bh * 0.2 - KH * (0.62 - r * 0.28),
-                    bw * 0.1, KH * 0.16, 0, 0, Math.PI * 2);
+        ctx.ellipse(bx - bw * 0.28 + i * bw * 0.28, by + bh * 0.2 - HE * (0.62 - r * 0.28),
+                    bw * 0.1, HE * 0.16, 0, 0, Math.PI * 2);
         ctx.fill();
       }
     });
@@ -4604,11 +5076,11 @@ const BAU_ZEICHNER = {
 
   ziegelei(geb, st, cx, cy, hw, hh) {
     werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
-      isoZylinder(bx, by, bw * 0.45, KH * 0.8, '#9c6b4a');
-      isoKegel(bx, by - KH * 0.8, bw * 0.45, KH * 0.55, '#8a5a3a');
+      isoZylinder(bx, by, bw * 0.45, HE * 0.8, '#9c6b4a');
+      isoKegel(bx, by - HE * 0.8, bw * 0.45, HE * 0.55, '#8a5a3a');
       ctx.fillStyle = '#e8781f';
-      ctx.fillRect(bx - bw * 0.14, by - KH * 0.5, bw * 0.28, KH * 0.28);
-      isoRauch(bx, by - KH * 1.35, bw * 0.22);
+      ctx.fillRect(bx - bw * 0.14, by - HE * 0.5, bw * 0.28, HE * 0.28);
+      isoRauch(bx, by - HE * 1.35, bw * 0.22);
       for (let r = 0; r < 3; r++) {
         ctx.fillStyle = '#b45a3c';
         ctx.fillRect(bx - bw * 0.7, by + bh * 0.3 - r * 4, bw * 0.4, 4);
@@ -4617,14 +5089,14 @@ const BAU_ZEICHNER = {
   },
 
   muehle(geb, st, cx, cy, hw, hh) {
-    isoZylinder(cx, cy, hw * 0.4, KH * 1.9, st.wand);
-    isoKegel(cx, cy - KH * 1.9, hw * 0.44, KH * 0.8, st.dach);
+    isoZylinder(cx, cy, hw * 0.4, HE * 1.9, st.wand);
+    isoKegel(cx, cy - HE * 1.9, hw * 0.44, HE * 0.8, st.dach);
     ctx.fillStyle = '#5c4228';
-    ctx.fillRect(cx - hw * 0.1, cy - KH * 0.7, hw * 0.2, KH * 0.7);
+    ctx.fillRect(cx - hw * 0.1, cy - HE * 0.7, hw * 0.2, HE * 0.7);
     // Drehende Flügel vor dem Turm
     const dreh = performance.now() / 2600;
     ctx.save();
-    ctx.translate(cx - hw * 0.1, cy - KH * 2.0);
+    ctx.translate(cx - hw * 0.1, cy - HE * 2.0);
     for (let i = 0; i < 4; i++) {
       ctx.save();
       ctx.rotate(dreh + i * Math.PI / 2);
@@ -4639,11 +5111,11 @@ const BAU_ZEICHNER = {
 
   baeckerei(geb, st, cx, cy, hw, hh) {
     werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
-      isoZylinder(bx, by, bw * 0.42, KH * 0.5, '#b08462');
-      isoKegel(bx, by - KH * 0.5, bw * 0.42, KH * 0.45, '#a2795a');
+      isoZylinder(bx, by, bw * 0.42, HE * 0.5, '#b08462');
+      isoKegel(bx, by - HE * 0.5, bw * 0.42, HE * 0.45, '#a2795a');
       ctx.fillStyle = '#e8781f';
-      ctx.fillRect(bx - bw * 0.12, by - KH * 0.35, bw * 0.24, KH * 0.24);
-      isoRauch(bx, by - KH * 0.95, bw * 0.2);
+      ctx.fillRect(bx - bw * 0.12, by - HE * 0.35, bw * 0.24, HE * 0.24);
+      isoRauch(bx, by - HE * 0.95, bw * 0.2);
       for (let i = 0; i < 3; i++)
         isoKugel(bx - bw * 0.3 + i * bw * 0.3, by + bh * 0.45, bw * 0.1, '#d7a556');
     }, { hausAnteil: 0.5 });
@@ -4651,11 +5123,11 @@ const BAU_ZEICHNER = {
 
   brennerei(geb, st, cx, cy, hw, hh) {
     werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
-      isoZylinder(bx, by, bw * 0.34, KH * 0.7, '#c47a3c');
-      isoKegel(bx, by - KH * 0.7, bw * 0.34, KH * 0.5, '#a2602c');
+      isoZylinder(bx, by, bw * 0.34, HE * 0.7, '#c47a3c');
+      isoKegel(bx, by - HE * 0.7, bw * 0.34, HE * 0.5, '#a2602c');
       ctx.strokeStyle = '#8a5428'; ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(bx, by - KH * 1.2); ctx.lineTo(bx + bw * 0.4, by - KH * 1.0);
+      ctx.moveTo(bx, by - HE * 1.2); ctx.lineTo(bx + bw * 0.4, by - HE * 1.0);
       ctx.stroke();
       for (let i = 0; i < 2; i++)
         isoZylinder(bx - bw * 0.2 + i * bw * 0.45, by + bh * 0.45, bw * 0.15, 6, '#9c6b3e');
@@ -4689,19 +5161,19 @@ function scheuneMitGut(st, cx, cy, hw, hh, gut) {
   isoHaus(st, cx - hw * 0.24, cy - hh * 0.24, hw * 0.56, hh * 0.56,
           { ueber: 1.3, tuer: false, fahne: false, schornstein: false });
   gut(cx + hw * 0.34, cy + hh * 0.34, hw * 0.42, hh * 0.42, st);
-  if (st.fahne) isoFahne(cx - hw * 0.7, cy, KH, st.gold);
+  if (st.fahne) isoFahne(cx - hw * 0.7, cy, HE, st.gold);
 }
 
 // Bergwerk: Stollen im Fels mit Lore
 function mineZeichnen(st, cx, cy, hw, hh, erzHell, erzDunkel) {
   // Felsbrocken
-  isoKegel(cx - hw * 0.1, cy - hh * 0.1, hw * 0.6, KH * 1.6, '#8e857a');
-  isoKegel(cx + hw * 0.35, cy + hh * 0.1, hw * 0.3, KH * 0.9, '#9a9186');
+  isoKegel(cx - hw * 0.1, cy - hh * 0.1, hw * 0.6, HE * 1.6, '#8e857a');
+  isoKegel(cx + hw * 0.35, cy + hh * 0.1, hw * 0.3, HE * 0.9, '#9a9186');
   // Erzader
   ctx.strokeStyle = erzDunkel; ctx.lineWidth = Math.max(2, hw * 0.1);
   ctx.beginPath();
-  ctx.moveTo(cx - hw * 0.45, cy - KH * 0.4);
-  ctx.quadraticCurveTo(cx, cy - KH * 1.0, cx + hw * 0.35, cy - KH * 0.5);
+  ctx.moveTo(cx - hw * 0.45, cy - HE * 0.4);
+  ctx.quadraticCurveTo(cx, cy - HE * 1.0, cx + hw * 0.35, cy - HE * 0.5);
   ctx.stroke();
   ctx.strokeStyle = erzHell; ctx.lineWidth = Math.max(1, hw * 0.05);
   ctx.stroke();
@@ -4710,30 +5182,30 @@ function mineZeichnen(st, cx, cy, hw, hh, erzHell, erzDunkel) {
   ctx.fillStyle = '#2b241d';
   ctx.beginPath();
   ctx.moveTo(sx - hw * 0.16, sy); ctx.lineTo(sx + hw * 0.16, sy);
-  ctx.lineTo(sx + hw * 0.16, sy - KH * 0.5);
-  ctx.quadraticCurveTo(sx, sy - KH * 0.75, sx - hw * 0.16, sy - KH * 0.5);
+  ctx.lineTo(sx + hw * 0.16, sy - HE * 0.5);
+  ctx.quadraticCurveTo(sx, sy - HE * 0.75, sx - hw * 0.16, sy - HE * 0.5);
   ctx.closePath(); ctx.fill();
   ctx.strokeStyle = '#7a5f3c'; ctx.lineWidth = 2.5;
   ctx.beginPath();
-  ctx.moveTo(sx - hw * 0.2, sy + 2); ctx.lineTo(sx - hw * 0.2, sy - KH * 0.55);
-  ctx.lineTo(sx + hw * 0.2, sy - KH * 0.55); ctx.lineTo(sx + hw * 0.2, sy + 2);
+  ctx.moveTo(sx - hw * 0.2, sy + 2); ctx.lineTo(sx - hw * 0.2, sy - HE * 0.55);
+  ctx.lineTo(sx + hw * 0.2, sy - HE * 0.55); ctx.lineTo(sx + hw * 0.2, sy + 2);
   ctx.stroke();
   // Volle Lore
   isoKasten(cx + hw * 0.4, cy + hh * 0.55, hw * 0.17, hh * 0.17, 6, '#6b5a46');
   isoKugel(cx + hw * 0.4, cy + hh * 0.55 - 6, hw * 0.1, erzHell);
-  if (st.fahne) isoFahne(cx - hw * 0.6, cy + hh * 0.3, KH, st.gold);
+  if (st.fahne) isoFahne(cx - hw * 0.6, cy + hh * 0.3, HE, st.gold);
 }
 
 // Schmiede: Werkstatt mit glühender Esse, Amboss und Zunftzeichen
 function schmiedeZeichnen(st, cx, cy, hw, hh, art) {
   werkHof(st, cx, cy, hw, hh, (bx, by, bw, bh) => {
-    isoKasten(bx, by - bh * 0.2, bw * 0.45, bh * 0.45, KH * 0.5, '#6b5a46');
+    isoKasten(bx, by - bh * 0.2, bw * 0.45, bh * 0.45, HE * 0.5, '#6b5a46');
     const glut = 0.55 + Math.sin(performance.now() / 260) * 0.3;
     ctx.globalAlpha = glut;
     ctx.fillStyle = '#ff8a2b';
-    ctx.fillRect(bx - bw * 0.2, by - bh * 0.2 - KH * 0.42, bw * 0.4, KH * 0.22);
+    ctx.fillRect(bx - bw * 0.2, by - bh * 0.2 - HE * 0.42, bw * 0.4, HE * 0.22);
     ctx.globalAlpha = 1;
-    isoRauch(bx, by - bh * 0.2 - KH * 0.5, bw * 0.18);
+    isoRauch(bx, by - bh * 0.2 - HE * 0.5, bw * 0.18);
     isoKasten(bx - bw * 0.1, by + bh * 0.5, bw * 0.2, bh * 0.2, 5, '#4e5056');
     if (art === 'gold') {
       for (let i = 0; i < 3; i++)
@@ -4741,16 +5213,16 @@ function schmiedeZeichnen(st, cx, cy, hw, hh, art) {
     } else if (art === 'waffe') {
       ctx.strokeStyle = '#c3cbd3'; ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(bx + bw * 0.2, by + bh * 0.1); ctx.lineTo(bx + bw * 0.7, by - KH * 0.7);
-      ctx.moveTo(bx + bw * 0.7, by + bh * 0.1); ctx.lineTo(bx + bw * 0.2, by - KH * 0.7);
+      ctx.moveTo(bx + bw * 0.2, by + bh * 0.1); ctx.lineTo(bx + bw * 0.7, by - HE * 0.7);
+      ctx.moveTo(bx + bw * 0.7, by + bh * 0.1); ctx.lineTo(bx + bw * 0.2, by - HE * 0.7);
       ctx.stroke();
     } else {
       ctx.strokeStyle = '#8a6a44'; ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(bx + bw * 0.2, by + bh * 0.1); ctx.lineTo(bx + bw * 0.6, by - KH * 0.6);
+      ctx.moveTo(bx + bw * 0.2, by + bh * 0.1); ctx.lineTo(bx + bw * 0.6, by - HE * 0.6);
       ctx.stroke();
       ctx.fillStyle = '#c3cbd3';
-      ctx.fillRect(bx + bw * 0.45, by - KH * 0.72, bw * 0.3, 5);
+      ctx.fillRect(bx + bw * 0.45, by - HE * 0.72, bw * 0.3, 5);
     }
   }, { hausAnteil: 0.5, schornstein: true, rauch: false });
 }
@@ -4786,11 +5258,12 @@ function zeichnen() {
     leinwand.width = b * dpr; leinwand.height = h * dpr;
   }
   if (state.terrainAlt) terrainZeichnen();
+  gelaendeBereit();                  // gilt der Gelände-Cache noch für diese Karte?
   if (schmutzKacheln.size) schmutzKacheln.clear();
 
   // Hintergrund: tiefes Meer
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = '#143b54';
+  ctx.fillStyle = '#1a4764';
   ctx.fillRect(0, 0, b, h);
 
   // Ab hier in Weltkoordinaten zeichnen
@@ -4801,11 +5274,26 @@ function zeichnen() {
 
   const s = sichtBereich();
   const fein = z > 0.45;             // bei starker Verkleinerung ohne Kleinkram
-  bodenZeichnen(s, fein);
+  const fern = z < FERN_ZOOM;        // ganz weit weg: nur noch das Übersichtsbild
+  if (fern) {
+    // Neue Welt? Dann alles neu malen. Haben sich nur einzelne Bäume
+    // geändert, werden bloß diese Stellen ausgebessert – es sei denn,
+    // es sind sehr viele (etwa nach langem Spielen in der Nahsicht).
+    if (!uebersicht || uebersichtAlt) {
+      uebersichtBauen();
+      ctx.setTransform(dpr * z, 0, 0, dpr * z, -kamera.x * dpr * z, -kamera.y * dpr * z);
+    } else if (uebersichtSchmutz.size) {
+      uebersichtPflegen();
+      ctx.setTransform(dpr * z, 0, 0, dpr * z, -kamera.x * dpr * z, -kamera.y * dpr * z);
+    }
+    ctx.drawImage(uebersicht, 0, -UE_RAND, uebersicht.width / UE, uebersicht.height / UE);
+  } else {
+    bodenZeichnen(s, fein);
+  }
 
   // Gitterlinien nur beim Bauen einblenden
   const bauModus = state.werkzeug !== 'zeiger' && state.werkzeug !== 'abriss';
-  if (bauModus) {
+  if (bauModus && z >= 0.4) {      // weit weg wäre es nur ein grauer Schleier
     ctx.strokeStyle = 'rgba(255,255,255,0.18)';
     ctx.lineWidth = 1 / z;
     ctx.beginPath();
@@ -4851,29 +5339,52 @@ function zeichnen() {
 
   // --- Alles Aufrechte von hinten nach vorn ---
   const wippen = Math.sin(performance.now() / 650) * 1.5;
-  for (let y = s.y0; y <= s.y1; y++) {
-    for (let x = s.x0; x <= s.x1; x++) {
-      if (!imBild(s, x, y)) continue;
-      const idx = y * N + x;
+  const einheitZeichnen = e => {
+    if (e.art === 'schiff')
+      segelschiff(isoX(e.s.x, e.s.y), isoY(e.s.x, e.s.y),
+                  KW * (e.gross ? 0.5 : 0.42) * (fern ? 1.6 : 1), e.farbe, wippen);
+    else truppZeichnen(e.t);
+  };
+  if (fern) {
+    // Fernsicht: Boden, Berge und Wälder stecken schon im Übersichtsbild.
+    // Frisch dazu kommen nur Äcker, vereinfachte Gebäude und Einheiten.
+    for (const [idx, geb] of aecker) {
+      const x = idx % N, y = (idx / N) | 0;
+      if (imBild(s, x, y)) ackerZeichnen(x, y, geb);
+    }
+    const reihenfolge = gebaeude.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    for (const geb of reihenfolge) {
+      if (!imBild(s, geb.x, geb.y)) continue;
+      gebaeudeFern(geb);
+      gebaeudeMarken(geb, false);
+    }
+    for (const liste of einheiten.values()) for (const e of liste) einheitZeichnen(e);
+  } else {
+    for (let y = s.y0; y <= s.y1; y++) {
+      for (let x = s.x0; x <= s.x1; x++) {
+        if (!imBild(s, x, y)) continue;
+        const idx = y * N + x;
 
-      const ackerGeb = aecker.get(idx);
-      if (ackerGeb) ackerZeichnen(x, y, ackerGeb);
+        const ackerGeb = aecker.get(idx);
+        if (ackerGeb) { baeumeMalen(); ackerZeichnen(x, y, ackerGeb); }
 
-      kachelAufbau(x, y, fein);
+        // Bäume werden nur gesammelt; gemalt wird am Reihenende oder
+        // bevor etwas anderes an die Reihe kommt (Verdeckung!)
+        const k = karte[idx];
+        if (k.typ === 'berg') { baeumeMalen(); bergKachel(x, y, fein); }
+        else if (k.baum > 0.02) baeumeSammeln(x, y, k, fein, z > 0.75);
 
-      const geb = belegt[idx];
-      if (geb && geb.x === x && geb.y === y) {
-        gebaeudeZeichnen(geb);
-        gebaeudeMarken(geb, fein);
+        const geb = belegt[idx];
+        if (geb && geb.x === x && geb.y === y) {
+          baeumeMalen();
+          gebaeudeZeichnen(geb);
+          gebaeudeMarken(geb, fein);
+        }
+
+        const liste = einheiten.get(idx);
+        if (liste) { baeumeMalen(); for (const e of liste) einheitZeichnen(e); }
       }
-
-      const liste = einheiten.get(idx);
-      if (liste) for (const e of liste) {
-        if (e.art === 'schiff')
-          segelschiff(isoX(e.s.x, e.s.y), isoY(e.s.x, e.s.y),
-                      KW * (e.gross ? 0.5 : 0.42), e.farbe, wippen);
-        else truppZeichnen(e.t);
-      }
+      baeumeMalen();
     }
   }
 
@@ -4956,7 +5467,7 @@ function zeichnen() {
         const groesse = 15 / Math.sqrt(z);
         ctx.font = `bold ${groesse}px system-ui, sans-serif`;
         const tx = isoX(a.x + def.w / 2, a.y + def.h / 2);
-        const ty = isoY(a.x + def.w / 2, a.y + def.h / 2) - hoch - KH * 1.6;
+        const ty = isoY(a.x + def.w / 2, a.y + def.h / 2) - hoch - HE * 1.6;
         ctx.lineWidth = groesse * 0.28;
         ctx.strokeStyle = 'rgba(17,24,39,0.75)';
         ctx.strokeText(prozent + ' %', tx, ty);
@@ -5003,8 +5514,8 @@ function ackerZeichnen(x, y, geb) {
   }
   ctx.stroke();
   if (kamera.zoom > 0.6) {
-    ctx.font = `${KH * 0.6}px sans-serif`;
-    ctx.fillText(symbol, isoX(x + 0.5, y + 0.5), isoY(x + 0.5, y + 0.5) - hoch - KH * 0.2);
+    ctx.font = `${HE * 0.6}px sans-serif`;
+    ctx.fillText(symbol, isoX(x + 0.5, y + 0.5), isoY(x + 0.5, y + 0.5) - hoch - HE * 0.2);
   }
 }
 
@@ -5013,7 +5524,7 @@ function gebaeudeMarken(geb, fein) {
   const def = GEBAEUDE[geb.typ];
   const hoch = hoeheBei(geb.x, geb.y);
   const mx = isoX(geb.x + def.w / 2, geb.y + def.h / 2);
-  const my = isoY(geb.x + def.w / 2, geb.y + def.h / 2) - hoch - KH * (def.w > 1 ? 2.3 : 1.7);
+  const my = isoY(geb.x + def.w / 2, geb.y + def.h / 2) - hoch - HE * (def.w > 1 ? 2.3 : 1.7);
 
   if (geb.hp < geb.maxHp) {
     const anteil = Math.max(0, geb.hp / geb.maxHp);
@@ -5060,34 +5571,34 @@ function truppZeichnen(t) {
     ctx.lineWidth = 3;
     ctx.stroke();
   }
-  rundRect(ctx, px - KW * 0.22, py - KH * 1.2, KW * 0.44, KH * 1.0, 6);
+  rundRect(ctx, px - KW * 0.22, py - HE * 1.2, KW * 0.44, HE * 1.0, 6);
   ctx.fillStyle = 'rgba(255,255,255,0.93)';
   ctx.fill();
   ctx.strokeStyle = farbe;
   ctx.lineWidth = state.truppAuswahl === t ? 3.5 : 2;
   ctx.stroke();
-  ctx.font = `${KH * 0.46}px sans-serif`;
-  ctx.fillText(t.art === 'flotte' ? '🚢' : '⚔️', px, py - KH * 0.88);
-  ctx.font = `bold ${KH * 0.36}px system-ui, sans-serif`;
+  ctx.font = `${HE * 0.46}px sans-serif`;
+  ctx.fillText(t.art === 'flotte' ? '🚢' : '⚔️', px, py - HE * 0.88);
+  ctx.font = `bold ${HE * 0.36}px system-ui, sans-serif`;
   ctx.fillStyle = '#1f2937';
   ctx.fillText(Math.round(gr) + (t.fracht > 0 ? '+' + Math.round(t.fracht) : ''),
-               px, py - KH * 0.38);
+               px, py - HE * 0.38);
   if (t.kanonen > 0) {
     ctx.fillStyle = '#b45309';
     for (let i = 0; i < t.kanonen; i++) {
       ctx.beginPath();
-      ctx.arc(px - KW * 0.14 + i * KW * 0.09, py - KH * 1.28, 2.6, 0, Math.PI * 2);
+      ctx.arc(px - KW * 0.14 + i * KW * 0.09, py - HE * 1.28, 2.6, 0, Math.PI * 2);
       ctx.fill();
     }
   }
 }
 
 function zielFaehnchen(px, py) {
-  pfosten(px, py, KH * 0.9, 2, '#6b5a46');
+  pfosten(px, py, HE * 0.9, 2, '#6b5a46');
   ctx.beginPath();
-  ctx.moveTo(px, py - KH * 0.9);
-  ctx.lineTo(px + KW * 0.18, py - KH * 0.78);
-  ctx.lineTo(px, py - KH * 0.66);
+  ctx.moveTo(px, py - HE * 0.9);
+  ctx.lineTo(px + KW * 0.18, py - HE * 0.78);
+  ctx.lineTo(px, py - HE * 0.66);
   ctx.closePath();
   ctx.fillStyle = '#dc2626'; ctx.fill();
 }
@@ -5114,20 +5625,18 @@ function bildschirmZuWelt(sx, sy) {
 }
 function bildschirmZuKachel(sx, sy) {
   const w = bildschirmZuWelt(sx, sy);
-  // Land liegt auf einem Plateau über dem Wasser, Berge noch höher.
-  // Darum jede mögliche Geländehöhe durchprobieren – von oben nach
-  // unten, weil hohe Kacheln die niedrigen dahinter verdecken – und
-  // die nehmen, bei der die getroffene Kachel wirklich so hoch ist.
-  for (const hoch of [H_LAND + H_BERG, H_LAND, H_LAND - 4, H_STRAND, 0]) {
-    const t = kachelVonWelt(w.x, w.y + hoch);
-    const x = Math.floor(t.x), y = Math.floor(t.y);
-    if (x < 0 || y < 0 || x >= N || y >= N) continue;
-    if (Math.abs(hoeheBei(x, y) - hoch) < 0.01) return { x, y };
+  gelaendeBereit();
+  // Land liegt auf einem Plateau über dem Wasser, Gebirge ragt noch
+  // weit darüber hinaus. Darum wird der Sehstrahl von oben nach unten
+  // verfolgt: bei jeder Höhe h liegt er über einer anderen Kachel –
+  // die erste, deren Oberfläche mindestens so hoch ist, ist die, die
+  // man an dieser Bildschirmstelle wirklich sieht.
+  for (let h = BERG_MAX + 16; h >= 0; h -= 2) {
+    const t = kachelVonWelt(w.x, w.y + h);
+    // (1 Pixel Toleranz, damit auch ein Tipp genau auf eine Gipfelspitze trifft)
+    if (oberflaeche(t.x, t.y) >= h - 1) return { x: Math.floor(t.x), y: Math.floor(t.y) };
   }
-  const t = kachelVonWelt(w.x, w.y);
-  const x = Math.floor(t.x), y = Math.floor(t.y);
-  if (x < 0 || y < 0 || x >= N || y >= N) return null;
-  return { x, y };
+  return null;
 }
 
 function kameraBegrenzen() {
