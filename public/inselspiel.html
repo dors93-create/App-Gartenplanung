@@ -259,6 +259,12 @@
     pointer-events: none;
   }
   #links-oben > * { pointer-events: auto; }
+  /* Auf dem Handy reicht das Info-Fenster bis über die linke Spalte.
+     Solange es offen ist, tritt sie zurück – sonst stünden Marken und
+     Fenstertext übereinander. Auf breiten Bildschirmen passt beides. */
+  @media (max-width: 500px) {
+    body.panel-offen #links-oben { display: none; }
+  }
   #punkte {
     background: var(--flaeche); border-radius: 10px; box-shadow: var(--schatten);
     padding: 7px 10px; font-size: 11.5px; min-width: 132px; cursor: pointer;
@@ -8610,15 +8616,20 @@ function diplomatieHtml() {
   return html;
 }
 
+// Info-Fenster ein- oder ausblenden. Die Klasse am <body> sagt dem
+// Layout, dass das Fenster gerade Platz braucht (siehe CSS).
+function panelSichtbar(an) {
+  $('info-panel').style.display = an ? 'block' : 'none';
+  document.body.classList.toggle('panel-offen', an);
+}
+
 // Info-Panel für das ausgewählte Gebäude
 function panelZeigen() {
-  const panel = $('info-panel');
-
   // Einzelheiten zur ausgewählten Truppe – nur, wenn sie mit ℹ️ in der
   // Auswahlleiste aufgeklappt wurden (sonst bleibt die Karte frei)
   const tr = state.truppAuswahl;
   if (tr && truppen.includes(tr) && state.truppInfo) {
-    panel.style.display = 'block';
+    panelSichtbar(true);
     const istFlotte = tr.art === 'flotte';
     let h = `<h2><span>${istFlotte ? '🚢' : '⚔️'}</span> ${istFlotte ? 'Flotte' : 'Heer'}</h2>`;
     h += `<div class="beschr">` +
@@ -8661,8 +8672,8 @@ function panelZeigen() {
   }
 
   const geb = state.auswahl;
-  if (!geb) { panel.style.display = 'none'; return; }
-  panel.style.display = 'block';
+  if (!geb) { panelSichtbar(false); return; }
+  panelSichtbar(true);
 
   const def = GEBAEUDE[geb.typ];
   const info = GEB_INFO[geb.typ] || {};
