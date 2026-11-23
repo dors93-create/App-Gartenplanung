@@ -1954,6 +1954,8 @@ const MP = {
   an: false, rolle: null, code: null,
   fb: null, app: null, db: null, pfad: null,
   taktZeit: 0, bautenZeit: 0, pulsZeit: 0, ausgang: null,
+  ruhte: false,           // (Gastgeber) ruhte die Welt bei der letzten Standmeldung?
+  bautenStand: -1,        // (Gastgeber) Gebäudebestand der zuletzt gesendeten Liste
   gastDa: false, fehler: '',
   horcher: [],            // (Gastgeber) Abmelde-Funktionen der Datenbank-Horcher
   alterName: '',          // (Gastgeber) Name der Computergegnerin, deren Platz der Gast einnimmt
@@ -2228,13 +2230,24 @@ function mpSenden(dt) {
   if (!istGastgeber() || !MP.fb || !MP.db || !MP.pfad) return;
   MP.taktZeit += dt; MP.bautenZeit += dt; MP.pulsZeit += dt;
 
-  if (MP.taktZeit >= 0.35) {
+  // Ruht die Welt (Pause oder Warten auf den Mitspieler), ändert sich
+  // kaum etwas – dann genügt ein gemächlicher Takt. Das spart unterwegs
+  // Datenvolumen. Der Wechsel selbst (Pause an/aus) geht sofort hinaus.
+  const ruht = !spielLaeuft();
+  const wechsel = ruht !== MP.ruhte;
+  MP.ruhte = ruht;
+
+  if (wechsel || MP.taktZeit >= (ruht ? 1.5 : 0.35)) {
     MP.taktZeit = 0;
     mpSchreiben('/stand/takt', taktPaket);
   }
 
-  if (MP.bautenZeit >= 1.5) {
+  // Gebäudeliste: im Lauf alle anderthalb Sekunden. In der Ruhe nur, wenn
+  // gebaut oder abgerissen wurde (auch der Gast darf in der Pause bauen) –
+  // und zur Sicherheit alle acht Sekunden.
+  if (MP.bautenZeit >= 1.5 && (!ruht || bauStand !== MP.bautenStand || MP.bautenZeit >= 8)) {
     MP.bautenZeit = 0;
+    MP.bautenStand = bauStand;
     mpSchreiben('/stand/bauten', bautenPaket);
   }
 
@@ -2309,12 +2322,13 @@ function standAnwenden(d) {
     tempoAnzeigen();
   }
   // Wie oft kommen die Meldungen? Daran richtet sich die weiche Bewegung aus.
+  // (Nur im Lauf gemessen: In der Pause kommen sie absichtlich seltener.)
   const jetzt = performance.now();
-  if (MP.taktZeitpunkt) {
+  if (!pause && MP.taktZeitpunkt) {
     const abstand = Math.min(1.5, (jetzt - MP.taktZeitpunkt) / 1000);
     MP.taktAbstand = MP.taktAbstand ? MP.taktAbstand * 0.8 + abstand * 0.2 : abstand;
   }
-  MP.taktZeitpunkt = jetzt;
+  MP.taktZeitpunkt = pause ? 0 : jetzt;
   const waren = Object.keys(PREISE).concat('gold');
   (d.sp || []).forEach((g, i) => {
     const sp = spieler[i];
