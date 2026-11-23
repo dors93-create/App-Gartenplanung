@@ -392,6 +392,10 @@
     border: none; border-radius: 10px; padding: 10px 18px; margin: 0 4px;
     font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;
   }
+  /* Beim Gast einer Partie zu zweit: Tempo und Pause zeigen nur an, was
+     der Gastgeber eingestellt hat; gespeichert wird bei ihm. */
+  body.gast #k-pause, body.gast #k-tempo1, body.gast #k-tempo2, body.gast #k-tempo3 { opacity: 0.55; }
+  body.gast #k-speichern, body.gast #k-laden { display: none; }
   #netz-warnung {
     position: absolute; top: calc(104px + var(--rand-oben)); left: 50%;
     transform: translateX(-50%);
@@ -1265,6 +1269,9 @@ const state = {
   kontorTab: 'handel',    // Reiter im Kontor: 'handel' oder 'diplomatie'
   pause: false,
   tempo: 1,               // 1, 2 oder 3
+  startFrage: false,      // die Frage „Fortsetzen oder neue Welt?" ist noch offen – solange ruht die Welt
+  nachNeustart: false,    // Seite wurde für eine Partie zu zweit neu geladen, die Partie läuft aber noch nicht
+  mpHalt: false,          // Partie zu zweit wartet noch auf den Mitspieler – solange ruht die Welt
   vorbei: false,          // Bankrott
   gewonnen: false,        // 500 Siedler geschafft
   rennenVorbei: false,    // hat schon jemand das Ziel erreicht?
@@ -1763,7 +1770,8 @@ function standSammeln() {
       kontingent: sp.kontingent, kontingentMax: sp.kontingentMax,
       embargo: sp.embargo, aggression: sp.aggression, timer: sp.timer,
       gunst: sp.gunst, zufriedenZeit: sp.zufriedenZeit, zielInsel: sp.zielInsel,
-      schiff: sp.schiff ? { x: sp.schiff.x, y: sp.schiff.y, pfad: sp.schiff.pfad } : null,
+      schiff: sp.schiff ? { x: sp.schiff.x, y: sp.schiff.y, pfad: sp.schiff.pfad,
+                            gesegelt: !!sp.schiff.gesegelt } : null,
       besiegt: sp.besiegt, aktAb: sp.aktAb, ultimatum: sp.ultimatum,
       piratenSchonBis: sp.piratenSchonBis || 0,
       gemeldet: sp.gemeldet, welleAb: sp.welleAb || 0, neidZeit: sp.neidZeit,
@@ -1782,6 +1790,9 @@ function standSammeln() {
 }
 
 function spielSpeichern(still) {
+  // Der Gast hat keinen eigenen Stand – sein Speicherplatz bleibt für
+  // sein eigenes Spiel unangetastet
+  if (istGast()) { if (!still) melden('💾 Gespeichert wird beim Gastgeber'); return false; }
   try {
     localStorage.setItem(STAND_SCHLUESSEL, JSON.stringify(standSammeln()));
     if (!still) melden('💾 Spielstand gespeichert');
@@ -1801,6 +1812,9 @@ function standVorhanden() {
 }
 
 function spielLaden(still) {
+  // Mitten in einer Partie zu zweit würde ein geladener Stand die beiden
+  // Geräte auseinanderreißen
+  if (MP.an) { if (!still) melden('📂 Laden geht während einer Partie zu zweit nicht'); return false; }
   let d;
   try { d = JSON.parse(localStorage.getItem(STAND_SCHLUESSEL)); } catch (e) { d = null; }
   if (!d || d.fassung !== STAND_FASSUNG) {
@@ -1853,8 +1867,10 @@ function spielLaden(still) {
       embargo: gesp.embargo, aggression: gesp.aggression, timer: gesp.timer,
       gunst: gesp.gunst || 0, zufriedenZeit: gesp.zufriedenZeit || 0,
       zielInsel: gesp.zielInsel === undefined ? -1 : gesp.zielInsel,
-      schiff: gesp.schiff ? { x: gesp.schiff.x, y: gesp.schiff.y, pfad: gesp.schiff.pfad || [] }
-                          : { x: schiff.x, y: schiff.y, pfad: [] },
+      // „gesegelt" fehlt in älteren Ständen – dort gilt das Schiff als bewegt
+      schiff: gesp.schiff ? { x: gesp.schiff.x, y: gesp.schiff.y, pfad: gesp.schiff.pfad || [],
+                              gesegelt: gesp.schiff.gesegelt !== false }
+                          : { x: schiff.x, y: schiff.y, pfad: [], gesegelt: true },
       besiegt: !!gesp.besiegt, aktAb: gesp.aktAb || 0, ultimatum: gesp.ultimatum || null,
       piratenSchonBis: gesp.piratenSchonBis || 0,
       gemeldet: gesp.gemeldet || [0, 0, 0, 0], welleAb: gesp.welleAb || 0,
@@ -1888,6 +1904,9 @@ function spielLaden(still) {
   if (d.duerre) Object.assign(duerre, d.duerre);
   Object.assign(markt, d.markt);
   Object.assign(autoHandel, d.autoHandel);
+  // Das eigene Schiff ist dasselbe Objekt wie spieler[ICH].schiff – sonst
+  // sähen Mitspieler und Computergegner eine veraltete Position.
+  schiff = spieler[ICH].schiff;
   schiff.x = d.schiff.x; schiff.y = d.schiff.y; schiff.pfad = d.schiff.pfad || [];
 
   // Startwert der Welt: Nur wenn er bekannt ist UND aus derselben Fassung
@@ -1935,7 +1954,15 @@ const MP = {
   an: false, rolle: null, code: null,
   fb: null, app: null, db: null, pfad: null,
   taktZeit: 0, bautenZeit: 0, pulsZeit: 0, ausgang: null,
-  hostPuls: 0, gastDa: false, fehler: '',
+  gastDa: false, fehler: '',
+  horcher: [],            // (Gastgeber) Abmelde-Funktionen der Datenbank-Horcher
+  alterName: '',          // (Gastgeber) Name der Computergegnerin, deren Platz der Gast einnimmt
+  hostGesehen: 0,         // (Gast) wann kam zuletzt etwas vom Gastgeber an? (eigene Uhr)
+  hostDa: false,          // (Gast) hat sich der Gastgeber schon einmal gemeldet?
+  hostPause: false,       // (Gast) ruht die Welt beim Gastgeber gerade?
+  taktZeitpunkt: 0,       // (Gast) Ankunft der letzten Standmeldung …
+  taktAbstand: 0,         // … und der übliche Abstand zwischen zweien (Sekunden)
+  weg: false,             // (Gast) die Partie wurde vom Gastgeber beendet
 };
 function istGast()      { return MP.an && MP.rolle === 'gast'; }
 function istGastgeber() { return MP.an && MP.rolle === 'gastgeber'; }
@@ -2009,13 +2036,33 @@ function mpCodeErzeugen() {
 }
 
 /* --- Der Gastgeber eröffnet --- */
+
+// Merker über das Neuladen der Seite hinweg: „eröffne gleich eine Partie"
+const MP_NEUSTART = 'inselspiel-zu-zweit';
+
+// Faire Partie von vorn: Beide beginnen gleichzeitig in einer frischen
+// Welt bei Spielzeit null. Ist die jetzige Welt schon angelaufen, entsteht
+// die frische am sichersten durch Neuladen der Seite – danach eröffnet
+// sich die Partie von selbst (siehe ganz unten bei „Los geht's").
+function partieNeu() {
+  const unberuehrt = !gebaeude.length && state.spielzeit < 12 && !schiff.gesegelt;
+  if (unberuehrt) { state.spielzeit = 0; partieEroeffnen(); return; }
+  try { sessionStorage.setItem(MP_NEUSTART, '1'); }
+  catch (e) { partieEroeffnen(); return; }      // ohne Zwischenspeicher: dann eben in dieser Welt
+  location.reload();
+}
+
+// Partie eröffnen. Von jetzt an ruht die Welt, bis der Mitspieler
+// beigetreten ist – erst dann beginnt das Spiel, für beide gleichzeitig.
 async function partieEroeffnen() {
+  if (MP.an) return;
   // Der Mitspieler baut die Welt aus dem Startwert nach. Bei einem
   // Spielstand aus einer älteren Fassung ist der nicht mehr bekannt.
   if (!weltSaat) {
-    mpStatus('Dieser Spielstand stammt aus einer älteren Fassung – zu zweit geht es nur in einer neuen Welt (Seite neu laden → „Neue Welt").');
+    mpStatus('Dieser Spielstand stammt aus einer älteren Fassung – zu zweit geht es nur in einer neuen Welt („Neue Welt zu zweit").');
     return;
   }
+  state.mpHalt = true;
   mpStatus('Verbinde …');
   try {
     await mitFrist(mpVerbinden());
@@ -2026,30 +2073,66 @@ async function partieEroeffnen() {
       welt: { saat: weltSaat, fassung: WELT_FASSUNG, erstellt: Date.now() },
       meta: { puls: Date.now(), gast: false },
     }));
-    MP.an = true; MP.rolle = 'gastgeber';
-    // Platz 2 wird frei für den Mitspieler
-    spieler[1].ki = false;
-    spieler[1].name = 'Gast (wartet)';
+    MP.an = true; MP.rolle = 'gastgeber'; MP.gastDa = false;
+    // Platz 2 wird frei für den Mitspieler. War die Computergegnerin
+    // gerade unterwegs, bleibt ihr Schiff stehen – wohin es geht,
+    // entscheidet jetzt der Mensch.
+    const platz = spieler[1];
+    MP.alterName = platz.name;
+    platz.ki = false;
+    platz.name = 'Mitspieler';
+    platz.zielInsel = -1; platz.expedition = null;
+    if (platz.schiff) { platz.schiff.pfad = []; platz.schiff.gesegelt = false; }
     // Auf den Beitritt und auf Befehle horchen
-    fb.onValue(fb.ref(MP.db, MP.pfad + '/meta/gast'), schnapp => {
-      if (schnapp.val() && !MP.gastDa) {
-        MP.gastDa = true;
-        spieler[1].name = 'Mitspieler';
-        melden('🎉 Dein Mitspieler ist der Partie beigetreten!');
-      }
-    }, mpHorchFehler);
-    fb.onChildAdded(fb.ref(MP.db, MP.pfad + '/befehle'), schnapp => {
-      // Ein fehlerhafter Befehl darf die Partie nicht aufhalten
-      try { befehlAnnehmen(schnapp.val()); } catch (e) { console.error('Befehl verworfen', e); }
-      fb.remove(schnapp.ref).catch(() => {});
-    }, mpHorchFehler);
+    MP.horcher = [
+      fb.onValue(fb.ref(MP.db, MP.pfad + '/meta/gast'), schnapp => gastMeldung(!!schnapp.val()), mpHorchFehler),
+      fb.onChildAdded(fb.ref(MP.db, MP.pfad + '/befehle'), schnapp => {
+        // Ein fehlerhafter Befehl darf die Partie nicht aufhalten
+        try { befehlAnnehmen(schnapp.val()); } catch (e) { console.error('Befehl verworfen', e); }
+        fb.remove(schnapp.ref).catch(() => {});
+      }, mpHorchFehler),
+    ];
+    // Die Frage „Fortsetzen oder neue Welt?" hat sich damit erledigt
+    if (state.startFrage) { state.startFrage = false; $('overlay').style.display = 'none'; }
     mpStatus('');
     mpFensterZeigen();
-    melden('🌐 Partie eröffnet – gib deinem Mitspieler den Code ' + MP.code);
   } catch (e) {
+    // Die Welt ruht weiter, solange das Fenster offen ist – so bleibt der
+    // Start fair, auch wenn es erst beim zweiten Versuch klappt
     MP.fehler = String(e && e.message || e);
     mpStatus(mpFehlerText(e));
   }
+}
+
+// Der Mitspieler kommt – oder geht
+function gastMeldung(da) {
+  if (da && !MP.gastDa) {
+    MP.gastDa = true;
+    const start = state.mpHalt;
+    state.mpHalt = false;               // jetzt läuft die Welt – für beide gleichzeitig
+    state.nachNeustart = false;
+    mpFensterSchliessen();
+    melden(start ? '🎉 Dein Mitspieler ist da – los geht\'s!' : '🎉 Dein Mitspieler ist wieder da');
+  } else if (!da && MP.gastDa) {
+    MP.gastDa = false;
+    melden('👋 Dein Mitspieler hat die Partie verlassen');
+  }
+}
+
+// Der Gastgeber beendet die Partie oder bricht das Warten ab. Auf dem
+// Platz des Mitspielers spielt danach wieder die Computergegnerin.
+function partieBeenden() {
+  if (!istGastgeber()) return;
+  for (const abmelden of MP.horcher) { try { abmelden(); } catch (e) {} }
+  MP.horcher = [];
+  // Die Partie aus der Datenbank nehmen – daran merkt auch der Gast, dass Schluss ist
+  try { MP.fb.remove(MP.fb.ref(MP.db, MP.pfad)).catch(() => {}); } catch (e) {}
+  MP.an = false; MP.rolle = null; MP.gastDa = false; MP.code = null; MP.pfad = null;
+  spieler[1].ki = true;
+  spieler[1].name = MP.alterName || 'Isabella';
+  state.mpHalt = false;
+  mpFensterSchliessen();
+  melden('🌐 Partie beendet – du spielst allein weiter');
 }
 
 /* --- Der Gast tritt bei --- */
@@ -2072,20 +2155,36 @@ async function partieBeitreten(code) {
 
     // Dieselbe Welt aus demselben Startwert aufbauen
     weltErzeugen(welt.saat);
-    gebaeude = []; truppen = [];
+    gebaeude = []; truppen = []; piraten = [];
     belegt = new Array(N * N).fill(null);
     MP.an = true; MP.rolle = 'gast'; MP.code = code;
+    MP.hostGesehen = 0; MP.hostDa = false; MP.hostPause = false;
+    MP.taktZeitpunkt = 0; MP.taktAbstand = 0; MP.weg = false;
     spieler[1].ki = false;
     spieler[1].name = 'Du';
     spieler[0].name = 'Gastgeber';
     rolleSetzen(1);
     state.kontorGebaut = false;
     state.terrainAlt = true;
+    // Die eigene Uhr ruht: Tempo und Pause kommen ab jetzt vom Gastgeber
+    state.pause = false; state.mpHalt = false;
+    if (state.startFrage) { state.startFrage = false; $('overlay').style.display = 'none'; }
+    document.body.classList.add('gast');
+    tempoAnzeigen();
 
     await mitFrist(fb.set(fb.ref(MP.db, MP.pfad + '/meta/gast'), true));
-    fb.onValue(fb.ref(MP.db, MP.pfad + '/stand/takt'), sn => standAnwenden(sn.val()), mpHorchFehler);
+    // Jede Meldung des Gastgebers gilt zugleich als Lebenszeichen
+    // (gemessen mit der eigenen Uhr – die Uhren zweier Handys gehen nie gleich)
+    fb.onValue(fb.ref(MP.db, MP.pfad + '/stand/takt'), sn => {
+      const stand = sn.val();
+      if (stand) MP.hostGesehen = Date.now();
+      standAnwenden(stand);
+    }, mpHorchFehler);
     fb.onValue(fb.ref(MP.db, MP.pfad + '/stand/bauten'), sn => bautenAnwenden(sn.val()), mpHorchFehler);
-    fb.onValue(fb.ref(MP.db, MP.pfad + '/meta/puls'), sn => { MP.hostPuls = sn.val() || 0; }, mpHorchFehler);
+    fb.onValue(fb.ref(MP.db, MP.pfad + '/meta/puls'), sn => {
+      if (sn.val()) { MP.hostGesehen = Date.now(); MP.hostDa = true; }
+      else if (MP.hostDa) partieWeg();        // die Partie wurde aus der Datenbank genommen
+    }, mpHorchFehler);
     // Befehle abschicken. Scheitert das – gleich oder später –, erfährt man es.
     MP.ausgang = paket => {
       const pech = () => melden('Befehl konnte nicht gesendet werden', 'mpbefehl');
@@ -2102,6 +2201,25 @@ async function partieBeitreten(code) {
     MP.fehler = String(e && e.message || e);
     mpStatus(mpFehlerText(e));
   }
+}
+
+// (Gast) Die Partie verlassen: dem Gastgeber Bescheid geben, dann zurück
+// zum eigenen Spiel – das Neuladen stellt es unverändert wieder her.
+function partieVerlassen() {
+  try { MP.fb.set(MP.fb.ref(MP.db, MP.pfad + '/meta/gast'), false).catch(() => {}); } catch (e) {}
+  setTimeout(() => location.reload(), 500);
+}
+
+// (Gast) Die Partie gibt es nicht mehr – der Gastgeber hat sie beendet
+function partieWeg() {
+  if (!istGast() || MP.weg) return;
+  MP.weg = true;
+  document.getElementById('mp-box').innerHTML = `
+    <div class="gross">👋</div>
+    <h1>Partie beendet</h1>
+    <p>Der Gastgeber hat die Partie geschlossen.</p>
+    <button class="knopf-gruen" onclick="location.reload()">Zu meinem Spiel</button>`;
+  document.getElementById('mp-fenster').style.display = 'flex';
 }
 
 /* --- Gastgeber veröffentlicht den Stand --- */
@@ -2144,6 +2262,8 @@ function mpSendeFehler(e) {
 function taktPaket() {
   return {
       t: Math.round(state.spielzeit),
+      v: state.tempo,                       // Tempo und …
+      p: spielLaeuft() ? 0 : 1,             // … Pause bestimmt der Gastgeber
       sp: spieler.map(sp => ({
         r: Object.keys(PREISE).concat('gold').map(w => Math.round(sp.res[w] * 10) / 10),
         s: sp.maxStufe, g: sp.gunst, k: Math.round(sp.kontingent),
@@ -2182,6 +2302,19 @@ function bautenPaket() {
 function standAnwenden(d) {
   if (!d || !istGast()) return;
   state.spielzeit = d.t || 0;
+  // Tempo und Pause des Gastgebers übernehmen und anzeigen
+  const tempo = d.v || 1, pause = !!d.p;
+  if (tempo !== state.tempo || pause !== MP.hostPause) {
+    state.tempo = tempo; MP.hostPause = pause;
+    tempoAnzeigen();
+  }
+  // Wie oft kommen die Meldungen? Daran richtet sich die weiche Bewegung aus.
+  const jetzt = performance.now();
+  if (MP.taktZeitpunkt) {
+    const abstand = Math.min(1.5, (jetzt - MP.taktZeitpunkt) / 1000);
+    MP.taktAbstand = MP.taktAbstand ? MP.taktAbstand * 0.8 + abstand * 0.2 : abstand;
+  }
+  MP.taktZeitpunkt = jetzt;
   const waren = Object.keys(PREISE).concat('gold');
   (d.sp || []).forEach((g, i) => {
     const sp = spieler[i];
@@ -2190,7 +2323,7 @@ function standAnwenden(d) {
     sp.maxStufe = g.s; sp.gunst = g.g;
     sp.kontingent = g.k; sp.kontingentMax = g.km;
     sp.einwohner = g.e; sp.siedlerEw = g.sd;
-    sp.schiff.x = g.sx / 10; sp.schiff.y = g.sy / 10;
+    gastZiel(sp.schiff, g.sx / 10, g.sy / 10);
     sp._hatKontor = g.kt;
     sp.blockiert = !!g.bl; sp.besiegt = !!g.bs;
     sp.ultimatum = g.ul ? { gegen: g.ul[0], ab: g.ul[1] } : null;
@@ -2207,7 +2340,7 @@ function standAnwenden(d) {
     t.spieler = a[1]; t.art = a[2] ? 'flotte' : 'heer';
     t.mann = a[3]; t.schiffe = a[4]; t.fracht = a[5];
     t.kanonen = a[6]; t.moral = a[7] / 100;
-    t._zx = a[8] / 10; t._zy = a[9] / 10; t.kampf = !!a[10];
+    gastZiel(t, a[8] / 10, a[9] / 10); t.kampf = !!a[10];
     t.pfad = a[11] >= 0 ? [{ x: a[11] / 10, y: a[12] / 10 }] : [];
     neu.push(t);
   }
@@ -2232,7 +2365,7 @@ function standAnwenden(d) {
   const altePiraten = new Map(piraten.map(p => [p.id, p]));
   piraten = (d.pi || []).map(a => {
     const p = altePiraten.get(a[0]) || { id: a[0], x: a[1] / 10, y: a[2] / 10, pfad: [] };
-    p._zx = a[1] / 10; p._zy = a[2] / 10;
+    gastZiel(p, a[1] / 10, a[2] / 10);
     p.schiffe = a[3]; p.ziel = a[4]; p.lauert = !!a[5]; p.geht = !!a[6]; p.kampf = !!a[7];
     return p;
   });
@@ -2268,14 +2401,41 @@ function bautenAnwenden(liste) {
   if (state.auswahl) state.auswahl = gebaeude.find(g => g.id === state.auswahl.id) || null;
 }
 
-// Weiche Bewegung beim Gast zwischen zwei Netzmeldungen
-function truppenGlaetten(dt) {
-  for (const t of truppen.concat(piraten)) {
-    if (t._zx === undefined) continue;
-    const f = Math.min(1, dt * 7);
-    t.x += (t._zx - t.x) * f;
-    t.y += (t._zy - t.y) * f;
+/* --- Weiche Bewegung beim Gast ---
+   Der Gastgeber meldet Positionen nur etwa dreimal je Sekunde. Würde der
+   Gast sie einfach übernehmen, hüpften Schiffe und Truppen von Punkt zu
+   Punkt. Stattdessen merkt er sich jede Meldung als ZIEL und fährt die
+   Strecke dorthin gleichmäßig ab – genau in der Zeit, bis die nächste
+   Meldung kommt. Das Ergebnis ist eine ruhige, durchgehende Fahrt (mit
+   einem Wimpernschlag Verzögerung). */
+function gastZiel(e, x, y) {
+  if (e._zx === undefined) { e.x = x; e.y = y; }          // erste Meldung: gleich dorthin setzen
+  e._zx = x; e._zy = y;
+  const strecke = Math.hypot(x - e.x, y - e.y);
+  // Sehr große Sprünge (etwa nach einer langen Verbindungspause) nicht
+  // nachfahren. Die Grenze liegt bewusst hoch: Bei dreifachem Tempo legt
+  // ein Schiff zwischen zwei Meldungen schon über drei Kacheln zurück,
+  // und im Mobilfunk kommt eine Meldung auch einmal verspätet.
+  if (strecke > 12) { e.x = x; e.y = y; e._tempo = 0; return; }
+  // Etwas Luft einrechnen: lieber eine Spur zu langsam als kurz stehen bleiben
+  e._tempo = strecke / ((MP.taktAbstand || 0.4) * 1.15);
+}
+function gastGlaetten(dt) {
+  const alle = truppen.concat(piraten);
+  for (const sp of spieler) if (sp.schiff) alle.push(sp.schiff);
+  for (const e of alle) {
+    if (e._zx === undefined) continue;
+    const dx = e._zx - e.x, dy = e._zy - e.y, rest = Math.hypot(dx, dy);
+    const schritt = (e._tempo || 0) * dt;
+    if (rest <= schritt || rest < 0.002) { e.x = e._zx; e.y = e._zy; }
+    else { e.x += dx / rest * schritt; e.y += dy / rest * schritt; }
   }
+}
+// Ist ein Schiff gerade in Fahrt? (Beim Gast gibt es keine Wegpunkte –
+// dort verrät es der Abstand zum gemeldeten Ziel.)
+function schiffFaehrt(s) {
+  if (s.pfad && s.pfad.length) return true;
+  return s._zx !== undefined && Math.hypot(s._zx - s.x, s._zy - s.y) > 0.03;
 }
 
 /* --- Befehle des Gastes --- */
@@ -2319,7 +2479,8 @@ function befehlAnnehmen(b) {
     case 'schiff':   { const weg = wegSuche(Math.floor(spieler[sid].schiff.x),
                                             Math.floor(spieler[sid].schiff.y),
                                             b.tx, b.ty, seeFrei);
-                       if (weg) spieler[sid].schiff.pfad = weg; break; }
+                       if (weg) { spieler[sid].schiff.pfad = weg; spieler[sid].schiff.gesegelt = true; }
+                       break; }
   }
 }
 
@@ -2335,15 +2496,30 @@ function mpFensterZeigen() {
 }
 function mpFensterSchliessen() {
   document.getElementById('mp-fenster').style.display = 'none';
+  if (MP.an) return;
+  // Wurde keine Partie daraus, läuft die Welt wieder. War die Seite eigens
+  // für die Partie neu geladen worden, kommt die Frage nach dem alten
+  // Spielstand zurück – er soll nicht versehentlich verloren gehen.
+  state.mpHalt = false;
+  if (state.nachNeustart) { state.nachNeustart = false; startFrageZeigen(); }
 }
 function mpStartText() {
+  // Hat der Gastgeber in dieser Welt schon gesiedelt, darf er wählen:
+  // faire Partie in einer neuen Welt – oder der Mitspieler steigt hier ein
+  const laufend = state.kontorGebaut;
+  const ersetzt = laufend || standVorhanden();
+  const hinweis = text => `<div style="color:var(--text-leise);font-size:12px;margin:5px 0 12px">${text}</div>`;
   return `
     <div class="gross">🌐</div>
     <h1>Zu zweit spielen</h1>
     <p>Ihr spielt in derselben Welt: gemeinsamer Markt, Diplomatie und Krieg.
-       Einer eröffnet die Partie, der andere tritt mit dem Code bei.<br>
+       Einer eröffnet die Partie, der andere tritt mit dem Code bei.
+       Los geht es erst, wenn beide da sind.<br>
        <b>Das Gerät des Gastgebers muss dabei geöffnet bleiben.</b></p>
-    <button class="knopf-gruen" onclick="partieEroeffnen()">Partie eröffnen</button>
+    <button class="knopf-gruen" onclick="partieNeu()">${laufend ? 'Neue Welt zu zweit' : 'Partie eröffnen'}</button>
+    ${ersetzt ? hinweis('Beide beginnen gleichzeitig in einer frischen Welt. Dein bisheriger Spielstand wird durch die neue Partie ersetzt.') : ''}
+    ${laufend ? `<button class="knopf-grau" onclick="partieEroeffnen()">In dieser Welt weiterspielen</button>` +
+                hinweis('Dein Mitspieler steigt in deine laufende Welt ein.') : ''}
     <div style="margin-top:14px">
       <input id="mp-code" placeholder="Code" maxlength="6"
              style="text-transform:uppercase;padding:9px;border:1px solid #d1d5db;
@@ -2355,18 +2531,37 @@ function mpStartText() {
     <button class="knopf-grau" style="margin-top:14px" onclick="mpFensterSchliessen()">Schließen</button>`;
 }
 function mpLaufendText() {
+  const code = `<b style="font-size:24px;letter-spacing:3px;color:var(--text)">${MP.code}</b>`;
+  const status = `<div id="mp-status" style="margin-top:10px;color:var(--rot);font-size:12.5px"></div>`;
+  // Gastgeber, der noch auf den Mitspieler wartet: Die Welt ruht
+  if (istGastgeber() && state.mpHalt) return `
+    <div class="gross">⏳</div>
+    <h1>Warte auf deinen Mitspieler</h1>
+    <p>Code: ${code}<br>
+       Gib ihm diesen Code. Das Spiel beginnt für euch beide, sobald er
+       beigetreten ist – bis dahin ruht die Welt.</p>
+    ${status}
+    <button class="knopf-grau" onclick="partieBeenden()">Abbrechen</button>`;
+  if (istGastgeber()) return `
+    <div class="gross">🌐</div>
+    <h1>Du bist Gastgeber</h1>
+    <p>Code: ${code}<br>
+       ${MP.gastDa ? 'Dein Mitspieler ist dabei.' : 'Dein Mitspieler ist gerade nicht dabei – mit dem Code kann er wieder einsteigen.'}<br>
+       Tempo und Pause bestimmst du.</p>
+    ${status}
+    <button class="knopf-gruen" onclick="mpFensterSchliessen()">Weiterspielen</button>
+    <button class="knopf-grau" onclick="partieBeenden()">Partie beenden</button>`;
   return `
     <div class="gross">🌐</div>
-    <h1>${istGastgeber() ? 'Du bist Gastgeber' : 'Verbunden'}</h1>
-    <p>Code: <b style="font-size:24px;letter-spacing:3px">${MP.code}</b><br>
-       ${istGastgeber()
-         ? (MP.gastDa ? 'Dein Mitspieler ist dabei.' : 'Warte auf deinen Mitspieler …')
-         : 'Du spielst beim Gastgeber mit.'}</p>
-    <div id="mp-status" style="margin-top:10px;color:var(--rot);font-size:12.5px"></div>
-    <button class="knopf-gruen" onclick="mpFensterSchliessen()">Weiterspielen</button>`;
+    <h1>Verbunden</h1>
+    <p>Code: ${code}<br>
+       Du spielst beim Gastgeber mit. Tempo und Pause bestimmt er.</p>
+    ${status}
+    <button class="knopf-gruen" onclick="mpFensterSchliessen()">Weiterspielen</button>
+    <button class="knopf-grau" onclick="partieVerlassen()">Partie verlassen</button>`;
 }
 
-/* ---------- 4. HILFSFUNKTIONEN ------------------------------- */
+/* ---------- 4. HILFSFUNKTIONEN ------------------------------- *//* ---------- 4. HILFSFUNKTIONEN ------------------------------- */
 
 // Mittelpunkt eines Gebäudes in Kachel-Koordinaten
 function zentrum(geb) {
@@ -2773,22 +2968,55 @@ function inselInfo() {
   return liste;
 }
 
-// Inseln, auf denen schon jemand sitzt oder die ein anderer ansteuert
+// Für welche Insel hat sich ein Mensch sichtbar entschieden? Maßgeblich
+// ist sein Schiff: Liegt es vor einer Küste oder segelt es gerade dorthin,
+// gilt die nächstgelegene Insel als seine Wahl – auch wenn das Kontor noch
+// nicht steht. Die Computergegner „sehen" das und suchen sich eine andere.
+// (Solange das Schiff noch unberührt am Startplatz liegt, zählt es nicht.)
+function inselAnspruch(sp) {
+  const s = sp.schiff;
+  if (sp.ki || sp.besiegt || !s || !s.gesegelt || !inselMarke) return -1;
+  const ort = s.pfad && s.pfad.length ? s.pfad[s.pfad.length - 1] : s;   // Ziel der Fahrt, sonst der Liegeplatz
+  const r = Math.ceil(SIM.schiffBauRadius);
+  let insel = -1, nah = SIM.schiffBauRadius;       // so weit reicht der Kontor-Bau vom Schiff aus
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    const x = Math.floor(ort.x) + dx, y = Math.floor(ort.y) + dy;
+    if (x < 0 || y < 0 || x >= N || y >= N) continue;
+    const m = inselMarke[y * N + x];
+    if (m < 0) continue;
+    const abstand = Math.hypot(x + 0.5 - ort.x, y + 0.5 - ort.y);
+    if (abstand < nah) { nah = abstand; insel = m; }
+  }
+  return insel;
+}
+
+// Inseln, die für diesen Spieler nicht mehr in Frage kommen: Dort steht
+// schon ein Kontor, ein anderer Computergegner ist dorthin unterwegs –
+// oder ein Mensch hat sich dafür entschieden (siehe inselAnspruch).
 function inselnVergeben(sp) {
   const besetzt = new Set();
   for (const g of gebaeude)
     if (g.typ === 'kontor') besetzt.add(inselMarke[g.y * N + g.x]);
-  for (const andere of spieler)
-    if (andere !== sp && andere.zielInsel >= 0 && (!andere.kontor || andere.expedition)) besetzt.add(andere.zielInsel);
+  for (const andere of spieler) {
+    if (andere === sp) continue;
+    if (andere.ki) {
+      if (andere.zielInsel >= 0 && (!andere.kontor || andere.expedition)) besetzt.add(andere.zielInsel);
+    } else {
+      const wahl = inselAnspruch(andere);
+      if (wahl >= 0) besetzt.add(wahl);
+    }
+  }
   return besetzt;
 }
 
-// Beste freie Insel für diesen Spieler. Damit du immer eine Top-Insel
-// zur Wahl hast, lassen dir die Gegner eine frei, solange du selbst noch
-// kein Kontor gebaut hast (im Spiel zu zweit: jedem Menschen eine).
+// Beste LEERE Insel für diesen Spieler – die Computergegner setzen sich
+// nie zu jemandem dazu. Damit du immer eine Top-Insel zur Wahl hast,
+// lassen sie außerdem für jeden Menschen eine frei, der sich noch nicht
+// entschieden hat (kein Kontor, und sein Schiff liegt vor keiner Insel).
 function kiInselWahl(sp, wunsch) {
   const info = inselInfo(), besetzt = inselnVergeben(sp);
-  const menschenOhneInsel = spieler.filter(x => !x.ki && !x.kontor && !x.besiegt).length;
+  const menschenOhneInsel = spieler.filter(x =>
+    !x.ki && !x.kontor && !x.besiegt && inselAnspruch(x) < 0).length;
   let topFrei = info.filter((e, i) => e.top && !besetzt.has(i)).length;
   let beste = -1, besterWert = -1;
   for (let i = 0; i < info.length; i++) {
@@ -2827,6 +3055,7 @@ function kiSegeln(sp, insel) {
 // sich am meisten Land versorgen lässt (gute Stadtmitte statt Landzunge)
 function kiLanden(sp, insel) {
   const s = sp.schiff, def = GEBAEUDE.kontor;
+  if (inselnVergeben(sp).has(insel)) return false;     // nie zu jemandem dazusetzen
   let beste = null, besteNote = -1;
   for (let dy = -11; dy <= 11; dy++) for (let dx = -11; dx <= 11; dx++) {
     const x = Math.floor(s.x) + dx, y = Math.floor(s.y) + dy;
@@ -2846,8 +3075,10 @@ function kiSiedeln(sp) {
   const s = sp.schiff;
   if (!s || s.pfad.length) return;      // noch auf See
 
-  // Ziel schon vergeben (jemand war schneller)? Dann neu wählen.
-  if (sp.zielInsel >= 0 && inselnVergeben(sp).has(sp.zielInsel) && kiInselWahl(sp) >= 0) sp.zielInsel = -1;
+  // Ziel inzwischen vergeben – jemand war schneller, oder ein Mensch hat
+  // sich für diese Insel entschieden? Dann neu wählen. Ist gerade gar
+  // nichts frei, wartet das Schiff lieber, als sich dazuzusetzen.
+  if (sp.zielInsel >= 0 && inselnVergeben(sp).has(sp.zielInsel)) sp.zielInsel = -1;
 
   if (sp.zielInsel < 0) {
     const insel = kiInselWahl(sp);
@@ -7293,8 +7524,10 @@ function zeichnen() {
     const tx = Math.floor(p.x), ty = Math.floor(p.y);
     if (tx >= 0 && ty >= 0 && tx < N && ty < N) merke(ty * N + tx, { art: 'pirat', p });
   }
+  // Schiffe der anderen: das des Mitspielers immer, die der Computergegner
+  // nur, solange sie noch keine Insel haben oder gerade unterwegs sind
   for (const sp of spieler)
-    if (sp.ki && sp.schiff && (!sp.kontor || sp.schiff.pfad.length)) {
+    if (sp.id !== ICH && sp.schiff && (!sp.ki || !sp.kontor || schiffFaehrt(sp.schiff))) {
       const tx = Math.floor(sp.schiff.x), ty = Math.floor(sp.schiff.y);
       if (tx >= 0 && ty >= 0 && tx < N && ty < N)
         merke(ty * N + tx, { art: 'schiff', s: sp.schiff, farbe: sp.farbe, gross: false });
@@ -7901,6 +8134,7 @@ function klickAufKarte(sx, sy) {
     const weg = segelWeg(t.x, t.y);
     if (weg) {
       schiff.pfad = weg;
+      schiff.gesegelt = true;       // ab jetzt zählt, wohin es fährt (siehe inselAnspruch)
       if (!state.kontorGebaut) melden('⛵ Leinen los!', 'segeln');
     } else melden('Dorthin führt kein Seeweg');
     state.auswahl = null; panelZeigen();
@@ -8337,7 +8571,7 @@ function uiAktualisieren() {
 
   // Netz-Hinweis: meldet sich der Gastgeber noch?
   const netz = $('netz-warnung');
-  if (istGast() && MP.hostPuls && Date.now() - MP.hostPuls > 9000) {
+  if (istGast() && MP.hostGesehen && Date.now() - MP.hostGesehen > 9000) {
     netz.style.display = 'block';
     netz.textContent = '📴 Der Gastgeber ist gerade nicht erreichbar …';
   } else netz.style.display = 'none';
@@ -8489,6 +8723,9 @@ function feindInSicht() {
 }
 function lageZeigen() {
   let html = '';
+  // Im Spiel zu zweit: Der Gastgeber hat angehalten (er bestimmt Tempo und Pause)
+  if (istGast() && MP.hostPause)
+    html += `<button class="lage-marke grau" data-akt="netz">⏸️ Der Gastgeber pausiert</button>`;
   if (state.alarm && state.alarm.bis > state.spielzeit)
     html += `<button class="lage-marke alarm" data-akt="alarm">🚨 Angriff!</button>`;
   const feind = feindInSicht();
@@ -8523,6 +8760,7 @@ $('lage').addEventListener('click', e => {
   }
   else if (akt === 'frieden') diploAktion('angebot', Number(knopf.dataset.id));
   else if (akt === 'diplo') diplomatieOeffnen();
+  else if (akt === 'netz') mpFensterZeigen();
 });
 
 // Krieg erklärt man nicht aus Versehen: erst das zweite Antippen zählt
@@ -8950,15 +9188,30 @@ function melden(text, schluessel, sperre = 8000) {
 }
 
 // Pause & Geschwindigkeit
+// Im Spiel zu zweit bestimmt der Gastgeber Tempo und Pause – sein Gerät
+// rechnet ja die Welt. Beim Gast zeigen die Knöpfe nur an, was gilt.
+function nurGastgeber() {
+  if (!istGast()) return false;
+  melden('⏱️ Tempo und Pause bestimmt der Gastgeber', 'gasttempo', 4000);
+  return true;
+}
 function pauseUmschalten() {
+  if (nurGastgeber()) return;
   state.pause = !state.pause;
-  $('k-pause').textContent = state.pause ? '▶' : '⏸';
-  $('k-pause').classList.toggle('aktiv', state.pause);
+  tempoAnzeigen();
 }
 function tempoSetzen(t) {
+  if (nurGastgeber()) return;
   state.tempo = t;
-  if (state.pause) pauseUmschalten();
-  for (const n of [1, 2, 3]) $('k-tempo' + n).classList.toggle('aktiv', n === t);
+  state.pause = false;
+  tempoAnzeigen();
+}
+// Knöpfe passend zum Stand einfärben (beim Gast: zum Stand des Gastgebers)
+function tempoAnzeigen() {
+  const pause = istGast() ? MP.hostPause : state.pause;
+  $('k-pause').textContent = pause ? '▶' : '⏸';
+  $('k-pause').classList.toggle('aktiv', !!pause);
+  for (const n of [1, 2, 3]) $('k-tempo' + n).classList.toggle('aktiv', n === state.tempo);
 }
 $('k-pause').addEventListener('click', pauseUmschalten);
 $('k-tempo1').addEventListener('click', () => tempoSetzen(1));
@@ -9087,22 +9340,32 @@ document.addEventListener('visibilitychange', () => {
 let zuletzt = performance.now();
 let uiTakt = 0;
 
+// Läuft die Simulation gerade? Sie ruht in der Pause, solange beim Start
+// noch die Frage „Fortsetzen oder neue Welt?" offen ist, und im Spiel zu
+// zweit, bis der Mitspieler beigetreten ist. (Der Gastgeber meldet das
+// auch dem Gast, siehe taktPaket.)
+function spielLaeuft() {
+  return !state.pause && !state.startFrage && !state.mpHalt && !state.vorbei &&
+         (!state.gewonnen || state.weiterspielen);
+}
+
 function schleife(jetzt) {
   let dt = (jetzt - zuletzt) / 1000;
   zuletzt = jetzt;
   dt = Math.min(dt, 0.1);   // große Sprünge (Tab im Hintergrund) abfangen
 
-  const laeuft = !state.pause && !state.vorbei && (!state.gewonnen || state.weiterspielen);
-  if (laeuft) {
-    if (istGast()) {
-      // Der Gast rechnet nichts – er zeichnet nur, was der Gastgeber meldet
-      truppenGlaetten(dt);
-    } else {
+  if (istGast()) {
+    // Der Gast rechnet nichts – er zeichnet nur, was der Gastgeber meldet,
+    // und führt Schiffe und Truppen dazwischen gleichmäßig nach
+    gastGlaetten(dt);
+  } else {
+    if (spielLaeuft()) {
       schiffUpdate(dt * state.tempo);
       kiSchiffeUpdate(dt * state.tempo);
       simSchritt(dt * state.tempo);
-      mpSenden(dt);
     }
+    // Gesendet wird auch in der Pause: Der Gast soll sehen, dass pausiert ist
+    mpSenden(dt);
   }
 
   zeichnen();
@@ -9140,8 +9403,28 @@ leinwand.classList.add('bauen');   // Start-Werkzeug ist das Kontor
 uiAktualisieren();
 requestAnimationFrame(schleife);
 
+// Wurde die Seite neu geladen, um eine Partie zu zweit in einer frischen
+// Welt zu beginnen (siehe partieNeu)? Dann gleich eröffnen. Die Welt ruht
+// von der ersten Sekunde an, bis der Mitspieler da ist.
+let mpNeustart = false;
+try {
+  mpNeustart = sessionStorage.getItem(MP_NEUSTART) === '1';
+  sessionStorage.removeItem(MP_NEUSTART);
+} catch (e) {}
+
+if (mpNeustart) {
+  state.mpHalt = true;
+  state.nachNeustart = true;
+  mpFensterZeigen();
+  partieEroeffnen();
+} else startFrageZeigen();
+
 // Liegt ein Spielstand vor? Dann fragen, ob fortgesetzt werden soll.
-if (standVorhanden()) {
+// Bis zur Antwort ruht die Welt – sonst wären die Computergegner in der
+// neuen Welt längst losgesegelt.
+function startFrageZeigen() {
+  if (!standVorhanden()) return;
+  state.startFrage = true;
   $('overlay').style.display = 'flex';
   $('overlay-box').innerHTML = `
     <div class="gross">💾</div>
@@ -9149,13 +9432,18 @@ if (standVorhanden()) {
     <p>Es liegt ein gespeicherter Spielstand vor.<br>
        Du kannst ihn fortsetzen oder eine neue Welt beginnen.</p>
     <button class="knopf-gruen" onclick="spielFortsetzen()">Fortsetzen</button>
-    <button class="knopf-grau" onclick="neueWelt()">Neue Welt</button>`;
+    <button class="knopf-grau" onclick="neueWelt()">Neue Welt</button>
+    <div style="margin-top:12px">
+      <button class="knopf-grau" onclick="mpFensterZeigen()">🌐 Zu zweit spielen</button>
+    </div>`;
 }
 function spielFortsetzen() {
+  state.startFrage = false;
   if (!spielLaden(true)) { $('overlay').style.display = 'none'; return; }
   melden('📂 Weiter geht\'s!');
 }
 function neueWelt() {
+  state.startFrage = false;
   standLoeschen();
   $('overlay').style.display = 'none';
 }

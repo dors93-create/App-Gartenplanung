@@ -53,20 +53,43 @@ niemand abrufen.
    beiden Geräten dieselbe Fassung läuft:
    `https://dors93-create.github.io/App-Gartenplanung/inselspiel.html`
 2. Eine Person tippt oben auf **🌐** → **„Partie eröffnen"**.
-   Es erscheint ein fünfstelliger Code, zum Beispiel `K7PQM`.
+   Es erscheint ein fünfstelliger Code, zum Beispiel `K7PQM`, und das
+   Fenster „Warte auf deinen Mitspieler". **Bis der da ist, ruht die
+   Welt** – kein Computergegner sticht in See.
 3. Die andere Person tippt auf **🌐**, gibt den Code ein → **„Beitreten"**.
-4. Fertig. Ihr seid in derselben Welt; die beiden übrigen Inseln
-   besiedeln wie gewohnt KI-Gegner.
+4. In dem Moment beginnt das Spiel für beide gleichzeitig, bei Spielzeit
+   null. Die beiden Computergegner brechen erst rund 15 Sekunden später
+   auf – ihr habt also beide den ersten Zug bei der Inselwahl.
 
-**Wichtig:** Das Gerät der Person, die eröffnet hat (der *Gastgeber*),
-rechnet das ganze Spiel. Es muss offen bleiben – wird es geschlossen
-oder gesperrt, pausiert das Spiel für beide. Der Gast sieht dann den
-Hinweis „Der Gastgeber ist gerade nicht erreichbar".
+Liegt beim Start ein gespeicherter Spielstand vor, führt der Knopf
+**„🌐 Zu zweit spielen"** direkt hierher, ohne den Stand anzurühren.
 
-**Am einfachsten in einer neuen Welt:** Der Gastgeber beginnt eine neue
-Welt und eröffnet die Partie gleich zu Beginn – der Mitspieler übernimmt
-dann den Platz der ersten Computergegnerin. Meldet das Spiel beim
-Beitreten eine „andere Spielfassung", hilft Neuladen auf beiden Geräten.
+**Neue Welt oder laufende Welt?** Hat der Gastgeber in seiner Welt schon
+gesiedelt, fragt das Fenster nach:
+
+- **„Neue Welt zu zweit"** – faire Partie von vorn. Die Seite lädt dafür
+  kurz neu. Der bisherige Spielstand wird ersetzt, sobald in der neuen
+  Welt gesiedelt wird; wer vorher abbricht, bekommt ihn wieder angeboten.
+- **„In dieser Welt weiterspielen"** – der Mitspieler steigt in die
+  laufende Welt ein und übernimmt Platz 2 (samt allem, was dort schon
+  steht). So setzt ihr auch eine frühere Partie fort: Stand laden,
+  eröffnen, mit dem neuen Code beitreten.
+
+**Wer bestimmt was?** Das Gerät der Person, die eröffnet hat (der
+*Gastgeber*), rechnet das ganze Spiel.
+
+- **Tempo und Pause** stellt nur der Gastgeber ein. Beim Gast zeigen die
+  Knöpfe an, was gerade gilt; pausiert der Gastgeber, steht beim Gast
+  links die Marke „Der Gastgeber pausiert".
+- **Gespeichert** wird nur beim Gastgeber. Der eigene Spielstand des
+  Gastes bleibt unberührt – nach der Partie ist er wieder da.
+- Das Gerät des Gastgebers muss **offen bleiben**. Wird es gesperrt oder
+  verliert es das Netz, steht die Welt für beide; der Gast sieht dann
+  „Der Gastgeber ist gerade nicht erreichbar".
+
+**Aufhören:** Über **🌐** kann der Gast die Partie verlassen (und später
+mit demselben Code wieder einsteigen) und der Gastgeber sie beenden –
+dann spielt auf Platz 2 wieder die Computergegnerin.
 
 ## Was technisch passiert
 
@@ -74,8 +97,8 @@ Beitreten eine „andere Spielfassung", hilft Neuladen auf beiden Geräten.
   (eine Zahl). Beide Geräte bauen daraus dieselbe Karte – das spart
   rund 260 KB je Beitritt.
 - Der Gastgeber veröffentlicht etwa dreimal pro Sekunde den laufenden
-  Stand (Rohstoffe, Truppen, Diplomatie, Markt) und alle anderthalb
-  Sekunden die Gebäudeliste.
+  Stand (Rohstoffe, Schiffe, Truppen, Diplomatie, Markt, Tempo und
+  Pause) und alle anderthalb Sekunden die Gebäudeliste.
 - Der Gast rechnet **nichts** selbst. Jede seiner Handlungen – bauen,
   abreißen, ausbauen, handeln, Truppen befehligen, Diplomatie – wird
   als Befehl geschickt; der Gastgeber prüft und führt sie aus.
@@ -92,13 +115,22 @@ Beitreten eine „andere Spielfassung", hilft Neuladen auf beiden Geräten.
 | „Keine Partie mit diesem Code gefunden" | Code vergleichen. Der Gastgeber muss die Partie gerade geöffnet haben. |
 | „… andere Spielfassung" | Auf beiden Geräten die Seite neu laden. |
 | „Dieser Spielstand stammt aus einer älteren Fassung" | Zu zweit geht es nur in einer neuen Welt. |
-| „Der Gastgeber ist gerade nicht erreichbar" | Das Gerät des Gastgebers ist gesperrt, pausiert oder ohne Netz. |
+| „Der Gastgeber ist gerade nicht erreichbar" | Das Gerät des Gastgebers ist gesperrt, geschlossen oder ohne Netz. |
+| Marke „Der Gastgeber pausiert" | Kein Fehler: Der Gastgeber hat angehalten. Weiter geht es, wenn er die Pause beendet. |
+| „Tempo und Pause bestimmt der Gastgeber" | Kein Fehler: Beim Gast sind diese Knöpfe nur Anzeige. |
+| „Partie beendet" (beim Gast) | Der Gastgeber hat die Partie geschlossen. „Zu meinem Spiel" führt zurück zum eigenen Stand. |
 
 ## Grenzen der aktuellen Fassung
 
 - Genau **zwei** menschliche Mitspieler (Plätze 1 und 2), dazu zwei KI-Gegner.
 - Der Gastgeber kann nicht wechseln: Verlässt er die Partie, ist sie vorbei.
 - Der Spielstand wird nur beim Gastgeber gespeichert.
-- Beim Gast laufen Truppen und Schiffe weich interpoliert, können also
-  um Bruchteile einer Kachel von der „Wahrheit" abweichen. Für die
-  Berechnung zählt immer der Stand beim Gastgeber.
+- Lädt der Gastgeber die Seite mitten in der Partie neu, ist die Partie
+  beendet; fortsetzen lässt sie sich über „In dieser Welt weiterspielen".
+- Beim Gast werden Schiffe und Truppen zwischen zwei Meldungen
+  gleichmäßig nachgeführt. Sie fahren dadurch ruhig, liegen aber einen
+  Wimpernschlag hinter dem Stand des Gastgebers – für die Berechnung
+  zählt immer dessen Stand.
+- Bäume, die gefällt, und Erz, das abgebaut wurde, reisen nicht mit:
+  Steigt jemand in eine länger laufende Welt ein, sieht er dort noch den
+  ursprünglichen Wald.
