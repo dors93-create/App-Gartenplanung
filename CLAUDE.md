@@ -122,6 +122,11 @@ Jeder Push auf den Branch wird per GitHub Actions automatisch gebaut und auf
 GitHub Pages veröffentlicht (`.github/workflows/deploy.yml`). Live-Adresse:
 `https://dors93-create.github.io/App-Gartenplanung/`.
 
+Arbeitsweise (so vereinbart am 24.11.2026): Änderungen entstehen auf einem
+eigenen Zweig und werden im Browser getestet. Sind die Tests bestanden, kommen
+sie ohne weitere Rückfrage in den Live-Branch
+`claude/grunriss-initial-setup-Fawpx` – und sind damit veröffentlicht.
+
 ## Lokal starten
 
 ```bash
