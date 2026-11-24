@@ -211,6 +211,32 @@ export function initEditor(map) {
   }
 
   chipBox.addEventListener("scroll", aktualisiereChipRand, { passive: true });
+
+  // Ein Tipp auf einen der Rand-Pfeile blättert die Reihe weiter. Der Pfeil
+  // ist nur gemalt und kann selbst keine Tipps annehmen; deshalb prüfen wir
+  // hier, ob der Tipp im Pfeilbereich am linken oder rechten Rand liegt, und
+  // fangen ihn ab, bevor er den (verdeckten) Chip darunter wählen würde.
+  const PFEIL_BREITE = 40; // Pixel, wie in style.css
+  chipBox.addEventListener(
+    "click",
+    (e) => {
+      const rand = chipBox.getBoundingClientRect();
+      const links =
+        chipBox.classList.contains("hat-mehr-links") &&
+        e.clientX < rand.left + PFEIL_BREITE;
+      const rechts =
+        chipBox.classList.contains("hat-mehr-rechts") &&
+        e.clientX > rand.right - PFEIL_BREITE;
+      if (!links && !rechts) return;
+      e.stopPropagation(); // der Chip unter dem Pfeil bekommt den Tipp nicht
+      chipBox.scrollBy({
+        left: (rechts ? 0.7 : -0.7) * chipBox.clientWidth,
+        behavior: "smooth",
+      });
+    },
+    true, // „true“: diese Prüfung kommt vor den Chips an die Reihe
+  );
+
   // Fenstergröße geändert oder Handy gedreht: Pfeile und Position nachführen.
   window.addEventListener("resize", () => {
     aktualisiereChipRand();
@@ -788,6 +814,8 @@ export function initEditor(map) {
         "; Restfläche als Rasen ergänzt. Jetzt anpassen oder Terrasse/Bäume ergänzen.";
     } catch (e) {
       console.error(e);
+      // Auch die Fehlermeldung gehört nur zu dem Plan, für den gefragt wurde.
+      if (!aktiv || planKey !== planBeimStart) return;
       hint.textContent = "Automatische Erfassung nicht möglich (Dienst nicht erreichbar).";
     } finally {
       btnAuto.disabled = false;

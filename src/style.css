@@ -372,8 +372,9 @@ body {
 
 /* Die beiden Rand-Pfeile „kleben“ am linken bzw. rechten Rand der Reihe
    (position: sticky) und brauchen selbst keinen Platz: Der negative Abstand
-   hebt ihre Breite (40 px) samt Lücke (8 px) wieder auf. Tipps gehen durch
-   sie hindurch an die Chips darunter. */
+   hebt ihre Breite (40 px) samt Lücke (8 px) wieder auf. Sie sind nur gemalt
+   (pointer-events: none); ein Tipp in ihren Bereich blättert die Reihe weiter
+   – das erledigt editor.js. */
 .toolbar__chips::before,
 .toolbar__chips::after {
   display: none; /* nur sichtbar, wenn es auf dieser Seite weitergeht */
@@ -407,10 +408,10 @@ body {
 /* Große Bildschirme (Tablet hochkant, Desktop) und alle Geräte mit Maus: Die
    Chips brechen in mehrere Zeilen um, alle Typen sind auf einmal sichtbar
    (mit dem Mausrad ließe sich die Reihe ohnehin nicht blättern). Nur am
-   Touch-Gerät mit wenig Höhe – Handy im Querformat – bleibt es bei der einen
+   kleinen Touch-Gerät – Handy hochkant oder quer – bleibt es bei der einen
    wischbaren Reihe. */
 @media (min-width: 600px) and (min-height: 600px),
-  (min-width: 600px) and (hover: hover) and (pointer: fine) {
+  (hover: hover) and (pointer: fine) {
   .toolbar__chips {
     flex-wrap: wrap;
     overflow-x: visible;

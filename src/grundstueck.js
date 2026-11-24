@@ -33,6 +33,11 @@ const WFS_URL = "https://www.wfs.nrw.de/geobasis/wfs_nw_alkis_vereinfacht";
 const DOPPELTIPP_MS = 600; // Millisekunden
 const DOPPELTIPP_PIXEL = 30; // Bildschirm-Pixel
 
+// So lange nach einem Wechsel des Bedienfelds ignorieren wir Klicks auf seine
+// Knöpfe. Bei einem Doppelklick träfe der zweite Klick sonst den Knopf, der
+// inzwischen an derselben Stelle erschienen ist (z. B. „Abbrechen“).
+const KNOPF_SPERRE_MS = 400;
+
 // Antwortet der Kataster-Dienst nicht, brechen wir die Abfrage nach dieser
 // Zeit ab und melden es (statt endlos „Suche Flurstück …“ zu zeigen).
 const ABFRAGE_ZEITLIMIT_MS = 15000;
@@ -92,6 +97,13 @@ export function initGrundstueck(map, optionen = {}) {
   const offeneAbfragen = new Set();
   // Zeitpunkt und Stelle des letzten Tipps – zum Erkennen eines Doppeltipps.
   let letzterTipp = { zeit: -Infinity, x: 0, y: 0 };
+  // Die Tipps werden durchgezählt. Je Flurstück merken wir, welcher Tipp
+  // zuletzt über es entschieden hat: Eine verspätete Antwort auf einen älteren
+  // Tipp darf einen neueren nicht überstimmen.
+  let tippNr = 0;
+  const zuletztEntschieden = new Map(); // Flurstücks-Kennung -> Nummer des Tipps
+  // Zeitpunkt des letzten Zustandswechsels (siehe KNOPF_SPERRE_MS).
+  let zustandSeit = -Infinity;
 
   // -----------------------------------------------------------------------
   // Karten-Ebenen einmalig anlegen (leer); später füllen wir sie mit Daten.
@@ -369,6 +381,7 @@ export function initGrundstueck(map, optionen = {}) {
   // -----------------------------------------------------------------------
   function aufraeumen() {
     abfragenAbbrechen();
+    zuletztEntschieden.clear();
     auswahl = [];
     masseLoeschen();
     if (map.getSource(SRC_FLUR)) {
@@ -405,6 +418,7 @@ export function initGrundstueck(map, optionen = {}) {
   // -----------------------------------------------------------------------
   function setze(neuerZustand, gesamtflaeche) {
     zustand = neuerZustand;
+    zustandSeit = performance.now();
 
     // Fadenkreuz nur während des Auswählens.
     map.getContainer().classList.toggle(
@@ -451,6 +465,9 @@ export function initGrundstueck(map, optionen = {}) {
   // Ist dieser Tipp der zweite Teil eines Doppeltipps? Dann soll er das
   // gerade gewählte Flurstück nicht gleich wieder abwählen. Erkannt wird er an
   // Zeit und Ort: kurz nach dem vorigen Tipp und an fast derselben Stelle.
+  // Auch ignorierte Tipps zählen als „voriger Tipp“ – wer ungeduldig mehrmals
+  // auf dieselbe Stelle tippt, löst also nur eine Abfrage aus. Der Preis: Ein
+  // bewusster zweiter Tipp (abwählen) braucht eine kurze Pause.
   // -----------------------------------------------------------------------
   function istDoppeltipp(e) {
     // Zeitstempel des Ereignisses nehmen (nicht „jetzt“): Zeichnet die Karte
@@ -479,6 +496,7 @@ export function initGrundstueck(map, optionen = {}) {
     // Antwort des Katasters auf sich warten lässt und inzwischen ungeduldig
     // noch einmal getippt wurde.
     const vorherGewaehlt = new Set(auswahl.map((f) => f.id));
+    const nr = ++tippNr; // laufende Nummer dieses Tipps
 
     const abfrage = new AbortController();
     offeneAbfragen.add(abfrage);
@@ -499,7 +517,11 @@ export function initGrundstueck(map, optionen = {}) {
       if (!flurstueck) {
         hinweis =
           "Hier wurde kein Flurstück gefunden. Bitte direkt auf das Grundstück tippen.";
-      } else {
+      } else if ((zuletztEntschieden.get(flurstueck.id) || 0) < nr) {
+        // (Hat inzwischen ein späterer Tipp über dieses Flurstück entschieden,
+        // bleibt es dabei – diese Antwort kommt dann zu spät.)
+        zuletztEntschieden.set(flurstueck.id, nr);
+
         // Umschalten: War das Flurstück beim Tippen schon gewählt, wird es
         // entfernt – sonst hinzugefügt. Zwei Tipps auf dasselbe, noch nicht
         // gewählte Flurstück wählen es also nur einmal.
@@ -534,7 +556,12 @@ export function initGrundstueck(map, optionen = {}) {
   // -----------------------------------------------------------------------
   // Knöpfe im Bedienfeld
   // -----------------------------------------------------------------------
+  // Kurz nach einem Wechsel des Bedienfelds zählt ein Klick noch nicht – er
+  // ist dann meist der zweite Teil eines Doppelklicks auf den vorigen Knopf.
+  const zuFrueh = () => performance.now() - zustandSeit < KNOPF_SPERRE_MS;
+
   btnAktion.addEventListener("click", () => {
+    if (zuFrueh()) return;
     if (zustand === "bereit") {
       setze("auswaehlen"); // los geht's: auf das/die Grundstück(e) tippen
     } else if (zustand === "auswaehlen" && auswahl.length > 0) {
@@ -548,6 +575,7 @@ export function initGrundstueck(map, optionen = {}) {
   });
 
   btnZurueck.addEventListener("click", () => {
+    if (zuFrueh()) return;
     if (zustand === "auswaehlen") {
       aufraeumen();
       setze("bereit"); // Auswahl abgebrochen

@@ -170,27 +170,63 @@ function clearResults() {
 // 5. Geocoding über Nominatim (OpenStreetMap)
 // -------------------------------------------------------------------------
 
-// Fragt Nominatim nach einer Adresse und gibt eine Liste von Treffern zurück.
+// Fragt Nominatim nach einer Adresse und gibt die Treffer in NRW zurück.
 // "signal" erlaubt es, eine laufende Anfrage abzubrechen (für die Vorschläge
 // während des Tippens, damit nicht veraltete Treffer ankommen).
 async function geocode(query, signal) {
+  const beginn = performance.now();
+
+  // Zuerst genau so fragen, wie getippt wurde. Zur Sicherheit nur die Treffer
+  // behalten, die wirklich in NRW liegen (das Such-Rechteck enthält auch
+  // Randgebiete der Nachbarländer).
+  const roh = await frageNominatim(query, signal);
+  let treffer = roh.filter(liegtInNrw);
+
+  // Bei häufigen Straßennamen ohne Ort („Hauptstraße 1“) kommen die 5
+  // Vorschläge leicht alle aus dem Rand der Nachbarländer, und aus NRW bleibt
+  // keiner übrig. Dann fragen wir EINMAL nach – mit angehängtem Bundesland.
+  // (Bewusst nicht von vornherein: Schreibweisen wie „Köln Hauptstraße 1“
+  // oder „…, Deutschland“ versteht der Dienst mit dem Zusatz nicht mehr.)
+  const nenntLand = query.toLowerCase().includes(NRW_NAME.toLowerCase());
+  if (roh.length > 0 && treffer.length === 0 && !nenntLand) {
+    // Den kostenlosen Dienst schonen: höchstens eine Anfrage pro Sekunde.
+    await warte(1000 - (performance.now() - beginn), signal);
+    const mitLand = query.replace(/[,\s]+$/, "") + ", " + NRW_NAME;
+    treffer = (await frageNominatim(mitLand, signal)).filter(liegtInNrw);
+  }
+
+  return treffer;
+}
+
+// Wartet die angegebene Zeit (Millisekunden). Wird die Suche inzwischen
+// verworfen ("signal"), endet das Warten sofort mit einem Abbruch.
+function warte(ms, signal) {
+  return new Promise((weiter, abbruch) => {
+    const abgebrochen = () =>
+      abbruch(new DOMException("Suche abgebrochen", "AbortError"));
+    if (signal.aborted) return abgebrochen();
+    const timer = setTimeout(weiter, Math.max(0, ms));
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        abgebrochen();
+      },
+      { once: true },
+    );
+  });
+}
+
+// Schickt EINE Anfrage an Nominatim und gibt die Treffer unverändert zurück.
+async function frageNominatim(suchtext, signal) {
   // Wir bauen die Anfrage-URL zusammen:
   //  - format=json   -> maschinenlesbare Antwort
   //  - addressdetails -> liefert strukturierte Adressbestandteile
   //  - limit=5        -> höchstens 5 Vorschläge
   //  - countrycodes=de-> nur Deutschland
   //  - viewbox+bounded-> nur Treffer im Rechteck um NRW (siehe NRW_SUCHRAHMEN)
-  //
-  // Zusätzlich hängen wir das Bundesland an den Suchtext. Ohne diesen Zusatz
-  // füllt Nominatim die 5 Vorschläge bei häufigen Straßennamen („Hauptstraße
-  // 1“) leicht mit Treffern aus dem Rand der Nachbarländer – und aus NRW
-  // bliebe keiner übrig.
-  const mitLand = query.toLowerCase().includes(NRW_NAME.toLowerCase())
-    ? query
-    : query + ", " + NRW_NAME;
-
   const url = new URL("https://nominatim.openstreetmap.org/search");
-  url.searchParams.set("q", mitLand);
+  url.searchParams.set("q", suchtext);
   url.searchParams.set("format", "json");
   url.searchParams.set("addressdetails", "1");
   url.searchParams.set("limit", "5");
@@ -211,10 +247,7 @@ async function geocode(query, signal) {
     throw new Error("Nominatim antwortet mit Status " + response.status);
   }
 
-  // Zur Sicherheit nur die Treffer behalten, die wirklich in NRW liegen (das
-  // Such-Rechteck enthält auch Randgebiete der Nachbarländer).
-  const treffer = await response.json();
-  return treffer.filter(liegtInNrw);
+  return response.json();
 }
 
 // Liegt ein Nominatim-Treffer in NRW? (Bundesland steht in den Adressdetails.)
@@ -298,6 +331,7 @@ function renderResults(results, query) {
   }
 
   resultsList.hidden = results.length === 0;
+  resultsList.scrollTop = 0; // neue Treffer immer von oben zeigen
 }
 
 // Fliegt sanft zum gewählten Ort und setzt dort einen Marker.
@@ -342,6 +376,7 @@ function selectPlace(place) {
 // jedem Tastendruck an, sondern erst nach einer kurzen Tipp-Pause.
 const DEBOUNCE_MS = 400; // Wartezeit nach dem letzten Tastendruck
 const MIN_ZEICHEN = 3; // erst ab dieser Eingabelänge suchen
+const SUCHE_ZEITLIMIT_MS = 15000; // antwortet der Dienst so lange nicht: aufgeben
 
 let debounceTimer = null; // Timer für die Tipp-Pause
 let laufendeSuche = null; // AbortController der aktuellen Anfrage
@@ -372,6 +407,14 @@ async function sucheVorschlaege(query) {
   laufendeSuche = suche;
   sucheLaeuftFuer = query;
 
+  // Antwortet der Dienst nicht, geben wir nach einer Weile auf und melden es
+  // (statt den Spinner endlos drehen zu lassen).
+  let zuLangsam = false;
+  const zeitlimit = setTimeout(() => {
+    zuLangsam = true;
+    suche.abort();
+  }, SUCHE_ZEITLIMIT_MS);
+
   setLoading(true);
   try {
     const results = await geocode(query, suche.signal);
@@ -386,11 +429,14 @@ async function sucheVorschlaege(query) {
       hint.hidden = true;
     }
   } catch (error) {
-    if (error.name === "AbortError") return; // bewusst abgebrochen – ignorieren
+    // Bewusst abgebrochen (neue Eingabe, Treffer gewählt) – ignorieren.
+    // Ein Abbruch durch das Zeitlimit dagegen wird wie ein Fehler gemeldet.
+    if (error.name === "AbortError" && !zuLangsam) return;
     console.error(error);
     clearResults(); // keine veralteten Treffer neben der Fehlermeldung stehen lassen
     showHint("Die Adresssuche ist gerade nicht erreichbar.", true);
   } finally {
+    clearTimeout(zeitlimit);
     // Spinner nur ausblenden, wenn nicht schon eine neuere Suche läuft.
     if (laufendeSuche === suche) {
       setLoading(false);
