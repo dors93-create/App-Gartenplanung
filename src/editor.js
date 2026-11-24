@@ -192,16 +192,30 @@ export function initEditor(map) {
   });
 
   // Am Handy passen nicht alle Typen nebeneinander; die Reihe ist dann
-  // wischbar. Ein weicher Rand (siehe style.css) zeigt an, auf welcher Seite
-  // noch weitere Typen liegen.
+  // wischbar. Ein kleiner Pfeil am Rand (siehe style.css) zeigt an, auf
+  // welcher Seite noch weitere Typen liegen.
   function aktualisiereChipRand() {
     const rechtsUebrig =
       chipBox.scrollWidth - chipBox.clientWidth - chipBox.scrollLeft;
     chipBox.classList.toggle("hat-mehr-links", chipBox.scrollLeft > 4);
     chipBox.classList.toggle("hat-mehr-rechts", rechtsUebrig > 4);
   }
+
+  // Den gewählten Chip in die Mitte der (am Handy wischbaren) Reihe holen –
+  // so bleibt er sichtbar, und auch seine Nachbarn kommen ins Bild.
+  function zentriereAktivenChip() {
+    const chip = chipEls.find((c) => c.dataset.typ === aktiverTyp);
+    if (!chip) return;
+    const mitte = chip.offsetLeft - chipBox.offsetLeft + chip.offsetWidth / 2;
+    chipBox.scrollTo({ left: mitte - chipBox.clientWidth / 2, behavior: "smooth" });
+  }
+
   chipBox.addEventListener("scroll", aktualisiereChipRand, { passive: true });
-  window.addEventListener("resize", aktualisiereChipRand);
+  // Fenstergröße geändert oder Handy gedreht: Pfeile und Position nachführen.
+  window.addEventListener("resize", () => {
+    aktualisiereChipRand();
+    zentriereAktivenChip();
+  });
 
   // -----------------------------------------------------------------------
   // Karten-Ebenen einmalig anlegen.
@@ -527,13 +541,7 @@ export function initEditor(map) {
       c.classList.toggle("is-active", c.dataset.typ === aktiverTyp),
     );
 
-    // Den gewählten Chip in die Mitte der (am Handy wischbaren) Reihe holen –
-    // so werden auch seine Nachbarn sichtbar.
-    const chip = chipEls.find((c) => c.dataset.typ === aktiverTyp);
-    if (chip) {
-      const mitte = chip.offsetLeft - chipBox.offsetLeft + chip.offsetWidth / 2;
-      chipBox.scrollTo({ left: mitte - chipBox.clientWidth / 2, behavior: "smooth" });
-    }
+    zentriereAktivenChip();
 
     if (!aktiverTyp) {
       modus = "neutral";
@@ -752,8 +760,13 @@ export function initEditor(map) {
   btnAuto.addEventListener("click", async () => {
     hint.textContent = "Erfasse amtliche Gebäude …";
     btnAuto.disabled = true;
+    const planBeimStart = planKey; // für welchen Plan wird hier gefragt?
     try {
       const haeuser = await erfasseGebaeude(parcelsData);
+      // Wurde der Editor inzwischen geschlossen oder ein anderes Grundstück
+      // geöffnet? Dann gehört die verspätete Antwort nicht mehr hierher –
+      // sonst lägen die Gebäude plötzlich auf einer aufgeräumten Karte.
+      if (!aktiv || planKey !== planBeimStart) return;
       haeuser.forEach((ring) => {
         const r = [...ring];
         const a = r[0];

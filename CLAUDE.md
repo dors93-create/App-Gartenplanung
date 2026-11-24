@@ -13,7 +13,7 @@ auch Nicht-Programmierer:innen dem Projekt folgen können.
 - Bildschirmfüllende, interaktive Karte (MapLibre GL JS).
 - Hintergrund: NRW-Luftbild (DOP) als WMS-Layer `nw_dop_rgb` vom Dienst
   `https://www.wms.nrw.de/geobasis/wms_nw_dop`, angefordert als JPEG-Kacheln
-  (rund zehnmal kleiner als PNG).
+  (je nach Bildinhalt etwa 6- bis 15-mal kleiner als PNG).
 - Suchfeld mit Adresssuche (Geocoding) über die kostenlose Nominatim-API,
   inkl. Vorschlägen während des Tippens. Die Suche ist auf NRW begrenzt (nur
   dort gibt es Luftbild und Kataster); unter den Treffern steht die

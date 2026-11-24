@@ -200,8 +200,13 @@ body {
   margin-top: 2px;
 }
 
-/* Quellenangabe unter den Treffern (Adressdaten von OpenStreetMap) */
+/* Quellenangabe unter den Treffern (Adressdaten von OpenStreetMap).
+   Sie bleibt am unteren Rand der Liste stehen, auch wenn die Treffer bei
+   voller Liste scrollen (bottom: -6px gleicht den Innenabstand der Liste aus). */
 .results__quelle {
+  position: sticky;
+  bottom: -6px;
+  background: var(--surface);
   padding: 6px 12px 4px;
   font-size: 11px;
   color: var(--text-muted);
@@ -353,45 +358,59 @@ body {
 }
 
 /* Reihe der Objekt-Typen.
-   Schmale Bildschirme (Handy): eine waagerecht wischbare Reihe. Ein weicher
-   Rand zeigt an, dass es links bzw. rechts noch weitergeht – die Klassen
-   „hat-mehr-…“ setzt editor.js je nach Wischposition.
-   Große Bildschirme: siehe weiter unten, dort bricht die Reihe um. */
+   Handy: eine waagerecht wischbare Reihe. Wo es noch weitergeht, liegt am
+   Rand ein kleiner Pfeil auf weichem weißem Verlauf (‹ links, › rechts) – die
+   Klassen „hat-mehr-…“ setzt editor.js je nach Wischposition.
+   Große Bildschirme und Geräte mit Maus: siehe weiter unten, dort bricht die
+   Reihe um und zeigt alle Typen auf einmal. */
 .toolbar__chips {
   display: flex;
   gap: 8px;
   overflow-x: auto;
   padding-bottom: 4px;
 }
-.toolbar__chips.hat-mehr-rechts {
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent);
-  mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent);
+
+/* Die beiden Rand-Pfeile „kleben“ am linken bzw. rechten Rand der Reihe
+   (position: sticky) und brauchen selbst keinen Platz: Der negative Abstand
+   hebt ihre Breite (40 px) samt Lücke (8 px) wieder auf. Tipps gehen durch
+   sie hindurch an die Chips darunter. */
+.toolbar__chips::before,
+.toolbar__chips::after {
+  display: none; /* nur sichtbar, wenn es auf dieser Seite weitergeht */
+  position: sticky;
+  z-index: 1;
+  flex: none;
+  width: 40px;
+  align-items: center;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--text-muted);
+  pointer-events: none;
 }
-.toolbar__chips.hat-mehr-links {
-  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 44px), transparent);
-  mask-image: linear-gradient(to left, #000 calc(100% - 44px), transparent);
+.toolbar__chips.hat-mehr-links::before {
+  content: "‹";
+  display: flex;
+  left: 0;
+  margin-right: -48px;
+  justify-content: flex-start;
+  background: linear-gradient(to left, rgba(255, 255, 255, 0), var(--surface) 55%);
 }
-.toolbar__chips.hat-mehr-links.hat-mehr-rechts {
-  -webkit-mask-image: linear-gradient(
-    to right,
-    transparent,
-    #000 44px,
-    #000 calc(100% - 44px),
-    transparent
-  );
-  mask-image: linear-gradient(
-    to right,
-    transparent,
-    #000 44px,
-    #000 calc(100% - 44px),
-    transparent
-  );
+.toolbar__chips.hat-mehr-rechts::after {
+  content: "›";
+  display: flex;
+  right: 0;
+  margin-left: -48px;
+  justify-content: flex-end;
+  background: linear-gradient(to right, rgba(255, 255, 255, 0), var(--surface) 55%);
 }
 
-/* Große Bildschirme (Tablet hochkant, Desktop): Platz genug, um alle Typen
-   auf einmal zu zeigen – die Chips brechen in mehrere Zeilen um. Im Querformat
-   eines Handys (wenig Höhe) bleibt es bei der einen wischbaren Reihe. */
-@media (min-width: 600px) and (min-height: 600px) {
+/* Große Bildschirme (Tablet hochkant, Desktop) und alle Geräte mit Maus: Die
+   Chips brechen in mehrere Zeilen um, alle Typen sind auf einmal sichtbar
+   (mit dem Mausrad ließe sich die Reihe ohnehin nicht blättern). Nur am
+   Touch-Gerät mit wenig Höhe – Handy im Querformat – bleibt es bei der einen
+   wischbaren Reihe. */
+@media (min-width: 600px) and (min-height: 600px),
+  (min-width: 600px) and (hover: hover) and (pointer: fine) {
   .toolbar__chips {
     flex-wrap: wrap;
     overflow-x: visible;

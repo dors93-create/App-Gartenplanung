@@ -39,8 +39,9 @@ import { initEditor } from "./editor.js";
 // MapLibre den Platzhalter {bbox-epsg-3857} pro Kachel mit dem passenden
 // Ausschnitt füllen. CRS EPSG:3857 = Web-Mercator (Standard für Webkarten).
 //
-// Bildformat JPEG: Für Fotos ist es rund zehnmal kleiner als PNG (im Test
-// 17 statt 196 kB je Kachel) – das spart Ladezeit und Datenvolumen am Handy.
+// Bildformat JPEG: Für Fotos ist es je nach Bildinhalt etwa 6- bis 15-mal
+// kleiner als PNG (gemessen z. B. 14 statt 87 kB je Kachel) – das spart
+// Ladezeit und Datenvolumen am Handy.
 // JPEG kennt keine Transparenz; wo es kein Luftbild gibt (außerhalb von NRW),
 // füllt der Dienst die Kachel mit BGCOLOR – hier der helle Seitenhintergrund.
 const DOP_WMS_URL =
@@ -179,8 +180,17 @@ async function geocode(query, signal) {
   //  - limit=5        -> höchstens 5 Vorschläge
   //  - countrycodes=de-> nur Deutschland
   //  - viewbox+bounded-> nur Treffer im Rechteck um NRW (siehe NRW_SUCHRAHMEN)
+  //
+  // Zusätzlich hängen wir das Bundesland an den Suchtext. Ohne diesen Zusatz
+  // füllt Nominatim die 5 Vorschläge bei häufigen Straßennamen („Hauptstraße
+  // 1“) leicht mit Treffern aus dem Rand der Nachbarländer – und aus NRW
+  // bliebe keiner übrig.
+  const mitLand = query.toLowerCase().includes(NRW_NAME.toLowerCase())
+    ? query
+    : query + ", " + NRW_NAME;
+
   const url = new URL("https://nominatim.openstreetmap.org/search");
-  url.searchParams.set("q", query);
+  url.searchParams.set("q", mitLand);
   url.searchParams.set("format", "json");
   url.searchParams.set("addressdetails", "1");
   url.searchParams.set("limit", "5");
@@ -191,7 +201,8 @@ async function geocode(query, signal) {
   const response = await fetch(url, {
     signal, // erlaubt das Abbrechen der Anfrage
     headers: {
-      // Nominatim bittet um eine sprechende Kennung der Anwendung.
+      // Antworten auf Deutsch anfordern (Ortsnamen; auch liegtInNrw vergleicht
+      // ersatzweise den deutschen Namen des Bundeslands).
       "Accept-Language": "de",
     },
   });
@@ -200,8 +211,8 @@ async function geocode(query, signal) {
     throw new Error("Nominatim antwortet mit Status " + response.status);
   }
 
-  // Das Such-Rechteck enthält auch Randgebiete der Nachbarländer – nur die
-  // Treffer behalten, die wirklich in NRW liegen.
+  // Zur Sicherheit nur die Treffer behalten, die wirklich in NRW liegen (das
+  // Such-Rechteck enthält auch Randgebiete der Nachbarländer).
   const treffer = await response.json();
   return treffer.filter(liegtInNrw);
 }
@@ -223,15 +234,19 @@ function trefferTexte(place) {
   const adresse = place.address || {};
 
   if (
-    adresse.road &&
     adresse.house_number &&
-    teile[0] === adresse.house_number
+    teile[0] === adresse.house_number &&
+    teile.length > 1
   ) {
     const rest = teile.slice(1);
-    const stelle = rest.indexOf(adresse.road);
-    if (stelle >= 0) rest.splice(stelle, 1); // Straße steht schon im Titel
+    // Die Straße steht in den Adressdetails. Fehlt sie (Häuser in Weilern
+    // sind oft nur nach dem Ortsteil benannt), steht der passende Name gleich
+    // hinter der Hausnummer.
+    const strasse = adresse.road || rest[0];
+    const stelle = rest.indexOf(strasse);
+    if (stelle >= 0) rest.splice(stelle, 1); // steht schon im Titel
     return {
-      titel: adresse.road + " " + adresse.house_number,
+      titel: strasse + " " + adresse.house_number,
       zusatz: rest.join(", "),
     };
   }
@@ -330,6 +345,7 @@ const MIN_ZEICHEN = 3; // erst ab dieser Eingabelänge suchen
 
 let debounceTimer = null; // Timer für die Tipp-Pause
 let laufendeSuche = null; // AbortController der aktuellen Anfrage
+let sucheLaeuftFuer = ""; // Suchtext der gerade laufenden Anfrage ("" = keine)
 
 // Startet (verzögert) eine Vorschlagssuche zur aktuellen Eingabe.
 function planeVorschlaege() {
@@ -354,6 +370,7 @@ async function sucheVorschlaege(query) {
   if (laufendeSuche) laufendeSuche.abort();
   const suche = new AbortController();
   laufendeSuche = suche;
+  sucheLaeuftFuer = query;
 
   setLoading(true);
   try {
@@ -375,7 +392,10 @@ async function sucheVorschlaege(query) {
     showHint("Die Adresssuche ist gerade nicht erreichbar.", true);
   } finally {
     // Spinner nur ausblenden, wenn nicht schon eine neuere Suche läuft.
-    if (laufendeSuche === suche) setLoading(false);
+    if (laufendeSuche === suche) {
+      setLoading(false);
+      sucheLaeuftFuer = "";
+    }
   }
 }
 
@@ -398,5 +418,6 @@ form.addEventListener("submit", (event) => {
   // Sonst (sehr schnelles Tippen + Enter, oder die Liste gehört noch zu einer
   // früheren Eingabe): alte Treffer weg und sofort nach der Eingabe suchen.
   clearResults();
+  if (sucheLaeuftFuer === query) return; // genau diese Suche läuft schon
   if (query.length >= MIN_ZEICHEN) sucheVorschlaege(query);
 });
