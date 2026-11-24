@@ -25,21 +25,27 @@ import polygonClipping from "polygon-clipping";
 import { erfasseGebaeude } from "./bestand.js";
 
 // -------------------------------------------------------------------------
-// Objekt-Typen: Name, Art (Fläche oder Kreis) und Farben.
+// Objekt-Typen: Name, Art (Fläche oder Kreis), Farben und Rang.
+// Der „rang“ legt die Stapelfolge auf der Karte fest: kleine Werte liegen
+// unten, große oben (Rasen ganz unten, Bäume ganz oben). So verdeckt ein
+// später angelegter Rasen weder Beete noch Terrassen oder Bäume.
 // -------------------------------------------------------------------------
 const TYPEN = {
-  haus: { name: "Haus", art: "flaeche", farbe: "#9aa0a6", rand: "#6b7280" },
-  gartenhaus: { name: "Gartenhaus", art: "flaeche", farbe: "#b08968", rand: "#8a6a4f" },
-  gewaechshaus: { name: "Gewächshaus", art: "flaeche", farbe: "#a9d6cf", rand: "#79b3aa" },
-  carport: { name: "Carport", art: "flaeche", farbe: "#aab2bd", rand: "#828c99" },
-  stellplatz: { name: "Stellplatz", art: "flaeche", farbe: "#bfc3c7", rand: "#9298a0" },
-  terrasse: { name: "Terrasse", art: "flaeche", farbe: "#caa472", rand: "#a07d4e" },
-  weg: { name: "Weg", art: "flaeche", farbe: "#cdbb98", rand: "#a3916f" },
-  pool: { name: "Pool", art: "flaeche", farbe: "#5bb0d8", rand: "#2f8fbf" },
-  beet: { name: "Beet", art: "flaeche", farbe: "#caa6d6", rand: "#9a6fb0" },
-  rasen: { name: "Rasen", art: "flaeche", farbe: "#8cc06a", rand: "#5fa03f" },
-  baum: { name: "Baum", art: "kreis", farbe: "#3f9b46", rand: "#2f7a34" },
+  haus: { name: "Haus", art: "flaeche", rang: 4, farbe: "#9aa0a6", rand: "#6b7280" },
+  gartenhaus: { name: "Gartenhaus", art: "flaeche", rang: 4, farbe: "#b08968", rand: "#8a6a4f" },
+  gewaechshaus: { name: "Gewächshaus", art: "flaeche", rang: 4, farbe: "#a9d6cf", rand: "#79b3aa" },
+  carport: { name: "Carport", art: "flaeche", rang: 4, farbe: "#aab2bd", rand: "#828c99" },
+  stellplatz: { name: "Stellplatz", art: "flaeche", rang: 2, farbe: "#bfc3c7", rand: "#9298a0" },
+  terrasse: { name: "Terrasse", art: "flaeche", rang: 2, farbe: "#caa472", rand: "#a07d4e" },
+  weg: { name: "Weg", art: "flaeche", rang: 2, farbe: "#cdbb98", rand: "#a3916f" },
+  pool: { name: "Pool", art: "flaeche", rang: 3, farbe: "#5bb0d8", rand: "#2f8fbf" },
+  beet: { name: "Beet", art: "flaeche", rang: 1, farbe: "#caa6d6", rand: "#9a6fb0" },
+  rasen: { name: "Rasen", art: "flaeche", rang: 0, farbe: "#8cc06a", rand: "#5fa03f" },
+  baum: { name: "Baum", art: "kreis", rang: 5, farbe: "#3f9b46", rand: "#2f7a34" },
 };
+
+// Rang eines Objekts (unbekannte Typen landen in der Mitte).
+const rangVon = (o) => (TYPEN[o.typ] ? TYPEN[o.typ].rang : 2);
 
 const BAUM_RADIUS = 3; // Standard-Radius eines neuen Baums in Metern
 
@@ -119,6 +125,14 @@ function polygonFlaeche(ringe) {
   return Math.max(0, a);
 }
 
+// Fläche eines Objekts in m² – egal ob Kreis (Baum), einfache Fläche oder
+// zusammengesetzte Fläche (Rest-Rasen).
+function objektFlaeche(o) {
+  if (o.art === "kreis") return Math.PI * o.radius * o.radius;
+  const polys = o.multi ? o.multi : [[o.coords]];
+  return polys.reduce((summe, p) => summe + polygonFlaeche(p), 0);
+}
+
 // Zahlen hübsch auf Deutsch.
 const fMeter = (w) =>
   w.toLocaleString("de-DE", { maximumFractionDigits: 1 }) + " m";
@@ -176,6 +190,18 @@ export function initEditor(map) {
     chipBox.append(chip);
     chipEls.push(chip);
   });
+
+  // Am Handy passen nicht alle Typen nebeneinander; die Reihe ist dann
+  // wischbar. Ein weicher Rand (siehe style.css) zeigt an, auf welcher Seite
+  // noch weitere Typen liegen.
+  function aktualisiereChipRand() {
+    const rechtsUebrig =
+      chipBox.scrollWidth - chipBox.clientWidth - chipBox.scrollLeft;
+    chipBox.classList.toggle("hat-mehr-links", chipBox.scrollLeft > 4);
+    chipBox.classList.toggle("hat-mehr-rechts", rechtsUebrig > 4);
+  }
+  chipBox.addEventListener("scroll", aktualisiereChipRand, { passive: true });
+  window.addEventListener("resize", aktualisiereChipRand);
 
   // -----------------------------------------------------------------------
   // Karten-Ebenen einmalig anlegen.
@@ -257,9 +283,13 @@ export function initEditor(map) {
 
   function zeichneObjekte() {
     ebenenSicherstellen();
+    // In Stapelfolge zeichnen (siehe „rang“ in TYPEN): Was später in der
+    // Liste steht, liegt auf der Karte oben. Bei gleichem Rang bleibt die
+    // Reihenfolge des Anlegens erhalten.
+    const gestapelt = [...objekte].sort((a, b) => rangVon(a) - rangVon(b));
     map.getSource(SRC_OBJ).setData({
       type: "FeatureCollection",
-      features: objekte.map(alsFeature),
+      features: gestapelt.map(alsFeature),
     });
     // Auswahl-Hervorhebung mitführen.
     const sel = objekte.find((o) => o.id === selektiertId);
@@ -497,6 +527,14 @@ export function initEditor(map) {
       c.classList.toggle("is-active", c.dataset.typ === aktiverTyp),
     );
 
+    // Den gewählten Chip in die Mitte der (am Handy wischbaren) Reihe holen –
+    // so werden auch seine Nachbarn sichtbar.
+    const chip = chipEls.find((c) => c.dataset.typ === aktiverTyp);
+    if (chip) {
+      const mitte = chip.offsetLeft - chipBox.offsetLeft + chip.offsetWidth / 2;
+      chipBox.scrollTo({ left: mitte - chipBox.clientWidth / 2, behavior: "smooth" });
+    }
+
     if (!aktiverTyp) {
       modus = "neutral";
     } else if (TYPEN[aktiverTyp].art === "kreis") {
@@ -580,6 +618,12 @@ export function initEditor(map) {
   // -----------------------------------------------------------------------
   map.on("click", (e) => {
     if (!aktiv) return;
+
+    // Ein Tipp auf einen Griff (ohne zu ziehen) gilt dem Griff, nicht der
+    // Karte – sonst würde er die Auswahl aufheben oder ein anderes Objekt wählen.
+    const ziel = e.originalEvent && e.originalEvent.target;
+    if (ziel && ziel.closest && ziel.closest(".ed-griff")) return;
+
     const p = [e.lngLat.lng, e.lngLat.lat];
 
     if (modus === "frei") {
@@ -613,9 +657,27 @@ export function initEditor(map) {
     } else {
       // neutral oder bearbeiten: vorhandenes Objekt antippen/auswählen.
       const treffer = map.queryRenderedFeatures(e.point, { layers: [LAYER_FILL] });
-      selektiere(treffer[0] ? treffer[0].properties.id : null);
+      selektiere(kleinsterTreffer(treffer));
     }
   });
+
+  // Liegen unter dem Tipp mehrere Objekte übereinander, gilt das kleinste:
+  // Ein Baum oder Beet auf dem Rasen bleibt so immer auswählbar – den großen
+  // Rasen erreicht man an jeder freien Stelle. Rückgabe: id oder null.
+  function kleinsterTreffer(treffer) {
+    let besteId = null;
+    let besteFlaeche = Infinity;
+    treffer.forEach((t) => {
+      const o = objekte.find((x) => x.id === t.properties.id);
+      if (!o) return;
+      const flaeche = objektFlaeche(o);
+      if (flaeche < besteFlaeche) {
+        besteFlaeche = flaeche;
+        besteId = o.id;
+      }
+    });
+    return besteId;
+  }
 
   // -----------------------------------------------------------------------
   // Knöpfe
@@ -778,6 +840,7 @@ export function initEditor(map) {
       if (gpPanel) gpPanel.hidden = true;
       toolbar.hidden = false;
       aktualisiere();
+      aktualisiereChipRand(); // erst jetzt ist die Typ-Reihe sichtbar und messbar
     },
 
     leeren() {

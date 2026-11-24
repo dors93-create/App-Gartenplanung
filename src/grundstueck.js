@@ -76,6 +76,10 @@ export function initGrundstueck(map, optionen = {}) {
   let auswahl = [];
   // Liste der Maß-Beschriftungen (HTML-Marker), damit wir sie aufräumen können.
   let masseMarker = [];
+  // Die gerade laufende Kataster-Abfrage (AbortController) – oder null, wenn
+  // keine läuft. Damit ignorieren wir weitere Tipps, solange eine Antwort
+  // aussteht, und können eine Abfrage verwerfen, die nicht mehr gebraucht wird.
+  let laufendeAbfrage = null;
 
   // -----------------------------------------------------------------------
   // Karten-Ebenen einmalig anlegen (leer); später füllen wir sie mit Daten.
@@ -203,8 +207,9 @@ export function initGrundstueck(map, optionen = {}) {
 
   // -----------------------------------------------------------------------
   // Ein Flurstück am angeklickten Punkt vom Kataster-Dienst holen.
+  // „signal“ erlaubt es, die Abfrage abzubrechen (siehe abfrageAbbrechen).
   // -----------------------------------------------------------------------
-  async function holeFlurstueck(lng, lat) {
+  async function holeFlurstueck(lng, lat, signal) {
     // Klickpunkt nach UTM32 umrechnen und eine kleine Box (±1 m) bilden.
     const [e, n] = nach25832(lng, lat);
     const d = 1;
@@ -215,7 +220,7 @@ export function initGrundstueck(map, optionen = {}) {
       `&TYPENAMES=ave:Flurstueck&COUNT=5` +
       `&SRSNAME=urn:ogc:def:crs:EPSG::25832&BBOX=${bbox}`;
 
-    const antwort = await fetch(url);
+    const antwort = await fetch(url, { signal });
     if (!antwort.ok) throw new Error("WFS-Status " + antwort.status);
     const text = await antwort.text();
 
@@ -337,9 +342,20 @@ export function initGrundstueck(map, optionen = {}) {
   }
 
   // -----------------------------------------------------------------------
+  // Eine noch laufende Kataster-Abfrage verwerfen. Ihre Antwort käme sonst
+  // verspätet an und würde die Auswahl verändern, obwohl inzwischen z. B.
+  // „Abbrechen“ oder „OK, übernehmen“ gedrückt wurde.
+  // -----------------------------------------------------------------------
+  function abfrageAbbrechen() {
+    if (laufendeAbfrage) laufendeAbfrage.abort();
+    laufendeAbfrage = null;
+  }
+
+  // -----------------------------------------------------------------------
   // Alles zurücksetzen (Auswahl + Grafik + Maße entfernen).
   // -----------------------------------------------------------------------
   function aufraeumen() {
+    abfrageAbbrechen();
     auswahl = [];
     masseLoeschen();
     if (map.getSource(SRC_FLUR)) {
@@ -383,6 +399,14 @@ export function initGrundstueck(map, optionen = {}) {
       zustand === "auswaehlen",
     );
 
+    // Während des Auswählens soll ein Doppeltipp nicht zusätzlich in die
+    // Karte hineinzoomen – er gilt hier dem Grundstück.
+    if (zustand === "auswaehlen") {
+      map.doubleClickZoom.disable();
+    } else {
+      map.doubleClickZoom.enable();
+    }
+
     if (zustand === "bereit") {
       panel.hidden = false;
       panelText.textContent = "Wähle dein Grundstück auf der Karte aus.";
@@ -416,10 +440,24 @@ export function initGrundstueck(map, optionen = {}) {
   // -----------------------------------------------------------------------
   map.on("click", async (e) => {
     if (zustand !== "auswaehlen") return;
+    // Solange eine Abfrage läuft, weitere Tipps ignorieren. Sonst würde ein
+    // Doppeltipp das Flurstück wählen und gleich wieder abwählen.
+    if (laufendeAbfrage) return;
+
+    const abfrage = new AbortController();
+    laufendeAbfrage = abfrage;
 
     panelText.textContent = "Suche Flurstück …";
     try {
-      const flurstueck = await holeFlurstueck(e.lngLat.lng, e.lngLat.lat);
+      const flurstueck = await holeFlurstueck(
+        e.lngLat.lng,
+        e.lngLat.lat,
+        abfrage.signal,
+      );
+      // Wurde die Abfrage inzwischen verworfen (Abbrechen, OK, neue Adresse)?
+      // Dann gehört die Antwort nicht mehr hierher.
+      if (laufendeAbfrage !== abfrage) return;
+
       if (!flurstueck) {
         panelText.textContent =
           "Hier wurde kein Flurstück gefunden. Bitte direkt auf das Grundstück tippen.";
@@ -437,8 +475,13 @@ export function initGrundstueck(map, optionen = {}) {
       zeigeAuswahl();
       aktualisiereAuswahlText();
     } catch (fehler) {
+      // Bewusst verworfene Abfrage (siehe abfrageAbbrechen): nichts melden.
+      if (fehler.name === "AbortError" || laufendeAbfrage !== abfrage) return;
       console.error(fehler);
       panelText.textContent = "Kataster-Dienst gerade nicht erreichbar.";
+    } finally {
+      // Nur aufräumen, wenn nicht schon eine neuere Abfrage läuft.
+      if (laufendeAbfrage === abfrage) laufendeAbfrage = null;
     }
   });
 
@@ -449,6 +492,7 @@ export function initGrundstueck(map, optionen = {}) {
     if (zustand === "bereit") {
       setze("auswaehlen"); // los geht's: auf das/die Grundstück(e) tippen
     } else if (zustand === "auswaehlen" && auswahl.length > 0) {
+      abfrageAbbrechen(); // eine noch ausstehende Antwort zählt jetzt nicht mehr
       const gesamt = uebernehmen(); // weiß ausblenden + bemaßen
       setze("fertig", gesamt);
     } else if (zustand === "fertig") {
@@ -474,6 +518,10 @@ export function initGrundstueck(map, optionen = {}) {
   return {
     zeigeStart() {
       aufraeumen();
+      // Auch den Editor leeren – sonst blieben Objekte und Etiketten des zuvor
+      // geöffneten Plans auf der Karte stehen. (Der Plan selbst bleibt
+      // gespeichert und erscheint wieder, sobald sein Grundstück gewählt wird.)
+      if (optionen.beimNeustart) optionen.beimNeustart();
       setze("bereit");
     },
   };

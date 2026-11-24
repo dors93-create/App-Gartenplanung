@@ -38,12 +38,17 @@ import { initEditor } from "./editor.js";
 // MapLibre lädt Rasterkacheln. Wir bauen darum eine WMS-GetMap-URL und lassen
 // MapLibre den Platzhalter {bbox-epsg-3857} pro Kachel mit dem passenden
 // Ausschnitt füllen. CRS EPSG:3857 = Web-Mercator (Standard für Webkarten).
+//
+// Bildformat JPEG: Für Fotos ist es rund zehnmal kleiner als PNG (im Test
+// 17 statt 196 kB je Kachel) – das spart Ladezeit und Datenvolumen am Handy.
+// JPEG kennt keine Transparenz; wo es kein Luftbild gibt (außerhalb von NRW),
+// füllt der Dienst die Kachel mit BGCOLOR – hier der helle Seitenhintergrund.
 const DOP_WMS_URL =
   "https://www.wms.nrw.de/geobasis/wms_nw_dop" +
   "?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap" +
   "&LAYERS=nw_dop_rgb&STYLES=" +
   "&CRS=EPSG:3857&BBOX={bbox-epsg-3857}" +
-  "&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true";
+  "&WIDTH=256&HEIGHT=256&FORMAT=image/jpeg&BGCOLOR=0xF5F6F7";
 
 // Startansicht: Überblick über NRW (Längengrad, Breitengrad) und Zoomstufe.
 const NRW_CENTER = [7.55, 51.45];
@@ -52,6 +57,21 @@ const NRW_ZOOM = 7;
 // Zoomstufe, auf die wir bei einer gefundenen Adresse heranfliegen.
 // 18 zeigt einzelne Grundstücke/Gärten gut erkennbar.
 const ADDRESS_ZOOM = 18;
+
+// Grünriss funktioniert nur in NRW: Luftbild und Kataster enden an der
+// Landesgrenze. Die Adresssuche wird deshalb auf NRW begrenzt.
+//  - NRW_SUCHRAHMEN: Rechteck um NRW (West, Nord, Ost, Süd in Grad). Nominatim
+//    liefert damit nur Treffer aus diesem Ausschnitt.
+//  - NRW_KENNUNG / NRW_NAME: Das Rechteck schließt Randgebiete der Nachbar-
+//    länder ein; daran erkennen wir die Treffer, die wirklich in NRW liegen.
+const NRW_SUCHRAHMEN = "5.86,52.54,9.47,50.32";
+const NRW_KENNUNG = "DE-NW";
+const NRW_NAME = "Nordrhein-Westfalen";
+
+// Quellenangabe für die Adresssuche (Daten von OpenStreetMap, Lizenz ODbL).
+// Sie erscheint direkt unter den Suchtreffern.
+const OSM_QUELLE =
+  'Adressdaten © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>-Mitwirkende';
 
 // -------------------------------------------------------------------------
 // 2. Karte aufbauen
@@ -133,10 +153,16 @@ function showHint(text, isError = false) {
   hint.hidden = false;
 }
 
+// Suchtext, zu dem die gerade angezeigte Trefferliste gehört ("" = keine Liste).
+// Damit übernimmt Enter nie einen Treffer, der noch von einer früheren
+// Eingabe stammt.
+let trefferFuer = "";
+
 // Trefferliste leeren und verstecken.
 function clearResults() {
   resultsList.innerHTML = "";
   resultsList.hidden = true;
+  trefferFuer = "";
 }
 
 // -------------------------------------------------------------------------
@@ -151,13 +177,16 @@ async function geocode(query, signal) {
   //  - format=json   -> maschinenlesbare Antwort
   //  - addressdetails -> liefert strukturierte Adressbestandteile
   //  - limit=5        -> höchstens 5 Vorschläge
-  //  - countrycodes=de-> nur Deutschland (Grünriss richtet sich an NRW)
+  //  - countrycodes=de-> nur Deutschland
+  //  - viewbox+bounded-> nur Treffer im Rechteck um NRW (siehe NRW_SUCHRAHMEN)
   const url = new URL("https://nominatim.openstreetmap.org/search");
   url.searchParams.set("q", query);
   url.searchParams.set("format", "json");
   url.searchParams.set("addressdetails", "1");
   url.searchParams.set("limit", "5");
   url.searchParams.set("countrycodes", "de");
+  url.searchParams.set("viewbox", NRW_SUCHRAHMEN);
+  url.searchParams.set("bounded", "1");
 
   const response = await fetch(url, {
     signal, // erlaubt das Abbrechen der Anfrage
@@ -171,7 +200,44 @@ async function geocode(query, signal) {
     throw new Error("Nominatim antwortet mit Status " + response.status);
   }
 
-  return response.json();
+  // Das Such-Rechteck enthält auch Randgebiete der Nachbarländer – nur die
+  // Treffer behalten, die wirklich in NRW liegen.
+  const treffer = await response.json();
+  return treffer.filter(liegtInNrw);
+}
+
+// Liegt ein Nominatim-Treffer in NRW? (Bundesland steht in den Adressdetails.)
+function liegtInNrw(place) {
+  const adresse = place.address || {};
+  return (
+    adresse["ISO3166-2-lvl4"] === NRW_KENNUNG || adresse.state === NRW_NAME
+  );
+}
+
+// Zerlegt einen Treffer in Titel (fett) und Zusatz (grau darunter).
+// Nominatim stellt bei Hausadressen die Hausnummer voran („3, Mozartstraße,
+// Rheda, …“). Dann setzen wir Straße und Hausnummer zu einem lesbaren Titel
+// zusammen („Mozartstraße 3“) statt nur „3“ zu zeigen.
+function trefferTexte(place) {
+  const teile = place.display_name.split(",").map((teil) => teil.trim());
+  const adresse = place.address || {};
+
+  if (
+    adresse.road &&
+    adresse.house_number &&
+    teile[0] === adresse.house_number
+  ) {
+    const rest = teile.slice(1);
+    const stelle = rest.indexOf(adresse.road);
+    if (stelle >= 0) rest.splice(stelle, 1); // Straße steht schon im Titel
+    return {
+      titel: adresse.road + " " + adresse.house_number,
+      zusatz: rest.join(", "),
+    };
+  }
+
+  // Sonst wie bisher: markantester Teil vorn, der Rest als Kontext.
+  return { titel: teile[0], zusatz: teile.slice(1).join(", ") };
 }
 
 // -------------------------------------------------------------------------
@@ -179,26 +245,26 @@ async function geocode(query, signal) {
 // -------------------------------------------------------------------------
 
 // Baut die klickbare Trefferliste aus den Nominatim-Ergebnissen.
-function renderResults(results) {
+// „query“ ist der Suchtext, zu dem die Treffer gehören.
+function renderResults(results, query) {
   clearResults();
+  trefferFuer = query;
 
   results.forEach((place) => {
     const item = document.createElement("li");
     item.className = "results__item";
 
-    // Erste Zeile: der markanteste Teil des Namens (vor dem ersten Komma).
+    const texte = trefferTexte(place);
+
+    // Erste Zeile: der markanteste Teil (Straße + Hausnummer bzw. Name).
     const title = document.createElement("div");
     title.className = "results__title";
-    title.textContent = place.display_name.split(",")[0];
+    title.textContent = texte.titel;
 
     // Zweite Zeile: der restliche Adresstext als Kontext.
     const subtitle = document.createElement("div");
     subtitle.className = "results__subtitle";
-    subtitle.textContent = place.display_name
-      .split(",")
-      .slice(1)
-      .join(",")
-      .trim();
+    subtitle.textContent = texte.zusatz;
 
     item.append(title, subtitle);
 
@@ -207,6 +273,14 @@ function renderResults(results) {
 
     resultsList.append(item);
   });
+
+  // Quellenangabe unter den Treffern (kein Treffer zum Anklicken).
+  if (results.length > 0) {
+    const quelle = document.createElement("li");
+    quelle.className = "results__quelle";
+    quelle.innerHTML = OSM_QUELLE; // feste Zeichenkette von oben, kein fremder Text
+    resultsList.append(quelle);
+  }
 
   resultsList.hidden = results.length === 0;
 }
@@ -237,7 +311,7 @@ function selectPlace(place) {
   // Eingabe übernehmen, Liste schließen.
   clearTimeout(debounceTimer);
   if (laufendeSuche) laufendeSuche.abort();
-  input.value = place.display_name.split(",")[0];
+  input.value = trefferTexte(place).titel;
   clearResults();
   showHint("Gefunden. Wähle als Nächstes dein Grundstück aus.");
 
@@ -278,24 +352,30 @@ function planeVorschlaege() {
 async function sucheVorschlaege(query) {
   // Eine eventuell noch laufende Anfrage abbrechen.
   if (laufendeSuche) laufendeSuche.abort();
-  laufendeSuche = new AbortController();
+  const suche = new AbortController();
+  laufendeSuche = suche;
 
   setLoading(true);
   try {
-    const results = await geocode(query, laufendeSuche.signal);
+    const results = await geocode(query, suche.signal);
     if (results.length === 0) {
       clearResults();
-      showHint("Keine Adresse gefunden. Bitte Eingabe prüfen.", true);
+      showHint(
+        "Keine Adresse in NRW gefunden. Bitte Eingabe prüfen – Grünriss gibt es bisher nur für Nordrhein-Westfalen.",
+        true,
+      );
     } else {
-      renderResults(results);
+      renderResults(results, query);
       hint.hidden = true;
     }
   } catch (error) {
     if (error.name === "AbortError") return; // bewusst abgebrochen – ignorieren
     console.error(error);
+    clearResults(); // keine veralteten Treffer neben der Fehlermeldung stehen lassen
     showHint("Die Adresssuche ist gerade nicht erreichbar.", true);
   } finally {
-    setLoading(false);
+    // Spinner nur ausblenden, wenn nicht schon eine neuere Suche läuft.
+    if (laufendeSuche === suche) setLoading(false);
   }
 }
 
@@ -306,15 +386,17 @@ input.addEventListener("input", planeVorschlaege);
 form.addEventListener("submit", (event) => {
   event.preventDefault(); // kein Neuladen der Seite
   clearTimeout(debounceTimer);
+  const query = input.value.trim();
 
-  // Gibt es bereits Vorschläge? Dann den obersten auswählen.
+  // Gibt es bereits Vorschläge zu genau dieser Eingabe? Dann den obersten wählen.
   const ersterTreffer = resultsList.querySelector(".results__item");
-  if (!resultsList.hidden && ersterTreffer) {
+  if (!resultsList.hidden && ersterTreffer && trefferFuer === query) {
     ersterTreffer.click();
     return;
   }
 
-  // Sonst (z. B. sehr schnelles Tippen + Enter) eine direkte Suche starten.
-  const query = input.value.trim();
+  // Sonst (sehr schnelles Tippen + Enter, oder die Liste gehört noch zu einer
+  // früheren Eingabe): alte Treffer weg und sofort nach der Eingabe suchen.
+  clearResults();
   if (query.length >= MIN_ZEICHEN) sucheVorschlaege(query);
 });

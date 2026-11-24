@@ -12,9 +12,12 @@ auch Nicht-Programmierer:innen dem Projekt folgen können.
 
 - Bildschirmfüllende, interaktive Karte (MapLibre GL JS).
 - Hintergrund: NRW-Luftbild (DOP) als WMS-Layer `nw_dop_rgb` vom Dienst
-  `https://www.wms.nrw.de/geobasis/wms_nw_dop`.
+  `https://www.wms.nrw.de/geobasis/wms_nw_dop`, angefordert als JPEG-Kacheln
+  (rund zehnmal kleiner als PNG).
 - Suchfeld mit Adresssuche (Geocoding) über die kostenlose Nominatim-API,
-  inkl. Vorschlägen während des Tippens. Die Karte fliegt sanft zur Adresse.
+  inkl. Vorschlägen während des Tippens. Die Suche ist auf NRW begrenzt (nur
+  dort gibt es Luftbild und Kataster); unter den Treffern steht die
+  Quellenangabe für OpenStreetMap. Die Karte fliegt sanft zur Adresse.
 - Oberfläche komplett auf Deutsch.
 
 **Schritt 2 ist umgesetzt – Grundstück auswählen:**
@@ -41,6 +44,9 @@ auch Nicht-Programmierer:innen dem Projekt folgen können.
 - „Restfläche als Rasen": füllt den noch freien Teil des Grundstücks
   (Grundstück minus alle anderen Flächen) automatisch mit Rasen
   (Flächen-Verschneidung via `polygon-clipping`).
+- Stapelfolge: Objekte liegen nach Typ übereinander (Rasen unten, Bäume oben –
+  `rang` in `TYPEN`). Liegen unter einem Tipp mehrere Objekte, wird das
+  kleinste gewählt; so bleibt ein Baum oder Beet auf dem Rasen erreichbar.
 - Bemaßung: je Objekt die Fläche (m², bei Bäumen der Durchmesser); für das
   ausgewählte Objekt zusätzlich die Seitenlängen.
 - Alles farbig und lokal im Browser gespeichert (localStorage, je Grundstück),
@@ -142,3 +148,5 @@ Vorschau davon: `npm run preview`.
 - Code und Kommentare auf Deutsch, ausführlich kommentiert.
 - Einfachheit vor Cleverness – verständlich für Nicht-Programmierer:innen.
 - Konfigurierbare Werte (URLs, Zoomstufen) stehen gesammelt oben in `main.js`.
+- Ein- und Ausblenden läuft über das HTML-Attribut `hidden`. Eine Regel oben in
+  `style.css` gibt ihm Vorrang vor eigenen `display`-Angaben – nicht entfernen.
