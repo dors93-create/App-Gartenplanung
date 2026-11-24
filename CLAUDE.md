@@ -49,8 +49,28 @@ auch Nicht-Programmierer:innen dem Projekt folgen können.
   kleinste gewählt; so bleibt ein Baum oder Beet auf dem Rasen erreichbar.
 - Bemaßung: je Objekt die Fläche (m², bei Bäumen der Durchmesser); für das
   ausgewählte Objekt zusätzlich die Seitenlängen.
-- Alles farbig und lokal im Browser gespeichert (localStorage, je Grundstück),
-  übersteht das Neuladen.
+- Alles farbig und lokal im Browser gespeichert (localStorage), übersteht das
+  Neuladen – siehe „Meine Gärten“.
+
+**Meine Gärten – Pläne wiederfinden, sichern und laden:**
+
+- Jeder Plan gehört zu einem „Garten“: Name (amtliche Lagebezeichnung, z. B.
+  „Mozartstraße 3“), die gewählten Flurstücke samt Umriss und die Objekte.
+  Gespeichert wird er mit dem ersten eingezeichneten Objekt.
+- Beim Start steht unter der Suchleiste die Liste „Meine Gärten“. Ein Tipp
+  öffnet den Garten direkt im Editor – ohne Adresssuche und Antippen; die
+  Karte springt auf das Grundstück.
+- Wer nach der Grundstückswahl „Garten erfassen“ drückt, landet in seinem
+  vorhandenen Garten, sobald mindestens ein Flurstück übereinstimmt (auch
+  wenn diesmal ein Flurstück mehr oder weniger gewählt wurde).
+- „Als Datei sichern“ lädt den Garten als kleine Datei herunter (Sicherung,
+  Mitnehmen auf ein anderes Gerät); „Garten aus Datei laden“ holt ihn zurück.
+- Was aus dem Speicher oder einer Datei kommt, wird geprüft: Ein beschädigter
+  Eintrag blockiert nichts, unlesbare Objekte werden ausgelassen und gemeldet.
+  Schlägt das Speichern fehl, erscheint eine Warnung im Editor.
+- Pläne aus der ersten Version (Schlüssel `gruenriss:plan:…`) werden beim
+  Start einmalig übernommen; das Original bleibt im Archiv
+  (`gruenriss:archiv:…`). Logik und Speicherformat: `src/gaerten.js`.
 
 **Schritt 3b ist begonnen – Automatische Bestandsaufnahme:**
 
@@ -82,6 +102,9 @@ src/main.js           Karte, Luftbild-Layer, Adresssuche/-vervollständigung
 src/grundstueck.js    Schritt 2: Flurstück abrufen, ausblenden, bemaßen
 src/editor.js         Schritt 3a: Objekte zeichnen/setzen, bemaßen, speichern
 src/bestand.js        Schritt 3b: amtliche Gebäude automatisch erfassen
+src/gaerten.js        „Meine Gärten“: Speicherformat, Prüfung, Sichern/Laden
+                      als Datei, Übernahme alter Pläne (ohne Karte/Oberfläche)
+tests/                Automatische Tests (siehe Abschnitt „Tests“)
 src/style.css         Gestaltung (Design-Tokens, Suchleiste, Panel, Editor)
 public/inselspiel.html  Eigenständiges Insel-Aufbauspiel (Bonus): eine einzelne
                         Datei, läuft auch ohne Server; wird mit veröffentlicht.
@@ -126,6 +149,27 @@ Arbeitsweise (so vereinbart am 24.11.2026): Änderungen entstehen auf einem
 eigenen Zweig und werden im Browser getestet. Sind die Tests bestanden, kommen
 sie ohne weitere Rückfrage in den Live-Branch
 `claude/grunriss-initial-setup-Fawpx` – und sind damit veröffentlicht.
+
+## Tests
+
+Vor jeder Veröffentlichung laufen die automatischen Tests:
+
+```bash
+npm test               # Speicher-Baustein (gaerten.js), ohne Browser, Sekunden
+npm run test:browser   # alle Browser-Tests, rund 15 Minuten
+npm run test:browser -- gaerten   # nur einen davon (ablauf, feinheiten, gaerten)
+```
+
+- Die Browser-Tests (`tests/*.test.cjs`) bedienen die App wie ein Mensch – am
+  Desktop und im Handy-Format – und prüfen jeden Schritt. `tests/browser.cjs`
+  startet dafür die App lokal und beendet sie danach wieder.
+- Sie brauchen Playwright mit Chromium (in den Claude-Sitzungen vorinstalliert,
+  bewusst nicht in `package.json`) und Netzzugriff auf `www.wfs.nrw.de`: Das
+  Kataster wird echt abgefragt (wenige Anfragen). Luftbild und Adresssuche
+  werden in den Tests nicht belastet.
+- Neue Funktionen bekommen eigene Prüfungen; ein Fehler, der einmal gefunden
+  wurde, bekommt eine Prüfung, damit er nicht zurückkommt.
+- Bildschirmfotos der Tests landen in `tests/ausgabe/` (nicht im Git).
 
 ## Lokal starten
 

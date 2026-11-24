@@ -16,13 +16,15 @@
 // Die Griffe sind native, ziehbare MapLibre-Marker – das funktioniert
 // zuverlässig auf Touch (Handy) und Maus.
 //
-// Alles wird lokal im Browser gespeichert (localStorage, je Grundstück).
+// Alles wird lokal im Browser gespeichert – als Teil des „Gartens“, zu dem
+// der Plan gehört (siehe gaerten.js).
 // Die spätere automatische Bestandsaufnahme (3b) befüllt dasselbe Modell.
 // =========================================================================
 
 import maplibregl from "maplibre-gl";
 import polygonClipping from "polygon-clipping";
 import { erfasseGebaeude } from "./bestand.js";
+import { speichereGarten } from "./gaerten.js";
 
 // -------------------------------------------------------------------------
 // Objekt-Typen: Name, Art (Fläche oder Kreis), Farben und Rang.
@@ -44,8 +46,10 @@ const TYPEN = {
   baum: { name: "Baum", art: "kreis", rang: 5, farbe: "#3f9b46", rand: "#2f7a34" },
 };
 
-// Rang eines Objekts (unbekannte Typen landen in der Mitte).
-const rangVon = (o) => (TYPEN[o.typ] ? TYPEN[o.typ].rang : 2);
+// Rang eines Objekts (unbekannte Typen – etwa aus einer fremden Datei –
+// landen in der Mitte).
+const rangVon = (o) =>
+  Object.prototype.hasOwnProperty.call(TYPEN, o.typ) ? TYPEN[o.typ].rang : 2;
 
 const BAUM_RADIUS = 3; // Standard-Radius eines neuen Baums in Metern
 
@@ -140,8 +144,9 @@ const fQm = (w) => Math.round(w).toLocaleString("de-DE") + " m²";
 
 // -------------------------------------------------------------------------
 // Hauptfunktion: richtet den Editor ein. Rückgabe: { starten, leeren }.
+// „optionen.beimSchliessen“ wird aufgerufen, wenn der Editor geschlossen wird.
 // -------------------------------------------------------------------------
-export function initEditor(map) {
+export function initEditor(map, optionen = {}) {
   // HTML-Elemente
   const toolbar = document.getElementById("ed-toolbar");
   const chipBox = document.getElementById("ed-chips");
@@ -157,6 +162,7 @@ export function initEditor(map) {
   const btnClose = document.getElementById("ed-close");
   const btnRest = document.getElementById("ed-rest");
   const btnAuto = document.getElementById("ed-auto");
+  const warnung = document.getElementById("ed-warnung");
   const suchleiste = document.querySelector(".search");
   const gpPanel = document.getElementById("gp-panel");
 
@@ -169,7 +175,7 @@ export function initEditor(map) {
   let objekte = []; // alle erfassten Objekte
   let selektiertId = null; // gerade ausgewähltes Objekt
   let griffe = []; // ziehbare Marker des ausgewählten Objekts
-  let planKey = "gruenriss:plan:default";
+  let garten = null; // der gerade geöffnete Garten (Aufbau siehe gaerten.js)
   let chipEls = [];
   let parcelGeom = null; // Grundstücksfläche (für „Restfläche als Rasen“)
   let parcelsData = []; // die gewählten Flurstücke (für die Auto-Erfassung)
@@ -361,28 +367,19 @@ export function initEditor(map) {
   // -----------------------------------------------------------------------
   // Speichern / Laden
   // -----------------------------------------------------------------------
+  // Die Objekte gehören zum geöffneten Garten und werden mit ihm gespeichert.
   function speichere() {
-    try {
-      localStorage.setItem(planKey, JSON.stringify(objekte));
-    } catch (e) {
-      console.warn("Konnte Plan nicht speichern:", e);
-    }
+    if (!garten) return;
+    garten.objekte = objekte;
+    const gespeichert = speichereGarten(garten);
+    // Klappt das Speichern nicht (Speicher des Browsers voll oder gesperrt),
+    // muss man das sehen – sonst wäre die Arbeit beim nächsten Öffnen
+    // unbemerkt verloren. Die Warnung bleibt, bis es wieder klappt.
+    warnung.hidden = gespeichert;
   }
+  // (Geprüft und bereinigt wurden die Objekte schon beim Lesen des Gartens.)
   function lade() {
-    try {
-      objekte = JSON.parse(localStorage.getItem(planKey)) || [];
-    } catch {
-      objekte = [];
-    }
-    // Ältere Bäume (als Punkt gespeichert) in Kreise umwandeln.
-    objekte.forEach((o) => {
-      if (o.art === "punkt") {
-        o.art = "kreis";
-        o.center = o.coords;
-        o.radius = BAUM_RADIUS;
-        delete o.coords;
-      }
-    });
+    objekte = garten ? garten.objekte : [];
   }
 
   const neueId = () =>
@@ -789,13 +786,13 @@ export function initEditor(map) {
   btnAuto.addEventListener("click", async () => {
     hint.textContent = "Erfasse amtliche Gebäude …";
     btnAuto.disabled = true;
-    const planBeimStart = planKey; // für welchen Plan wird hier gefragt?
+    const gartenBeimStart = garten; // für welchen Garten wird hier gefragt?
     try {
       const haeuser = await erfasseGebaeude(parcelsData);
-      // Wurde der Editor inzwischen geschlossen oder ein anderes Grundstück
+      // Wurde der Editor inzwischen geschlossen oder ein anderer Garten
       // geöffnet? Dann gehört die verspätete Antwort nicht mehr hierher –
       // sonst lägen die Gebäude plötzlich auf einer aufgeräumten Karte.
-      if (!aktiv || planKey !== planBeimStart) return;
+      if (!aktiv || garten !== gartenBeimStart) return;
       haeuser.forEach((ring) => {
         const r = [...ring];
         const a = r[0];
@@ -817,8 +814,8 @@ export function initEditor(map) {
         "; Restfläche als Rasen ergänzt. Jetzt anpassen oder Terrasse/Bäume ergänzen.";
     } catch (e) {
       console.error(e);
-      // Auch die Fehlermeldung gehört nur zu dem Plan, für den gefragt wurde.
-      if (!aktiv || planKey !== planBeimStart) return;
+      // Auch die Fehlermeldung gehört nur zu dem Garten, für den gefragt wurde.
+      if (!aktiv || garten !== gartenBeimStart) return;
       hint.textContent = "Automatische Erfassung nicht möglich (Dienst nicht erreichbar).";
     } finally {
       btnAuto.disabled = false;
@@ -844,16 +841,18 @@ export function initEditor(map) {
     toolbar.hidden = true;
     if (suchleiste) suchleiste.hidden = false;
     if (gpPanel) gpPanel.hidden = false;
+    if (optionen.beimSchliessen) optionen.beimSchliessen();
   }
 
   // -----------------------------------------------------------------------
   // Nach außen
   // -----------------------------------------------------------------------
   return {
-    starten(parcels) {
-      planKey =
-        "gruenriss:plan:" +
-        ((parcels || []).map((p) => p.id).sort().join("|") || "default");
+    // Öffnet den Editor für einen Garten. „parcels“ sind seine Flurstücke
+    // (mit Umriss), „geoeffneterGarten“ der Garten aus gaerten.js – seine
+    // Objekte werden angezeigt, jede Änderung wird in ihm gespeichert.
+    starten(parcels, geoeffneterGarten) {
+      garten = geoeffneterGarten;
       parcelsData = parcels || []; // für die automatische Gebäude-Erfassung
 
       // Grundstücksfläche (Vereinigung aller gewählten Flurstücke) merken –
@@ -883,11 +882,25 @@ export function initEditor(map) {
       if (suchleiste) suchleiste.hidden = true;
       if (gpPanel) gpPanel.hidden = true;
       toolbar.hidden = false;
+      warnung.hidden = true;
       aktualisiere();
       aktualisiereChipRand(); // erst jetzt ist die Typ-Reihe sichtbar und messbar
+
+      // War ein Teil des gespeicherten Plans nicht lesbar, sagen wir es einmal.
+      if (garten && garten.verworfen > 0) {
+        hint.textContent =
+          (garten.verworfen === 1
+            ? "1 Objekt dieses Plans war"
+            : garten.verworfen + " Objekte dieses Plans waren") +
+          " nicht lesbar und wurde" +
+          (garten.verworfen === 1 ? "" : "n") +
+          " ausgelassen.";
+        garten.verworfen = 0;
+      }
     },
 
     leeren() {
+      garten = null;
       objekte = [];
       punkte = [];
       selektiertId = null;

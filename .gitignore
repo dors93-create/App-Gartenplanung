@@ -9,3 +9,6 @@ dist/
 .DS_Store
 .vscode/
 .idea/
+
+# Ausgaben der Browser-Tests (Bildschirmfotos, heruntergeladene Dateien)
+tests/ausgabe/

@@ -27,6 +27,22 @@ import { initGrundstueck } from "./grundstueck.js";
 // Objekt-Editor (Schritt 3a): Garten selbst erfassen.
 import { initEditor } from "./editor.js";
 
+// „Meine Gärten“: gespeicherte Pläne wiederfinden, sichern und laden.
+import {
+  alleGaerten,
+  ladeGarten,
+  speichereGarten,
+  loescheGarten,
+  neuerGarten,
+  alsGespeichertesFlurstueck,
+  findeGartenFuer,
+  flaecheVon,
+  alsDateiText,
+  dateiName,
+  ausDateiText,
+  uebernehmeAltePlaene,
+} from "./gaerten.js";
+
 // -------------------------------------------------------------------------
 // 1. Konfiguration
 // -------------------------------------------------------------------------
@@ -118,13 +134,21 @@ map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-rig
 // Ein einzelner Marker, den wir bei jeder Suche wiederverwenden.
 let marker = null;
 
-// Objekt-Editor (Schritt 3a) einrichten.
-const editor = initEditor(map);
+// Wird erfüllt, sobald der Kartenstil geladen ist – erst dann lassen sich
+// Ebenen anlegen. Das dauert nur einen Augenblick nach dem Seitenaufruf.
+const karteBereit = new Promise((weiter) => map.once("styledata", weiter));
+
+// Objekt-Editor (Schritt 3a) einrichten. Wird er geschlossen, kann sich die
+// Liste „Meine Gärten“ geändert haben (neuer Garten, neues Änderungsdatum).
+const editor = initEditor(map, {
+  beimSchliessen: () => aktualisiereGaertenAnzeige(),
+});
 
 // Steuerung der Grundstücksauswahl (Schritt 2) einrichten. Beim Klick auf
-// „Garten erfassen“ öffnet sich der Editor; „Neu beginnen“ räumt ihn mit auf.
+// „Garten erfassen“ öffnet sich der Editor mit dem passenden Garten;
+// „Neu beginnen“ räumt ihn mit auf.
 const grundstueck = initGrundstueck(map, {
-  beimErfassen: (parcels) => editor.starten(parcels),
+  beimErfassen: (parcels) => oeffneEditorFuer(parcels),
   beimNeustart: () => editor.leeren(),
 });
 
@@ -164,6 +188,7 @@ function clearResults() {
   resultsList.innerHTML = "";
   resultsList.hidden = true;
   trefferFuer = "";
+  aktualisiereGaertenAnzeige(); // ohne Trefferliste ist wieder Platz dafür
 }
 
 // -------------------------------------------------------------------------
@@ -332,6 +357,7 @@ function renderResults(results, query) {
 
   resultsList.hidden = results.length === 0;
   resultsList.scrollTop = 0; // neue Treffer immer von oben zeigen
+  aktualisiereGaertenAnzeige(); // Trefferliste und Gartenliste nie zugleich
 }
 
 // Fliegt sanft zum gewählten Ort und setzt dort einen Marker.
@@ -361,6 +387,7 @@ function selectPlace(place) {
   clearTimeout(debounceTimer);
   if (laufendeSuche) laufendeSuche.abort();
   input.value = trefferTexte(place).titel;
+  gaertenOffen = false; // jetzt geht es um eine neue Adresse
   clearResults();
   showHint("Gefunden. Wähle als Nächstes dein Grundstück aus.");
 
@@ -387,6 +414,12 @@ function planeVorschlaege() {
   const query = input.value.trim();
 
   clearTimeout(debounceTimer); // alte, noch nicht gestartete Suche verwerfen
+
+  // Wer eine Adresse tippt, braucht die Liste „Meine Gärten“ gerade nicht.
+  if (query !== "" && gaertenOffen) {
+    gaertenOffen = false;
+    aktualisiereGaertenAnzeige();
+  }
 
   // Zu wenige Zeichen: Liste leeren und Start-Hinweis zeigen.
   if (query.length < MIN_ZEICHEN) {
@@ -467,3 +500,288 @@ form.addEventListener("submit", (event) => {
   if (sucheLaeuftFuer === query) return; // genau diese Suche läuft schon
   if (query.length >= MIN_ZEICHEN) sucheVorschlaege(query);
 });
+
+// -------------------------------------------------------------------------
+// 8. Meine Gärten: gespeicherte Pläne wiederfinden, sichern und laden
+// -------------------------------------------------------------------------
+// Jeder Plan gehört zu einem „Garten“ (Name, Flurstücke, Objekte – siehe
+// gaerten.js). Unter der Suchleiste steht die Liste aller Gärten: Ein Tipp
+// öffnet den Garten wieder genau dort, wo man aufgehört hat.
+
+const gaertenKnopf = document.getElementById("gaerten-knopf");
+const gaertenBox = document.getElementById("gaerten");
+const gaertenListe = document.getElementById("gaerten-liste");
+const gaertenLaden = document.getElementById("gaerten-laden");
+const gaertenDatei = document.getElementById("gaerten-datei");
+
+// Soll die Liste „Meine Gärten“ zu sehen sein? Beim Start ja; sobald eine
+// Adresse getippt oder ein Garten geöffnet wird, macht sie Platz.
+let gaertenOffen = true;
+// Wird gerade ein Garten geöffnet? Dann zählen weitere Tipps auf die Liste nicht.
+let gartenWirdGeoeffnet = false;
+
+// Flächen hübsch auf Deutsch, z. B. „2.146 m²“.
+const alsFlaeche = (m2) => Math.round(m2).toLocaleString("de-DE") + " m²";
+
+// Namen, die nur als Platzhalter vergeben wurden (übernommene alte Pläne
+// heißen zunächst „Flurstück 544“). Sie weichen der Adresse, sobald wir sie kennen.
+const istPlatzhalter = (name) =>
+  name === "Mein Garten" || /^Flurstück \d/.test(name);
+
+// Ein Namensvorschlag für den Garten: die amtliche Lagebezeichnung des
+// Grundstücks („Mozartstraße 3“), sonst die gesuchte Adresse.
+function vorschlagName(parcels) {
+  const mitLage = parcels.find((p) => p.lage);
+  if (mitLage) return mitLage.lage;
+  return input.value.trim() || "Mein Garten";
+}
+
+// Kurzbeschreibung für die Liste: „2.146 m² · 12 Objekte · geändert am 24.11.2026“.
+function beschreibeGarten(garten) {
+  const teile = [];
+  const flaeche = flaecheVon(garten);
+  if (flaeche != null) teile.push(alsFlaeche(flaeche));
+  const anzahl = garten.objekte.length;
+  teile.push(
+    anzahl === 0 ? "noch leer" : anzahl === 1 ? "1 Objekt" : anzahl + " Objekte",
+  );
+  teile.push(
+    "geändert am " + new Date(garten.geaendert).toLocaleDateString("de-DE"),
+  );
+  return teile.join(" · ");
+}
+
+// Baut die Liste der Gärten: je Garten ein großer Knopf zum Weiterplanen und
+// darunter klein „Weiter planen“, „Als Datei sichern“ und „Löschen“.
+function zeigeGaertenListe(gaerten) {
+  gaertenListe.innerHTML = "";
+  gaerten.forEach((garten) => {
+    const zeile = document.createElement("li");
+    zeile.className = "garten";
+
+    const oeffnen = document.createElement("button");
+    oeffnen.type = "button";
+    oeffnen.className = "garten__oeffnen";
+    const name = document.createElement("div");
+    name.className = "garten__name";
+    name.textContent = garten.name;
+    const info = document.createElement("div");
+    info.className = "garten__info";
+    info.textContent = beschreibeGarten(garten);
+    oeffnen.append(name, info);
+    oeffnen.addEventListener("click", () => oeffneGarten(garten.id));
+
+    const aktionen = document.createElement("div");
+    aktionen.className = "garten__aktionen";
+    // „Weiter planen“ sagt ausdrücklich, was ein Tipp auf den Garten bewirkt.
+    const weiter = document.createElement("button");
+    weiter.type = "button";
+    weiter.className = "garten__aktion garten__aktion--weiter";
+    weiter.textContent = "Weiter planen";
+    weiter.addEventListener("click", () => oeffneGarten(garten.id));
+    const sichern = document.createElement("button");
+    sichern.type = "button";
+    sichern.className = "garten__aktion garten__aktion--sichern";
+    sichern.textContent = "Als Datei sichern";
+    sichern.addEventListener("click", () => sichereAlsDatei(garten));
+    const loeschen = document.createElement("button");
+    loeschen.type = "button";
+    loeschen.className = "garten__aktion garten__aktion--loeschen";
+    loeschen.textContent = "Löschen";
+    loeschen.addEventListener("click", () => loescheNachRueckfrage(garten));
+    aktionen.append(weiter, sichern, loeschen);
+
+    zeile.append(oeffnen, aktionen);
+    gaertenListe.append(zeile);
+  });
+}
+
+// Liste und Knopf passend ein- bzw. ausblenden. Die Liste erscheint nur,
+// wenn es Gärten gibt und gerade keine Suchtreffer angezeigt werden.
+function aktualisiereGaertenAnzeige() {
+  const gaerten = alleGaerten();
+  const listeSichtbar =
+    gaertenOffen && gaerten.length > 0 && resultsList.hidden;
+
+  gaertenBox.hidden = !listeSichtbar;
+  if (listeSichtbar) zeigeGaertenListe(gaerten);
+
+  // Der kleine Knopf holt die Liste zurück. Gibt es noch keinen Garten,
+  // führt er direkt zur Dateiauswahl (gesicherten Garten laden).
+  gaertenKnopf.hidden = listeSichtbar || !resultsList.hidden;
+  gaertenKnopf.textContent =
+    gaerten.length > 0 ? "Meine Gärten" : "Garten aus Datei laden";
+}
+
+gaertenKnopf.addEventListener("click", () => {
+  if (alleGaerten().length === 0) {
+    gaertenDatei.click();
+    return;
+  }
+  gaertenOffen = true;
+  clearResults(); // blendet dabei auch die Liste ein
+});
+
+// Rückt die Karte so, dass das Grundstück über der Werkzeugleiste des Editors
+// ganz zu sehen ist. Ohne Flug-Animation: Die würde auf dem Weg viele
+// Luftbild-Kacheln laden, die niemand braucht.
+function passeKarteEin(parcels) {
+  const rahmen = new maplibregl.LngLatBounds();
+  parcels.forEach((p) => p.ringLngLat.forEach((punkt) => rahmen.extend(punkt)));
+
+  const hoehe = map.getContainer().clientHeight;
+  const leiste = document.getElementById("ed-toolbar");
+  const unten = Math.min((leiste ? leiste.offsetHeight : 0) + 40, hoehe * 0.55);
+  const kamera = map.cameraForBounds(rahmen, {
+    padding: { top: 40, bottom: unten, left: 30, right: 30 },
+    maxZoom: 20,
+  });
+  // Passt das Grundstück bei diesen Rändern gar nicht aufs Bild, wenigstens
+  // seine Mitte zeigen.
+  map.jumpTo(kamera || { center: rahmen.getCenter(), zoom: ADDRESS_ZOOM });
+}
+
+// Einen gespeicherten Garten wieder aufschlagen („Weiter planen“).
+async function oeffneGarten(id) {
+  if (gartenWirdGeoeffnet) return;
+  const garten = ladeGarten(id);
+  if (!garten) {
+    aktualisiereGaertenAnzeige(); // der Eintrag ist inzwischen weg
+    return;
+  }
+
+  gartenWirdGeoeffnet = true;
+  setLoading(true);
+  try {
+    await karteBereit;
+    // Maske und Bemaßung wie nach „OK, übernehmen“. Fehlt der Umriss noch
+    // (übernommener alter Plan), wird er dabei vom Kataster geholt.
+    const parcels = await grundstueck.oeffne(garten.flurstuecke);
+
+    // Was das Kataster nachgeliefert hat, gleich mitspeichern.
+    const vorher = JSON.stringify(garten.flurstuecke) + garten.name;
+    garten.flurstuecke = parcels.map(alsGespeichertesFlurstueck);
+    if (istPlatzhalter(garten.name)) garten.name = vorschlagName(parcels);
+    if (JSON.stringify(garten.flurstuecke) + garten.name !== vorher) {
+      speichereGarten(garten);
+    }
+
+    // Oberfläche: Stecknadel einer früheren Suche weg, Name ins Suchfeld.
+    clearTimeout(debounceTimer);
+    if (laufendeSuche) laufendeSuche.abort();
+    if (marker) marker.remove();
+    input.value = garten.name;
+    gaertenOffen = false;
+    clearResults();
+    hint.hidden = true;
+
+    editor.starten(parcels, garten);
+    passeKarteEin(parcels);
+  } catch (fehler) {
+    console.error(fehler);
+    showHint(
+      fehler.name === "FlurstueckFehlt"
+        ? "Das Flurstück dieses Gartens ist im Kataster nicht mehr zu finden – der Garten lässt sich so nicht öffnen."
+        : "Der Garten lässt sich gerade nicht öffnen (Kataster-Dienst nicht erreichbar).",
+      true,
+    );
+  } finally {
+    gartenWirdGeoeffnet = false;
+    setLoading(false);
+  }
+}
+
+// „Garten erfassen“ nach der Grundstückswahl: den Garten zu den gewählten
+// Flurstücken öffnen – einen vorhandenen, falls es schon einen gibt.
+function oeffneEditorFuer(parcels) {
+  let garten = findeGartenFuer(parcels.map((p) => p.id));
+  if (garten) {
+    // Flurstücke auf den Stand der aktuellen Auswahl bringen (Umriss, Lage –
+    // oder ein Flurstück mehr bzw. weniger als beim letzten Mal).
+    const vorher = JSON.stringify(garten.flurstuecke) + garten.name;
+    garten.flurstuecke = parcels.map(alsGespeichertesFlurstueck);
+    if (istPlatzhalter(garten.name)) garten.name = vorschlagName(parcels);
+    if (JSON.stringify(garten.flurstuecke) + garten.name !== vorher) {
+      speichereGarten(garten);
+    }
+  } else {
+    // Neuer Garten. Gespeichert wird er erst mit dem ersten Objekt – sonst
+    // stünde jedes nur angesehene Grundstück in der Liste.
+    garten = neuerGarten(parcels, vorschlagName(parcels));
+  }
+  gaertenOffen = false;
+  editor.starten(parcels, garten);
+}
+
+// „Als Datei sichern“: Der Browser lädt den Garten als kleine Datei herunter.
+// Sie ist die Sicherung für den Fall, dass die Browserdaten verloren gehen,
+// und der Weg, einen Garten auf ein anderes Gerät mitzunehmen.
+function sichereAlsDatei(garten) {
+  const inhalt = new Blob([alsDateiText(garten)], { type: "application/json" });
+  const adresse = URL.createObjectURL(inhalt);
+  const link = document.createElement("a");
+  link.href = adresse;
+  link.download = dateiName(garten);
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(adresse), 1000);
+}
+
+function loescheNachRueckfrage(garten) {
+  const sicher = window.confirm(
+    `Garten „${garten.name}“ wirklich löschen? Das lässt sich nicht rückgängig machen.`,
+  );
+  if (!sicher) return;
+  loescheGarten(garten.id);
+  aktualisiereGaertenAnzeige();
+}
+
+// „Garten aus Datei laden“: gesicherte Datei auswählen, prüfen, übernehmen.
+gaertenLaden.addEventListener("click", () => gaertenDatei.click());
+
+gaertenDatei.addEventListener("change", async () => {
+  const datei = gaertenDatei.files[0];
+  gaertenDatei.value = ""; // dieselbe Datei soll sich erneut wählen lassen
+  if (!datei) return;
+
+  let text;
+  try {
+    text = await new Response(datei).text();
+  } catch (fehler) {
+    console.error(fehler);
+    showHint("Die Datei lässt sich nicht lesen.", true);
+    return;
+  }
+
+  const { garten, fehler } = ausDateiText(text);
+  if (fehler) {
+    showHint(fehler, true);
+    return;
+  }
+
+  const vorhanden = ladeGarten(garten.id);
+  if (
+    vorhanden &&
+    !window.confirm(
+      `Den Garten „${vorhanden.name}“ gibt es hier schon. Durch den Stand aus der Datei ersetzen?`,
+    )
+  ) {
+    return;
+  }
+
+  if (!speichereGarten(garten)) {
+    showHint(
+      "Der Garten konnte nicht gespeichert werden – der Speicher des Browsers ist voll oder gesperrt.",
+      true,
+    );
+    return;
+  }
+  gaertenOffen = true;
+  clearResults(); // zeigt die Liste mit dem neuen Garten
+  showHint(`„${garten.name}“ wurde geladen. Tippe darauf, um weiterzuplanen.`);
+});
+
+// Beim Start: Pläne aus der ersten Version übernehmen und die Liste zeigen.
+uebernehmeAltePlaene();
+aktualisiereGaertenAnzeige();

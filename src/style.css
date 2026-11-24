@@ -216,6 +216,120 @@ body {
   color: inherit;
 }
 
+/* 5b. „Meine Gärten“ (gespeicherte Pläne unter der Suchleiste) ------------ */
+/* Kleiner Knopf unter dem Hinweis, der die Liste einblendet */
+.search__link {
+  display: block;
+  margin: 8px auto 0;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent-strong);
+  background: rgba(255, 255, 255, 0.92);
+  border: none;
+  border-radius: 999px;
+  padding: 7px 14px;
+  box-shadow: var(--shadow-soft);
+  cursor: pointer;
+}
+
+.gaerten {
+  margin: 8px 0 0;
+  padding: 6px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+}
+
+.gaerten__kopf {
+  padding: 8px 12px 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.gaerten__liste {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 290px;
+  overflow-y: auto;
+}
+
+/* Ein Garten: oben der große Knopf zum Weiterplanen, darunter klein die
+   Aktionen „Weiter planen“, „Als Datei sichern“ und „Löschen“. */
+.garten + .garten {
+  border-top: 1px solid var(--border);
+}
+
+.garten__oeffnen {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px 6px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.garten__oeffnen:hover {
+  background: var(--bg);
+}
+
+.garten__name {
+  font-size: 15px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.garten__info {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.garten__aktionen {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 0 4px 6px;
+}
+
+/* kleine Text-Knöpfe in der Gartenliste */
+.garten__aktion {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.garten__aktion:hover {
+  background: var(--bg);
+}
+.garten__aktion--weiter {
+  margin-right: auto; /* links, die übrigen Aktionen rechts */
+  color: var(--accent-strong);
+  font-weight: 500;
+}
+.garten__aktion--loeschen {
+  color: #dc2626;
+}
+
+.gaerten__fuss {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 0 0;
+  border-top: 1px solid var(--border);
+}
+
 /* 6. Marker (Stecknadel) ------------------------------------------------- */
 .marker {
   width: 22px;
@@ -461,6 +575,14 @@ body {
   margin: 8px 2px 0;
   font-size: 13px;
   color: var(--text-muted);
+}
+
+/* Warnung, wenn der Plan nicht gespeichert werden konnte */
+.toolbar__warnung {
+  margin: 8px 2px 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #dc2626;
 }
 
 /* Segment-Umschalter „Frei zeichnen | Rechteck“ */

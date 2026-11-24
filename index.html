@@ -52,6 +52,28 @@
       <p id="search-hint" class="search__hint">
         Gib deine Adresse ein, um zu starten.
       </p>
+
+      <!-- Kleiner Knopf unter dem Hinweis: blendet die Liste „Meine Gärten“
+           ein. Gibt es noch keinen Garten, öffnet er die Dateiauswahl, um
+           einen gesicherten Garten zu laden. -->
+      <button id="gaerten-knopf" class="search__link" type="button" hidden>
+        Meine Gärten
+      </button>
+
+      <!-- „Meine Gärten“: gespeicherte Pläne zum Weiterplanen
+           (die Liste wird per JavaScript gefüllt). -->
+      <div id="gaerten" class="gaerten" hidden>
+        <div class="gaerten__kopf">Meine Gärten</div>
+        <ul id="gaerten-liste" class="gaerten__liste"></ul>
+        <div class="gaerten__fuss">
+          <button id="gaerten-laden" class="btn btn--ghost" type="button">
+            Garten aus Datei laden
+          </button>
+        </div>
+      </div>
+
+      <!-- Unsichtbare Dateiauswahl für „Garten aus Datei laden“ -->
+      <input id="gaerten-datei" type="file" accept=".json,application/json" hidden />
     </div>
 
     <!-- Unteres Bedienfeld: führt Schritt für Schritt durch die
@@ -100,6 +122,11 @@
         </button>
         <button id="ed-close" class="btn btn--ghost" type="button">Schließen</button>
       </div>
+      <!-- Warnung, falls der Plan nicht gespeichert werden konnte -->
+      <p id="ed-warnung" class="toolbar__warnung" hidden>
+        Achtung: Der Plan konnte nicht gespeichert werden – der Speicher des
+        Browsers ist voll oder gesperrt.
+      </p>
       <p id="ed-hint" class="toolbar__hint"></p>
     </div>
 

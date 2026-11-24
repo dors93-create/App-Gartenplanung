@@ -28,6 +28,11 @@ import proj4 from "proj4";
 // Adresse des NRW-Kataster-Dienstes (amtliche Flurstücke).
 const WFS_URL = "https://www.wfs.nrw.de/geobasis/wfs_nw_alkis_vereinfacht";
 
+// Fertige Abfrage des Dienstes, die ein Flurstück über sein Kennzeichen
+// liefert (für gespeicherte Gärten, deren Umriss noch fehlt).
+const ABFRAGE_NACH_KENNZEICHEN =
+  "http://repository.gdi-de.org/query/adv/produkt/alkis-vereinfacht/2.0/flst-by-kennzeichen";
+
 // Ein Tipp, der so kurz nach dem vorigen und so nah an derselben Stelle kommt,
 // gilt als zweiter Teil eines Doppeltipps und wird ignoriert.
 const DOPPELTIPP_MS = 600; // Millisekunden
@@ -153,7 +158,9 @@ export function initGrundstueck(map, optionen = {}) {
   // -----------------------------------------------------------------------
   // GML (XML) des Dienstes auswerten -> Liste von Flurstücken.
   // Jedes Flurstück: { id, ring25832: [[e,n],...], ringLngLat: [[lng,lat],...],
-  //                    info: "Gemarkung …, Flur …, Flurstück …" }
+  //                    info: "Gemarkung …, Flur …, Flurstück …",
+  //                    lage: "Mozartstraße 3" (amtliche Lagebezeichnung),
+  //                    amtlicheFlaeche: 2149 (m² laut Kataster) }
   // -----------------------------------------------------------------------
   function leseFlurstuecke(xmlText) {
     const xml = new DOMParser().parseFromString(xmlText, "application/xml");
@@ -194,6 +201,8 @@ export function initGrundstueck(map, optionen = {}) {
         ring25832,
         ringLngLat,
         info: teile.join(", "),
+        lage: feld("lagebeztxt"),
+        amtlicheFlaeche: Number(feld("flaeche")) || null,
       });
     }
     return ergebnisse;
@@ -255,6 +264,29 @@ export function initGrundstueck(map, optionen = {}) {
     // dasjenige nehmen, in dem der Klickpunkt wirklich liegt.
     const treffer = liste.find((f) => punktImRing(e, n, f.ring25832));
     return treffer || liste[0];
+  }
+
+  // -----------------------------------------------------------------------
+  // Ein Flurstück gezielt über sein Kennzeichen holen (für gespeicherte
+  // Gärten, deren Umriss noch nicht gespeichert ist).
+  // -----------------------------------------------------------------------
+  async function holeNachKennzeichen(kennzeichen) {
+    const url =
+      `${WFS_URL}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature` +
+      `&STOREDQUERY_ID=${ABFRAGE_NACH_KENNZEICHEN}` +
+      `&CRS=urn:ogc:def:crs:EPSG::25832` +
+      `&kennzeichen=${encodeURIComponent(kennzeichen)}`;
+
+    // Antwortet der Dienst nicht, geben wir nach dem Zeitlimit auf.
+    const abfrage = new AbortController();
+    const zeitlimit = setTimeout(() => abfrage.abort(), ABFRAGE_ZEITLIMIT_MS);
+    try {
+      const antwort = await fetch(url, { signal: abfrage.signal });
+      if (!antwort.ok) throw new Error("WFS-Status " + antwort.status);
+      return leseFlurstuecke(await antwort.text())[0] || null;
+    } finally {
+      clearTimeout(zeitlimit);
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -598,6 +630,42 @@ export function initGrundstueck(map, optionen = {}) {
       // „Garten erfassen“ gewählt wird.)
       if (optionen.beimNeustart) optionen.beimNeustart();
       setze("bereit");
+    },
+
+    // Einen gespeicherten Garten wieder aufschlagen: Seine Flurstücke werden
+    // ohne Antippen übernommen (weiße Maske, Bemaßung – wie nach „OK,
+    // übernehmen“). Fehlt einem Flurstück der Umriss, holen wir ihn über das
+    // Kennzeichen vom Kataster. Rückgabe: die vollständigen Flurstücke.
+    // Wirft einen Fehler, wenn der Dienst nicht antwortet oder ein Flurstück
+    // nicht mehr gefunden wird (dann mit dem Namen „FlurstueckFehlt“).
+    async oeffne(gespeicherte) {
+      const flurstuecke = [];
+      for (const g of gespeicherte) {
+        if (g.ring25832) {
+          flurstuecke.push({
+            ...g,
+            ringLngLat: g.ring25832.map(([e, n]) => nachLngLat(e, n)),
+          });
+        } else {
+          const geholt = await holeNachKennzeichen(g.id);
+          if (!geholt) {
+            // Der Dienst hat geantwortet, kennt das Flurstück aber nicht mehr
+            // (z. B. nach einer Teilung) – das ist kein Verbindungsfehler.
+            const fehler = new Error("Flurstück nicht gefunden: " + g.id);
+            fehler.name = "FlurstueckFehlt";
+            throw fehler;
+          }
+          flurstuecke.push(geholt);
+        }
+      }
+
+      aufraeumen();
+      if (optionen.beimNeustart) optionen.beimNeustart();
+      auswahl = flurstuecke;
+      zeigeAuswahl(); // legt bei Bedarf auch die Karten-Ebenen an
+      const gesamt = uebernehmen();
+      setze("fertig", gesamt);
+      return flurstuecke;
     },
   };
 }
