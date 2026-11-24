@@ -220,6 +220,9 @@ export function initEditor(map) {
   chipBox.addEventListener(
     "click",
     (e) => {
+      // Nur echte Tipps und Mausklicks haben eine Position. Eine Auswahl per
+      // Tastatur (Enter/Leertaste auf einem Chip) lassen wir immer durch.
+      if (e.detail === 0) return;
       const rand = chipBox.getBoundingClientRect();
       const links =
         chipBox.classList.contains("hat-mehr-links") &&
