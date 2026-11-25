@@ -42,6 +42,7 @@ import {
   dateiName,
   ausDateiText,
   uebernehmeAltePlaene,
+  altePlaeneUebrig,
 } from "./gaerten.js";
 
 // Rückfrage-Fenster für Entscheidungen mit mehr als zwei Möglichkeiten.
@@ -158,7 +159,13 @@ const karteBereit = new Promise((weiter) => map.once("styledata", weiter));
 // Objekt-Editor (Schritt 3a) einrichten. Wird er geschlossen, kann sich die
 // Liste „Meine Gärten“ geändert haben (neuer Garten, neues Änderungsdatum).
 const editor = initEditor(map, {
-  beimSchliessen: () => aktualisiereGaertenAnzeige(),
+  beimSchliessen: () => {
+    // Das Bedienfeld erscheint wieder. Seine Knöpfe zählen einen Moment lang
+    // noch nicht: Der zweite Tipp eines Doppeltipps auf „Schließen“ träfe
+    // sonst „Neu beginnen“ an derselben Stelle.
+    grundstueck.sperreKnoepfeKurz();
+    aktualisiereGaertenAnzeige();
+  },
 });
 
 // Steuerung der Grundstücksauswahl (Schritt 2) einrichten. Beim Klick auf
@@ -166,6 +173,12 @@ const editor = initEditor(map, {
 // „Neu beginnen“ räumt ihn mit auf.
 const grundstueck = initGrundstueck(map, {
   beimErfassen: (parcels) => oeffneEditorFuer(parcels).catch(console.error),
+  // Beim Antippen der Flurstücke stört die Liste „Meine Gärten“ nur – am
+  // Handy verdeckt sie die halbe Karte.
+  beimAuswaehlen: () => {
+    gaertenOffen = false;
+    aktualisiereGaertenAnzeige();
+  },
   beimNeustart: () => editor.leeren(),
 });
 
@@ -890,21 +903,29 @@ function frageZuUeberschneidung(garten, parcels) {
 // „Garten erfassen“ nach der Grundstückswahl: den Garten zu den gewählten
 // Flurstücken im Editor öffnen. Der Reihe nach:
 //   a) Liegt der Garten noch im Editor (er wurde nur geschlossen)? Dann genau
-//      dort weitermachen – auch wenn er sich nicht speichern ließ.
+//      dort weitermachen – auch wenn er sich nicht speichern ließ. (Nur ein
+//      leerer Entwurf weicht einem inzwischen gespeicherten, passenden Garten.)
 //   b) Gibt es einen gespeicherten Garten mit genau diesen Flurstücken? Öffnen.
 //   c) Überschneidet sich die Auswahl nur mit einem Garten (ein Flurstück mehr
 //      oder weniger)? Nachfragen – die Flurstücke eines Gartens werden nie
 //      stillschweigend geändert.
 //   d) Sonst: ein neuer Garten.
 async function oeffneEditorFuer(parcels) {
+  const { genau, teilweise } = sucheGaertenFuer(parcels.map((p) => p.id));
+
   // a) Derselbe Garten wie eben.
   const offen = editor.aktuellerGarten();
   if (offen && gleicheFlurstuecke(offen, parcels)) {
-    starteEditor(parcels, offen);
-    return;
+    // Ausnahme: Er ist nur ein leerer Entwurf (nichts gezeichnet, nie
+    // gespeichert), und inzwischen gibt es einen gespeicherten Garten mit
+    // genau diesen Flurstücken – etwa eben aus einer Datei geladen. Dann ist
+    // der gemeint (weiter bei b).
+    const nurEntwurf = offen.objekte.length === 0 && !ladeGarten(offen.id);
+    if (!(nurEntwurf && genau.length > 0)) {
+      starteEditor(parcels, offen);
+      return;
+    }
   }
-
-  const { genau, teilweise } = sucheGaertenFuer(parcels.map((p) => p.id));
 
   // b) Genau passender Garten (gibt es mehrere, der zuletzt geänderte).
   if (genau.length > 0) {
@@ -1043,3 +1064,11 @@ gaertenDatei.addEventListener("change", async () => {
 // Beim Start: Pläne aus der ersten Version übernehmen und die Liste zeigen.
 uebernehmeAltePlaene();
 aktualisiereGaertenAnzeige();
+// Ließ sich ein alter Plan nicht übernehmen (der Speicher des Browsers ist
+// voll oder gesperrt), soll ihn niemand für verloren halten.
+if (altePlaeneUebrig()) {
+  showHint(
+    "Ein früherer Plan konnte noch nicht übernommen werden – der Speicher des Browsers ist voll oder gesperrt. Verloren ist er nicht.",
+    true,
+  );
+}

@@ -252,7 +252,11 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 290px;
+  /* Höchstens so hoch, dass die Liste samt Suchleiste auf den Bildschirm
+     passt (wichtig beim Handy im Querformat) – sonst rollte die ganze Seite
+     mitsamt der Karte. Die Liste selbst lässt sich dann rollen. */
+  max-height: min(290px, calc(100vh - 230px));
+  max-height: min(290px, calc(100dvh - 230px));
   overflow-y: auto;
 }
 

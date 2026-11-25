@@ -74,6 +74,8 @@ let alle = g.alleGaerten();
 pruefe("2 alte Pläne mit Inhalt werden Gärten", n === 2 && alle.length === 2, `übernommen ${n}, Gärten ${alle.length}`);
 const eins = alle.find((x) => x.flurstuecke.length === 1), zwei = alle.find((x) => x.flurstuecke.length === 2);
 pruefe("Name aus dem Kennzeichen", eins.name === "Flurstück 544" && zwei.name === "Flurstück 271 u. a.", `${eins.name} | ${zwei.name}`);
+pruefe("unlesbare Objekte eines alten Plans verschwinden nicht stumm: Beim Lesen werden sie gezählt (und so beim ersten Öffnen gemeldet)", g.ladeGarten("g-alt-" + K544).verworfen === 2 && g.ladeGarten("g-alt-" + K544).objekte.length === 2, `verworfen ${g.ladeGarten("g-alt-" + K544).verworfen}`);
+pruefe("nach der Übernahme liegt kein alter Plan mehr herum (altePlaeneUebrig)", g.altePlaeneUebrig() === false);
 pruefe("gültige Objekte übernommen, alter Punkt-Baum wird Kreis, Schrott fällt weg", eins.objekte.length === 2 && eins.objekte[1].art === "kreis" && eins.objekte[1].radius === 3, JSON.stringify(eins.objekte.map((o) => o.art)));
 pruefe("Umriss fehlt zunächst (wird beim Öffnen nachgeladen)", eins.flurstuecke[0].ring25832 === null && g.flaecheVon(eins) === null);
 pruefe("alte Einträge liegen im Archiv, nichts ist verloren", schluesselMit(ALT).length === 0 && schluesselMit(ARCHIV + ALT).length === 5 && speicher.get(ARCHIV + ALT + "05254002600888______") === "{kaputt");
@@ -100,10 +102,12 @@ speicher.set(ALT + K271, altPlan);
 stoerung = (was, k) => was === "schreiben" && k === ARCHIV + ALT + K544;
 let m = g.uebernehmeAltePlaene();
 pruefe("Archiv-Kopie scheitert: das Original bleibt unberührt liegen, es entsteht kein Garten", speicher.get(ALT + K544) === altPlan && !speicher.has(GARTEN + ID544) && !speicher.has(ARCHIV + ALT + K544));
+pruefe("… und das lässt sich abfragen, damit die Oberfläche darauf hinweisen kann (altePlaeneUebrig)", g.altePlaeneUebrig() === true);
 pruefe("… der andere Plan wird davon nicht aufgehalten", m === 1 && kennungen(g.alleGaerten()) === ID271 && !speicher.has(ALT + K271), `übernommen ${m}`);
 stoerung = null;
 m = g.uebernehmeAltePlaene();
 pruefe("… der nächste Start holt den liegengebliebenen Plan nach: genau ein Garten je Plan, Original im Archiv", m === 1 && g.alleGaerten().length === 2 && schluesselMit(GARTEN).length === 2 && g.ladeGarten(ID544).objekte.length === 1 && schluesselMit(ALT).length === 0 && speicher.get(ARCHIV + ALT + K544) === altPlan, `übernommen ${m}, Gärten ${schluesselMit(GARTEN).length}`);
+pruefe("… danach liegt kein alter Plan mehr herum", g.altePlaeneUebrig() === false);
 
 // (b) Die Kopie klappt, aber der Garten lässt sich nicht schreiben.
 speicher.clear();
@@ -323,6 +327,16 @@ let vorschlag = g.freierName(lang);
 pruefe("sehr langer Name: auch mit „ (2)“ passt der Vorschlag in die 80 Zeichen und bleibt nach dem Speichern eigen", vorschlag.length <= 80 && vorschlag !== lang && / \(2\)$/.test(vorschlag) && g.neuerGarten(fl, vorschlag).name === vorschlag, `${vorschlag.length} Zeichen: ${vorschlag}`);
 vorschlag = g.freierName(lang + " und noch mehr");
 pruefe("überlanger Wunschname wird wie beim Speichern gekürzt – und dann als vergeben erkannt", vorschlag.length <= 80 && vorschlag !== lang && g.neuerGarten(fl, vorschlag).name === vorschlag, `${vorschlag.length} Zeichen: ${vorschlag}`);
+
+// Beim ersten Speichern wird der Name noch einmal geprüft: Er wurde beim
+// Anlegen vergeben, und seither kann ein gleichnamiger Garten dazugekommen sein.
+speicher.clear();
+const entwurf = g.neuerGarten([flurstueck("A")], "Mozartstraße 3"); // noch nicht gespeichert
+lege("g-datei", ["B"], 5, { name: "Mozartstraße 3" }); // inzwischen kommt ein gleichnamiger dazu (z. B. aus einer Datei)
+g.speichereGarten(entwurf);
+pruefe("erstes Speichern: Heißt inzwischen ein anderer Garten so, bekommt der neue „ (2)“", entwurf.name === "Mozartstraße 3 (2)" && g.ladeGarten(entwurf.id).name === "Mozartstraße 3 (2)" && g.ladeGarten("g-datei").name === "Mozartstraße 3", entwurf.name);
+g.speichereGarten(entwurf);
+pruefe("… weiteres Speichern ändert den Namen nicht mehr", g.ladeGarten(entwurf.id).name === "Mozartstraße 3 (2)" && g.alleGaerten().length === 2, g.ladeGarten(entwurf.id).name);
 
 // -------------------------------------------------------------------------
 // Beschädigte Einträge

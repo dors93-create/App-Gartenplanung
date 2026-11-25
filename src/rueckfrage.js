@@ -24,9 +24,10 @@
 // Gestaltung in style.css.
 // =========================================================================
 
-// So lange nach dem Erscheinen der Frage zählen Klicks auf ihre Knöpfe noch
-// nicht (Millisekunden). Sonst könnte der zweite Klick eines Doppelklicks
-// gleich eine Antwort auslösen, die niemand gelesen hat.
+// So lange nach dem Erscheinen der Frage zählen ihre Knöpfe noch nicht
+// (Millisekunden). Sonst könnte der zweite Klick eines Doppelklicks – oder
+// ein zweiter Druck auf die Eingabetaste – gleich eine Antwort auslösen, die
+// niemand gelesen hat.
 const KNOPF_SPERRE_MS = 400;
 
 const fenster = document.getElementById("rueckfrage");
@@ -57,6 +58,13 @@ fenster.addEventListener("close", () => {
   if (!fenster.hasAttribute("open")) schliesse(null);
 });
 
+// Eine gedrückt gehaltene Taste wiederholt sich von selbst. Solche
+// Wiederholungen zählen hier nicht: Sonst beantwortete die Eingabetaste, mit
+// der die Frage geöffnet wurde, sie nach einer halben Sekunde gleich mit.
+fenster.addEventListener("keydown", (e) => {
+  if (e.repeat) e.preventDefault();
+});
+
 // Stellt eine Frage. Rückgabe: ein Versprechen (Promise) auf die Antwort –
 // der „wert“ des gedrückten Knopfes oder null bei „Abbrechen“.
 export function frage({ titel, text, knoepfe }) {
@@ -79,10 +87,10 @@ export function frage({ titel, text, knoepfe }) {
     knopf.addEventListener("click", (e) => {
       // Zu früh? Es zählt, wann getippt wurde – nicht, wann der Browser den
       // Tipp abarbeitet (das kann sich verzögern, wenn er gerade zeichnet).
-      // (Zählung 0 = Tastatur – die ist nie ein Doppelklick.)
+      // Das gilt für Maus, Finger und Tastatur gleichermaßen.
       const jetzt = performance.now();
       const getippt = e.timeStamp > 0 ? Math.min(e.timeStamp, jetzt) : jetzt;
-      if (e.detail > 0 && getippt - geoeffnetUm < KNOPF_SPERRE_MS) return;
+      if (getippt - geoeffnetUm < KNOPF_SPERRE_MS) return;
       schliesse(k.wert === "abbrechen" ? null : k.wert);
     });
     knopfFeld.append(knopf);

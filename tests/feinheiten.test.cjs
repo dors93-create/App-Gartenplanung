@@ -191,7 +191,8 @@ async function suchAttrappe(page, protokoll) {
   await page.click('#gp-aktion'); await page.waitForTimeout(600); await page.mouse.click(640, 310); await page.waitForTimeout(3500);
   await page.click('#gp-aktion'); await page.waitForTimeout(700); await page.click('#gp-aktion'); await page.waitForTimeout(600);
   await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('gruenriss:garten:')) localStorage.removeItem(k); });
-  await page.click('#ed-close'); await page.waitForTimeout(300); await page.click('#gp-aktion'); await page.waitForTimeout(700);
+  // (Nach „Schließen“ zählen die Knöpfe des Bedienfelds 400 ms lang nicht – darum erst kurz warten.)
+  await page.click('#ed-close'); await page.waitForTimeout(600); await page.click('#gp-aktion'); await page.waitForTimeout(700);
   await page.route('**/www.wfs.nrw.de/**', async (r) => { await warte(3000); try { await r.continue(); } catch (e) {} });
   await page.click('#ed-auto'); await page.waitForTimeout(300);
   await page.click('#ed-close'); await page.waitForTimeout(300);

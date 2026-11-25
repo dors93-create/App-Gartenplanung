@@ -80,7 +80,8 @@ const quadratmeter = (wert) =>
 // -------------------------------------------------------------------------
 // Hauptfunktion: richtet die gesamte Grundstücks-Logik ein.
 // Wird von main.js mit der fertigen Karte aufgerufen und gibt eine kleine
-// Steuerung zurück ({ zeigeStart, zuruecksetzen, vervollstaendige, uebernimm }).
+// Steuerung zurück ({ zeigeStart, sperreKnoepfeKurz, zuruecksetzen,
+// vervollstaendige, uebernimm }).
 // -------------------------------------------------------------------------
 export function initGrundstueck(map, optionen = {}) {
   // Verweise auf das untere Bedienfeld und seine Knöpfe.
@@ -599,6 +600,7 @@ export function initGrundstueck(map, optionen = {}) {
     if (zuFrueh()) return;
     if (zustand === "bereit") {
       setze("auswaehlen"); // los geht's: auf das/die Grundstück(e) tippen
+      if (optionen.beimAuswaehlen) optionen.beimAuswaehlen();
     } else if (zustand === "auswaehlen" && auswahl.length > 0) {
       abfragenAbbrechen(); // noch ausstehende Antworten zählen jetzt nicht mehr
       const gesamt = uebernehmen(); // weiß ausblenden + bemaßen
@@ -633,6 +635,14 @@ export function initGrundstueck(map, optionen = {}) {
       // „Garten erfassen“ gewählt wird.)
       if (optionen.beimNeustart) optionen.beimNeustart();
       setze("bereit");
+    },
+
+    // Die Knöpfe des Bedienfelds kurz sperren (siehe KNOPF_SPERRE_MS). main.js
+    // ruft das auf, wenn das Bedienfeld wieder erscheint, weil der Editor
+    // geschlossen wurde: Der zweite Tipp eines Doppeltipps auf „Schließen“
+    // träfe sonst „Neu beginnen“, das an derselben Stelle auftaucht.
+    sperreKnoepfeKurz() {
+      zustandSeit = performance.now();
     },
 
     // Alles ausschalten: Auswahl, Maske und Bemaßung weg, Bedienfeld verborgen

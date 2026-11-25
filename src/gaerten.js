@@ -299,6 +299,13 @@ export function ladeGarten(id) {
 // Speichert den Garten und setzt sein Änderungsdatum. Rückgabe: true, wenn
 // das Speichern geklappt hat.
 export function speichereGarten(garten) {
+  // Kommt der Garten zum ersten Mal in den Speicher? Dann noch einmal
+  // sicherstellen, dass kein anderer schon so heißt: Sein Name wurde beim
+  // Anlegen vergeben, und seither kann ein gleichnamiger dazugekommen sein
+  // (zum Beispiel aus einer Datei).
+  if (lies(PRAEFIX + garten.id) == null) {
+    garten.name = freierName(garten.name, garten.id);
+  }
   garten.geaendert = Date.now();
   return schreibe(PRAEFIX + garten.id, JSON.stringify(zumSpeichern(garten)));
 }
@@ -526,7 +533,10 @@ export function uebernehmeAltePlaene() {
             ),
             geaendert: Date.now(),
             flurstuecke: kennzeichen.map((k) => bereinigeFlurstueck({ id: k })),
-            objekte,
+            // Bewusst die ungeprüfte Liste: Unlesbare Objekte fallen dann beim
+            // ersten Öffnen weg und werden dort gemeldet – wie bei jedem
+            // anderen Garten – statt hier stumm zu verschwinden.
+            objekte: liste,
           };
           if (!schreibe(PRAEFIX + id, JSON.stringify(garten))) return;
           anzahl++;
@@ -537,4 +547,13 @@ export function uebernehmeAltePlaene() {
       entferne(alt);
     });
   return anzahl;
+}
+
+// Liegen noch alte Pläne im Speicher, die sich nicht übernehmen ließen? Das
+// kommt nur vor, wenn der Speicher des Browsers voll oder gesperrt ist. Die
+// Oberfläche weist dann darauf hin, damit niemand den Plan für verloren hält.
+export function altePlaeneUebrig() {
+  return alleSchluessel().some((schluessel) =>
+    schluessel.startsWith(PRAEFIX_ALT),
+  );
 }

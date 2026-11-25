@@ -846,6 +846,85 @@ const gleicheLage = (a, b) => a.length > 0 && a.length === b.length && a.every((
     pruefe('N Handy quer: Doppeltipp auf einen solchen Eintrag – der Garten bleibt offen, kein Werkzeug wird gewählt', ergebnis.length > 0 && ergebnis.every((e) => e.offen && e.werkzeug === ''), ergebnis.map((e) => `${e.name}: Editor ${e.offen ? 'offen' : 'wieder zu'}${e.werkzeug ? ', Werkzeug ' + e.werkzeug : ''}`).join(' | '));
   });
 
+  // =======================================================================
+  // Teil 9: Nachträge aus der Schlussprüfung (Desktop)
+  // =======================================================================
+  await teil(9, 'Nachträge: leerer Entwurf und geladene Datei, Tastatur, Klick gleich nach „Schließen“', {}, async (page) => {
+    await page.goto(URL_APP); await page.waitForTimeout(1200);
+    await sucheAdresse(page); await waehle(page, [A]);
+    // Leerer Entwurf: „Garten erfassen“, nichts zeichnen, „Schließen“ …
+    await page.click('#gp-aktion'); await page.warteAufEditor();
+    await page.click('#ed-close'); await page.waitForTimeout(600);
+    // … dann die Sicherung desselben Grundstücks laden (Umzug auf ein neues Gerät).
+    await page.setInputFiles('#gaerten-datei', schreibeDatei('umzug.json', garten('g-umzug', 'Mozartstraße 3', 2))); await page.waitForTimeout(500);
+    await page.click('#gp-aktion'); await page.warteAufEditor();
+    const nachLaden = await page.objekte();
+    await setzeBaum(page);
+    const g = await page.gaerten();
+    pruefe('Q Leerer Entwurf, dann Datei geladen: „Garten erfassen“ öffnet den geladenen Garten – kein zweiter, gleichnamiger entsteht', nachLaden === gartenA.objekte.length && g.length === 1 && g[0].id === 'g-umzug' && g[0].objekte.length === gartenA.objekte.length + 1, `Objekte nach dem Öffnen ${nachLaden}; Gärten: ${g.map((x) => `${x.id} „${x.name}“ ${x.objekte.length}`).join(', ')}`);
+
+    // ---- Tastatur: Die Rückfrage darf nicht ungelesen beantwortet werden ----
+    await neuBeginnen(page); await waehle(page, [A, B]);
+    await page.focus('#gp-aktion');
+    await page.keyboard.press('Enter'); await warte(60); await page.keyboard.press('Enter'); await page.waitForTimeout(700);
+    let f = await page.frage();
+    pruefe('Q Zweimal Enter auf „Garten erfassen“: Die Rückfrage bleibt stehen, nichts wird umgestellt', f.offen && !(await page.sichtbar('#ed-toolbar')) && (await page.garten('g-umzug')).flurstuecke.length === 1, `Frage offen: ${f.offen}, Flurstücke ${(await page.garten('g-umzug')).flurstuecke.length}`);
+    await page.keyboard.press('Escape'); await page.waitForTimeout(400);
+    // Gehaltene Eingabetaste: Der erste Druck öffnet die Frage, die
+    // Wiederholungen der Taste zählen nicht.
+    await page.focus('#gp-aktion');
+    await page.keyboard.down('Enter'); await page.waitForTimeout(600);
+    await page.keyboard.down('Enter'); await warte(40); await page.keyboard.down('Enter'); await warte(40);
+    await page.keyboard.up('Enter'); await page.waitForTimeout(400);
+    f = await page.frage();
+    pruefe('Q Gehaltene Eingabetaste: Ihre Wiederholungen beantworten die Rückfrage nicht', f.offen && !(await page.sichtbar('#ed-toolbar')) && (await page.garten('g-umzug')).flurstuecke.length === 1, `Frage offen: ${f.offen}, Flurstücke ${(await page.garten('g-umzug')).flurstuecke.length}`);
+    // Ein bewusster Druck auf die Eingabetaste wählt die empfohlene Antwort.
+    await page.keyboard.press('Enter'); await page.warteAufEditor();
+    pruefe('Q … ein bewusster Druck auf die Eingabetaste gilt danach: empfohlene Antwort „umstellen“', !(await page.frage()).offen && (await page.garten('g-umzug')).flurstuecke.length === 2, `Flurstücke ${(await page.garten('g-umzug')).flurstuecke.length}`);
+
+    // ---- Der zweite Klick eines Doppelklicks auf „Schließen“ träfe „Neu beginnen“ ----
+    const objekteVorher = await page.objekte();
+    await page.click('#ed-close');
+    const [zx, zy] = await page.mitte('#gp-zurueck'); await page.mouse.click(zx, zy); // sofort hinterher
+    await page.waitForTimeout(600);
+    pruefe('Q Klick gleich nach „Schließen“ trifft „Neu beginnen“ nicht: Der Garten bleibt auf der Karte', (await page.text('#gp-aktion')) === 'Garten erfassen' && (await page.text('#gp-zurueck')) === 'Neu beginnen' && objekteVorher > 0 && (await page.objekte()) === objekteVorher, `Knopf „${await page.text('#gp-aktion')}“, Objekte ${await page.objekte()} von ${objekteVorher}`);
+
+    // ---- Die Liste macht Platz, sobald Flurstücke angetippt werden sollen ----
+    await page.click('#gp-zurueck'); await page.waitForTimeout(600); // „Neu beginnen“ – jetzt zählt der Klick
+    await page.click('#gaerten-knopf'); await page.waitForTimeout(300);
+    const listeVorher = await page.sichtbar('#gaerten');
+    await page.click('#gp-aktion'); await page.waitForTimeout(600); // „Grundstück auswählen“
+    pruefe('Q „Grundstück auswählen“ blendet die Liste „Meine Gärten“ aus (sie verdeckte sonst die Karte)', listeVorher && !(await page.sichtbar('#gaerten')) && (await page.sichtbar('#gaerten-knopf')) && /Tippe auf dein Grundstück/.test(await page.text('#gp-text')), `Liste vorher sichtbar: ${listeVorher}, danach: ${await page.sichtbar('#gaerten')}`);
+  });
+
+  // =======================================================================
+  // Teil 10: alter Plan mit einem unlesbaren Objekt
+  // =======================================================================
+  await teil(10, 'Nachtrag: alter Plan mit unlesbarem Objekt', {}, async (page) => {
+    const baum = gartenA.objekte.find((o) => o.art === 'kreis');
+    await saeen(page, [], { ['gruenriss:plan:' + ID_A]: JSON.stringify([{ ...baum, id: 'gut' }, { ...baum, id: 'kaputt', radius: 0 }]) });
+    await page.goto(URL_APP); await page.waitForTimeout(1200);
+    pruefe('R Alter Plan mit einem unlesbaren Objekt: erscheint als Garten mit dem lesbaren Objekt', (await page.anzahl('.garten')) === 1 && /1 Objekt/.test(await page.text('.garten__info')), await page.text('.garten__info'));
+    await page.click('.garten__oeffnen'); await page.warteAufEditor();
+    pruefe('R … beim ersten Öffnen wird das ausgelassene Objekt gemeldet, statt stumm zu verschwinden', /1 Objekt dieses Plans war nicht lesbar/.test(await page.text('#ed-hint')), await page.text('#ed-hint'));
+    const g = await page.gaerten();
+    pruefe('R … danach ist der Garten bereinigt gespeichert, das Original liegt im Archiv', g.length === 1 && g[0].objekte.length === 1 && (await page.evaluate((k) => localStorage.getItem(k) !== null, 'gruenriss:archiv:gruenriss:plan:' + ID_A)), `Gärten ${g.length}, Objekte ${g[0] && g[0].objekte.length}`);
+  });
+
+  // =======================================================================
+  // Teil 11: alter Plan lässt sich nicht übernehmen (Speicher voll)
+  // =======================================================================
+  await teil(11, 'Nachtrag: alter Plan lässt sich nicht übernehmen', {}, async (page) => {
+    const baum = gartenA.objekte.find((o) => o.art === 'kreis');
+    const alt = JSON.stringify([{ ...baum, id: 'gut' }]);
+    await saeen(page, [], { ['gruenriss:plan:' + ID_A]: alt });
+    // Der Speicher nimmt die Sicherungskopie fürs Archiv nicht an.
+    await page.addInitScript(() => { const echt = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (String(k).startsWith('gruenriss:archiv:')) throw new Error('QuotaExceededError'); return echt.call(this, k, v); }; });
+    await page.goto(URL_APP); await page.waitForTimeout(1200);
+    const h = await page.hinweis();
+    pruefe('S Alter Plan lässt sich nicht übernehmen: Ein Hinweis sagt es, der Plan bleibt unangetastet liegen', h.sichtbar && h.fehler && /konnte noch nicht übernommen werden/.test(h.text) && (await page.evaluate((k) => localStorage.getItem(k), 'gruenriss:plan:' + ID_A)) === alt && (await page.gaerten()).length === 0, h.text);
+  });
+
   console.log(`\nEchte Anfragen an das Kataster in diesem Lauf: ${echteAnfragen.size}` + (katasterAussetzer ? ` (${katasterAussetzer}-mal antwortete der Dienst nicht, der Schritt wurde wiederholt)` : ''));
   const bad = ergebnisse.filter((e) => !e.ok);
   console.log(`\nERGEBNIS: ${ergebnisse.length - bad.length} von ${ergebnisse.length} Prüfungen bestanden` + (bad.length ? ' – FEHLER: ' + bad.map((b) => b.name).join(' ; ') : ''));
