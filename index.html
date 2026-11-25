@@ -130,6 +130,15 @@
       <p id="ed-hint" class="toolbar__hint"></p>
     </div>
 
+    <!-- Rückfrage-Fenster: stellt eine Frage und bietet die Antworten als
+         beschriftete Knöpfe an. Titel, Text und Knöpfe füllt das JavaScript
+         (src/rueckfrage.js). Unsichtbar, solange keine Frage offen ist. -->
+    <dialog id="rueckfrage" class="rueckfrage" aria-labelledby="rueckfrage-titel">
+      <h2 id="rueckfrage-titel" class="rueckfrage__titel"></h2>
+      <p id="rueckfrage-text" class="rueckfrage__text"></p>
+      <div id="rueckfrage-knoepfe" class="rueckfrage__knoepfe"></div>
+    </dialog>
+
     <!-- Einstiegspunkt: Vite lädt von hier unseren JavaScript-Code. -->
     <script type="module" src="/src/main.js"></script>
   </body>

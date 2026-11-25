@@ -37,6 +37,11 @@ const PRAEFIX_ARCHIV = "gruenriss:archiv:";
 // Radius, mit dem sehr alte Bäume (damals nur ein Punkt) übernommen werden.
 const BAUM_RADIUS_ALT = 3;
 
+// Obergrenzen für Werte aus dem Speicher oder aus einer Datei. Was darüber
+// liegt, ist ein Fehler in den Daten und wird nicht übernommen.
+const RADIUS_MAX = 500; // Meter – größer ist kein Baum und kein Garten
+const KENNZEICHEN_MAX = 100; // Zeichen – ein Flurstückskennzeichen hat 20
+
 // -------------------------------------------------------------------------
 // Zugriff auf den Speicher des Browsers. Er kann fehlen oder voll sein
 // (z. B. im privaten Modus) – darum fängt jede Funktion Fehler ab.
@@ -84,10 +89,45 @@ const zufall = () =>
 // Prüfen und Bereinigen
 // -------------------------------------------------------------------------
 const istZahl = (x) => typeof x === "number" && Number.isFinite(x);
+
+// Ein Punkt auf der Karte: [Länge, Breite] in Grad. Werte außerhalb des
+// Gradnetzes würden die Karte beim Zeichnen zum Abbruch bringen.
 const istPunkt = (p) =>
-  Array.isArray(p) && p.length >= 2 && istZahl(p[0]) && istZahl(p[1]);
+  Array.isArray(p) &&
+  p.length >= 2 &&
+  istZahl(p[0]) &&
+  istZahl(p[1]) &&
+  Math.abs(p[0]) <= 180 &&
+  Math.abs(p[1]) <= 90;
+
 // Ein Ring ist eine geschlossene Punktfolge: mindestens 3 Ecken + Schlusspunkt.
-const istRing = (r) => Array.isArray(r) && r.length >= 4 && r.every(istPunkt);
+// Rückgabe: der Ring als saubere Liste von [Länge, Breite] (ein fehlender
+// Schlusspunkt wird ergänzt) – oder null, wenn er nicht zu gebrauchen ist.
+function bereinigeRing(r) {
+  if (!Array.isArray(r) || r.length < 3 || !r.every(istPunkt)) return null;
+  const ring = r.map((p) => [p[0], p[1]]);
+  const erster = ring[0];
+  const letzter = ring[ring.length - 1];
+  if (erster[0] !== letzter[0] || erster[1] !== letzter[1]) {
+    ring.push([erster[0], erster[1]]);
+  }
+  return ring.length >= 4 ? ring : null;
+}
+
+// Umriss eines Flurstücks in Metern (EPSG:25832). Zur Sicherheit nur Werte
+// annehmen, die in und um NRW vorkommen können – alles andere ist ein Fehler
+// in der Datei, und der Umriss wird dann beim Öffnen neu vom Kataster geholt.
+const istPunkt25832 = (p) =>
+  Array.isArray(p) &&
+  p.length >= 2 &&
+  istZahl(p[0]) &&
+  istZahl(p[1]) &&
+  p[0] > 200000 &&
+  p[0] < 700000 &&
+  p[1] > 5400000 &&
+  p[1] < 5900000;
+const istRing25832 = (r) =>
+  Array.isArray(r) && r.length >= 4 && r.every(istPunkt25832);
 
 // Ein einzelnes Objekt prüfen. Rückgabe: das (ggf. umgewandelte) Objekt
 // oder null, wenn es nicht zu gebrauchen ist.
@@ -106,22 +146,28 @@ function bereinigeObjekt(o) {
     };
   }
   if (o.art === "kreis") {
-    const gut = istPunkt(o.center) && istZahl(o.radius) && o.radius > 0;
-    return gut ? { ...o, id } : null;
+    const gut =
+      istPunkt(o.center) &&
+      istZahl(o.radius) &&
+      o.radius > 0 &&
+      o.radius <= RADIUS_MAX;
+    return gut ? { ...o, id, center: [o.center[0], o.center[1]] } : null;
   }
   if (o.art === "flaeche") {
     if (o.multi) {
       // Zusammengesetzte Fläche: Liste von Vielecken, jedes eine Liste von Ringen.
-      const gut =
-        Array.isArray(o.multi) &&
-        o.multi.length > 0 &&
-        o.multi.every(
-          (vieleck) =>
-            Array.isArray(vieleck) && vieleck.length > 0 && vieleck.every(istRing),
-        );
-      return gut ? { ...o, id } : null;
+      if (!Array.isArray(o.multi) || o.multi.length === 0) return null;
+      const multi = [];
+      for (const vieleck of o.multi) {
+        if (!Array.isArray(vieleck) || vieleck.length === 0) return null;
+        const ringe = vieleck.map(bereinigeRing);
+        if (ringe.includes(null)) return null;
+        multi.push(ringe);
+      }
+      return { ...o, id, multi };
     }
-    return istRing(o.coords) ? { ...o, id } : null;
+    const coords = bereinigeRing(o.coords);
+    return coords ? { ...o, id, coords } : null;
   }
   return null; // unbekannte Art
 }
@@ -133,11 +179,18 @@ export function pruefeObjekte(liste) {
     return { objekte: [], verworfen: liste == null ? 0 : 1 };
   }
   const objekte = [];
+  const kennungen = new Set();
   let verworfen = 0;
   liste.forEach((o) => {
     const gut = bereinigeObjekt(o);
-    if (gut) objekte.push(gut);
-    else verworfen++;
+    if (!gut) {
+      verworfen++;
+      return;
+    }
+    // Jede Kennung darf nur einmal vorkommen („Löschen“ träfe sonst mehrere).
+    if (kennungen.has(gut.id)) gut.id = zufall();
+    kennungen.add(gut.id);
+    objekte.push(gut);
   });
   return { objekte, verworfen };
 }
@@ -148,12 +201,13 @@ function bereinigeFlurstueck(f) {
   if (!f || typeof f !== "object" || typeof f.id !== "string" || !f.id) {
     return null;
   }
+  if (f.id.length > KENNZEICHEN_MAX) return null;
   return {
     id: f.id,
     info: typeof f.info === "string" ? f.info : "",
     lage: typeof f.lage === "string" ? f.lage : "",
     amtlicheFlaeche: istZahl(f.amtlicheFlaeche) ? f.amtlicheFlaeche : null,
-    ring25832: istRing(f.ring25832)
+    ring25832: istRing25832(f.ring25832)
       ? f.ring25832.map((p) => [p[0], p[1]])
       : null,
   };
@@ -262,22 +316,52 @@ export function alsGespeichertesFlurstueck(f) {
   });
 }
 
-// Sucht den gespeicherten Garten, der zu den gewählten Flurstücken gehört:
-// den mit den meisten gemeinsamen Flurstücken (bei Gleichstand den zuletzt
-// geänderten). So findet man seinen Garten auch wieder, wenn man diesmal ein
-// Flurstück mehr oder weniger angetippt hat.
-export function findeGartenFuer(flurstueckIds) {
+// Vergleicht die gewählten Flurstücke mit allen gespeicherten Gärten.
+// Rückgabe:
+//   genau      Gärten mit GENAU dieser Flurstücks-Auswahl (neuester zuerst).
+//              Nur ein solcher Garten darf ohne Rückfrage geöffnet werden.
+//   teilweise  Gärten, die sich mit der Auswahl nur überschneiden – der
+//              ähnlichste zuerst (meiste gemeinsame, dann wenigste fremde
+//              Flurstücke, dann der neueste). Hier muss die Oberfläche
+//              nachfragen; die Flurstücke eines Gartens werden nie still
+//              umgeschrieben.
+export function sucheGaertenFuer(flurstueckIds) {
   const gesucht = new Set(flurstueckIds);
-  let bester = null;
-  let meiste = 0;
+  const genau = [];
+  const kandidaten = [];
   alleGaerten().forEach((garten) => {
-    const gemeinsam = garten.flurstuecke.filter((f) => gesucht.has(f.id)).length;
-    if (gemeinsam > meiste) {
-      meiste = gemeinsam;
-      bester = garten;
+    const eigene = new Set(garten.flurstuecke.map((f) => f.id));
+    const gemeinsam = [...eigene].filter((id) => gesucht.has(id)).length;
+    if (gemeinsam === 0) return;
+    if (gemeinsam === eigene.size && gemeinsam === gesucht.size) {
+      genau.push(garten);
+    } else {
+      const fremd = eigene.size + gesucht.size - 2 * gemeinsam;
+      kandidaten.push({ garten, gemeinsam, fremd });
     }
   });
-  return bester;
+  kandidaten.sort(
+    (a, b) =>
+      b.gemeinsam - a.gemeinsam ||
+      a.fremd - b.fremd ||
+      b.garten.geaendert - a.garten.geaendert,
+  );
+  return { genau, teilweise: kandidaten.map((k) => k.garten) };
+}
+
+// Ein Name, den noch kein anderer Garten trägt: Ist der Wunschname vergeben,
+// wird „ (2)“, „ (3)“ … angehängt. „ausserId“ nennt den Garten, der den Namen
+// selbst tragen darf (beim Umbenennen).
+export function freierName(wunsch, ausserId) {
+  const vergeben = new Set(
+    alleGaerten()
+      .filter((garten) => garten.id !== ausserId)
+      .map((garten) => garten.name),
+  );
+  if (!vergeben.has(wunsch)) return wunsch;
+  let nummer = 2;
+  while (vergeben.has(`${wunsch} (${nummer})`)) nummer++;
+  return `${wunsch} (${nummer})`;
 }
 
 // -------------------------------------------------------------------------
@@ -344,7 +428,10 @@ export function ausDateiText(text) {
         "Die Datei stammt aus einer neueren Version von Grünriss und kann hier nicht gelesen werden.",
     };
   }
-  const garten = bereinigeGarten(daten);
+  // Ohne Kennung ließe sich nicht erkennen, ob es den Garten hier schon gibt –
+  // jedes Laden legte einen weiteren an.
+  const garten =
+    typeof daten.id === "string" && daten.id ? bereinigeGarten(daten) : null;
   if (!garten) {
     return { fehler: "Die Datei enthält keinen lesbaren Garten." };
   }
@@ -365,8 +452,13 @@ function flurstuecksNummer(kennzeichen) {
 }
 
 // Übernimmt Pläne aus der ersten Version als Gärten. Rückgabe: Anzahl der
-// übernommenen Pläne. Leere Pläne werden nicht übernommen. Das Original
-// wandert ins Archiv – aber nur, wenn der neue Garten sicher gespeichert ist.
+// übernommenen Pläne. Leere Pläne werden nicht übernommen.
+//
+// Die Reihenfolge macht die Übernahme wiederholungssicher: zuerst die Kopie
+// ins Archiv, dann der Garten, zuletzt das Entfernen des Originals. Scheitert
+// ein Schritt (Speicher voll), bleibt das Original liegen, und der nächste
+// Start versucht es erneut – ohne dass ein Garten doppelt entsteht, denn
+// seine Kennung wird aus dem alten Schlüssel gebildet.
 export function uebernehmeAltePlaene() {
   let anzahl = 0;
   alleSchluessel()
@@ -375,10 +467,11 @@ export function uebernehmeAltePlaene() {
       const rohwert = lies(alt);
       if (rohwert == null) return;
 
-      const kennzeichen = alt
-        .slice(PRAEFIX_ALT.length)
-        .split("|")
-        .filter((k) => k && k !== "default");
+      // 1. Sicherungskopie ins Archiv (ohne sie fassen wir das Original nicht an).
+      if (!schreibe(PRAEFIX_ARCHIV + alt, rohwert)) return;
+
+      const rest = alt.slice(PRAEFIX_ALT.length);
+      const kennzeichen = rest.split("|").filter((k) => k && k !== "default");
 
       let liste = null;
       try {
@@ -388,25 +481,30 @@ export function uebernehmeAltePlaene() {
       }
       const { objekte } = pruefeObjekte(liste);
 
+      // 2. Garten anlegen – außer es gibt ihn von einem früheren Versuch schon
+      //    (dann wurde er vielleicht inzwischen weiterbearbeitet).
       if (kennzeichen.length > 0 && objekte.length > 0) {
-        const garten = {
-          format: FORMAT_NAME,
-          version: FORMAT_VERSION,
-          id: "g-" + zufall(),
-          name:
-            "Flurstück " +
-            flurstuecksNummer(kennzeichen[0]) +
-            (kennzeichen.length > 1 ? " u. a." : ""),
-          geaendert: Date.now(),
-          flurstuecke: kennzeichen.map((id) => bereinigeFlurstueck({ id })),
-          objekte,
-        };
-        if (!schreibe(PRAEFIX + garten.id, JSON.stringify(garten))) return;
-        anzahl++;
+        const id = "g-alt-" + rest;
+        if (lies(PRAEFIX + id) == null) {
+          const garten = {
+            format: FORMAT_NAME,
+            version: FORMAT_VERSION,
+            id,
+            name:
+              "Flurstück " +
+              flurstuecksNummer(kennzeichen[0]) +
+              (kennzeichen.length > 1 ? " u. a." : ""),
+            geaendert: Date.now(),
+            flurstuecke: kennzeichen.map((k) => bereinigeFlurstueck({ id: k })),
+            objekte,
+          };
+          if (!schreibe(PRAEFIX + id, JSON.stringify(garten))) return;
+          anzahl++;
+        }
       }
 
-      // Original ins Archiv verschieben (nur wenn die Kopie dort angekommen ist).
-      if (schreibe(PRAEFIX_ARCHIV + alt, rohwert)) entferne(alt);
+      // 3. Original entfernen – die Kopie liegt im Archiv.
+      entferne(alt);
     });
   return anzahl;
 }

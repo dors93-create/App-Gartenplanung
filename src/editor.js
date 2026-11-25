@@ -53,6 +53,13 @@ const rangVon = (o) =>
 
 const BAUM_RADIUS = 3; // Standard-Radius eines neuen Baums in Metern
 
+// So lange nach dem Öffnen des Editors zählen Klicks noch nicht
+// (Millisekunden). Wer einen Garten mit einem Doppelklick oder Doppeltipp
+// öffnet, träfe mit dem zweiten Klick sonst schon die Karte oder einen Knopf
+// der Werkzeugleiste, die inzwischen an derselben Stelle erschienen ist –
+// und die Karte würde obendrein hineinzoomen.
+const START_SPERRE_MS = 400;
+
 // IDs der Karten-Quellen/-Ebenen.
 const SRC_OBJ = "ed-objekte";
 const SRC_SEL = "ed-auswahl";
@@ -143,7 +150,8 @@ const fMeter = (w) =>
 const fQm = (w) => Math.round(w).toLocaleString("de-DE") + " m²";
 
 // -------------------------------------------------------------------------
-// Hauptfunktion: richtet den Editor ein. Rückgabe: { starten, leeren }.
+// Hauptfunktion: richtet den Editor ein.
+// Rückgabe: { starten, leeren, schliessen, aktuellerGarten }.
 // „optionen.beimSchliessen“ wird aufgerufen, wenn der Editor geschlossen wird.
 // -------------------------------------------------------------------------
 export function initEditor(map, optionen = {}) {
@@ -176,6 +184,9 @@ export function initEditor(map, optionen = {}) {
   let selektiertId = null; // gerade ausgewähltes Objekt
   let griffe = []; // ziehbare Marker des ausgewählten Objekts
   let garten = null; // der gerade geöffnete Garten (Aufbau siehe gaerten.js)
+  let speicherFehler = false; // konnte dieser Garten zuletzt nicht gespeichert werden?
+  let sperreBis = -Infinity; // bis zu diesem Zeitpunkt zählen Klicks noch nicht
+  let sperreTimer = null; // schaltet danach den Doppelklick-Zoom wieder ein
   let chipEls = [];
   let parcelGeom = null; // Grundstücksfläche (für „Restfläche als Rasen“)
   let parcelsData = []; // die gewählten Flurstücke (für die Auto-Erfassung)
@@ -371,11 +382,12 @@ export function initEditor(map, optionen = {}) {
   function speichere() {
     if (!garten) return;
     garten.objekte = objekte;
-    const gespeichert = speichereGarten(garten);
     // Klappt das Speichern nicht (Speicher des Browsers voll oder gesperrt),
     // muss man das sehen – sonst wäre die Arbeit beim nächsten Öffnen
-    // unbemerkt verloren. Die Warnung bleibt, bis es wieder klappt.
-    warnung.hidden = gespeichert;
+    // unbemerkt verloren. Die Warnung bleibt, bis es wieder klappt – auch
+    // wenn der Editor zwischendurch geschlossen und wieder geöffnet wird.
+    speicherFehler = !speichereGarten(garten);
+    warnung.hidden = !speicherFehler;
   }
   // (Geprüft und bereinigt wurden die Objekte schon beim Lesen des Gartens.)
   function lade() {
@@ -652,6 +664,8 @@ export function initEditor(map, optionen = {}) {
   // -----------------------------------------------------------------------
   map.on("click", (e) => {
     if (!aktiv) return;
+    // Gerade erst geöffnet? Dann ist das der zweite Klick eines Doppelklicks.
+    if (performance.now() < sperreBis) return;
 
     // Ein Tipp auf einen Griff (ohne zu ziehen) gilt dem Griff, nicht der
     // Karte – sonst würde er die Auswahl aufheben oder ein anderes Objekt wählen.
@@ -824,11 +838,30 @@ export function initEditor(map, optionen = {}) {
 
   btnClose.addEventListener("click", () => beenden());
 
+  // Kurz nach dem Öffnen zählen auch Klicks auf die Werkzeugleiste noch nicht
+  // (siehe START_SPERRE_MS). Wir fangen sie ab, bevor sie einen Knopf
+  // erreichen. Die Bedienung per Tastatur bleibt davon unberührt: Dort hat
+  // das Klick-Ereignis die Zählung 0.
+  toolbar.addEventListener(
+    "click",
+    (e) => {
+      if (e.detail > 0 && performance.now() < sperreBis) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    },
+    true,
+  );
+
   // -----------------------------------------------------------------------
   // Editor schließen (alles bleibt gespeichert und sichtbar).
   // -----------------------------------------------------------------------
   function beenden() {
     aktiv = false;
+    // Die Start-Sperre ist damit erledigt; der Doppelklick-Zoom gilt wieder.
+    clearTimeout(sperreTimer);
+    sperreBis = -Infinity;
+    map.doubleClickZoom.enable();
     modus = "neutral";
     aktiverTyp = null;
     punkte = [];
@@ -852,6 +885,10 @@ export function initEditor(map, optionen = {}) {
     // (mit Umriss), „geoeffneterGarten“ der Garten aus gaerten.js – seine
     // Objekte werden angezeigt, jede Änderung wird in ihm gespeichert.
     starten(parcels, geoeffneterGarten) {
+      // Ein anderer Garten als bisher? Dann gilt eine frühere Speicher-Warnung
+      // nicht mehr. (Derselbe Garten – nach „Schließen“ erneut geöffnet –
+      // behält sie: Er ist ja immer noch nicht gespeichert.)
+      if (geoeffneterGarten !== garten) speicherFehler = false;
       garten = geoeffneterGarten;
       parcelsData = parcels || []; // für die automatische Gebäude-Erfassung
 
@@ -882,7 +919,7 @@ export function initEditor(map, optionen = {}) {
       if (suchleiste) suchleiste.hidden = true;
       if (gpPanel) gpPanel.hidden = true;
       toolbar.hidden = false;
-      warnung.hidden = true;
+      warnung.hidden = !speicherFehler;
       aktualisiere();
       aktualisiereChipRand(); // erst jetzt ist die Typ-Reihe sichtbar und messbar
 
@@ -897,10 +934,33 @@ export function initEditor(map, optionen = {}) {
           " ausgelassen.";
         garten.verworfen = 0;
       }
+
+      // Kurze Sperre gegen den zweiten Klick eines Doppelklicks (siehe
+      // START_SPERRE_MS): Klicks zählen noch nicht, die Karte zoomt nicht.
+      sperreBis = performance.now() + START_SPERRE_MS;
+      map.doubleClickZoom.disable();
+      clearTimeout(sperreTimer);
+      sperreTimer = setTimeout(() => {
+        if (aktiv) map.doubleClickZoom.enable();
+      }, START_SPERRE_MS);
+    },
+
+    // Den Editor schließen – dasselbe wie der Knopf „Schließen“.
+    schliessen() {
+      beenden();
+    },
+
+    // Der Garten, der gerade im Editor liegt. Das gilt auch nach „Schließen“
+    // noch (seine Objekte bleiben ja auf der Karte) – erst leeren() setzt ihn
+    // auf null.
+    aktuellerGarten() {
+      return garten;
     },
 
     leeren() {
       garten = null;
+      speicherFehler = false;
+      warnung.hidden = true;
       objekte = [];
       punkte = [];
       selektiertId = null;

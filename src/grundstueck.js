@@ -80,7 +80,7 @@ const quadratmeter = (wert) =>
 // -------------------------------------------------------------------------
 // Hauptfunktion: richtet die gesamte Grundstücks-Logik ein.
 // Wird von main.js mit der fertigen Karte aufgerufen und gibt eine kleine
-// Steuerung zurück ({ zeigeStart }).
+// Steuerung zurück ({ zeigeStart, zuruecksetzen, vervollstaendige, uebernimm }).
 // -------------------------------------------------------------------------
 export function initGrundstueck(map, optionen = {}) {
   // Verweise auf das untere Bedienfeld und seine Knöpfe.
@@ -90,6 +90,7 @@ export function initGrundstueck(map, optionen = {}) {
   const btnZurueck = document.getElementById("gp-zurueck"); // dezenter Knopf
 
   // Zustand der Auswahl: "aus" | "bereit" | "auswaehlen" | "fertig"
+  // ("aus" = Bedienfeld verborgen, so wie direkt nach dem Seitenaufruf)
   let zustand = "aus";
   // Liste der aktuell gewählten Flurstücke (Mehrfachauswahl möglich).
   let auswahl = [];
@@ -466,7 +467,9 @@ export function initGrundstueck(map, optionen = {}) {
       map.doubleClickZoom.enable();
     }
 
-    if (zustand === "bereit") {
+    if (zustand === "aus") {
+      panel.hidden = true;
+    } else if (zustand === "bereit") {
       panel.hidden = false;
       panelText.textContent = "Wähle dein Grundstück auf der Karte aus.";
       btnAktion.hidden = false;
@@ -632,13 +635,26 @@ export function initGrundstueck(map, optionen = {}) {
       setze("bereit");
     },
 
-    // Einen gespeicherten Garten wieder aufschlagen: Seine Flurstücke werden
-    // ohne Antippen übernommen (weiße Maske, Bemaßung – wie nach „OK,
-    // übernehmen“). Fehlt einem Flurstück der Umriss, holen wir ihn über das
-    // Kennzeichen vom Kataster. Rückgabe: die vollständigen Flurstücke.
+    // Alles ausschalten: Auswahl, Maske und Bemaßung weg, Bedienfeld verborgen
+    // (so wie direkt nach dem Seitenaufruf). Gebraucht, wenn sich ein
+    // gespeicherter Garten nicht anzeigen lässt.
+    zuruecksetzen() {
+      aufraeumen();
+      if (optionen.beimNeustart) optionen.beimNeustart();
+      setze("aus");
+    },
+
+    // Einen gespeicherten Garten wieder aufschlagen – das geht in zwei
+    // Schritten, damit main.js dazwischen prüfen kann, ob das Öffnen noch
+    // erwünscht ist:
+    //
+    // Schritt 1 – vervollstaendige(): macht aus den gespeicherten Flurstücken
+    // vollständige (mit dem Umriss in Lat/Lon für die Karte). Fehlt einem der
+    // Umriss, holen wir ihn über das Kennzeichen vom Kataster. Das kann
+    // einige Sekunden dauern, ändert aber NICHTS an Karte und Bedienfeld.
     // Wirft einen Fehler, wenn der Dienst nicht antwortet oder ein Flurstück
     // nicht mehr gefunden wird (dann mit dem Namen „FlurstueckFehlt“).
-    async oeffne(gespeicherte) {
+    async vervollstaendige(gespeicherte) {
       const flurstuecke = [];
       for (const g of gespeicherte) {
         if (g.ring25832) {
@@ -658,14 +674,19 @@ export function initGrundstueck(map, optionen = {}) {
           flurstuecke.push(geholt);
         }
       }
+      return flurstuecke;
+    },
 
+    // Schritt 2 – uebernimm(): zeigt die (vollständigen) Flurstücke sofort so
+    // an wie nach „OK, übernehmen“ – weiße Maske, Bemaßung –, ganz ohne
+    // Antippen.
+    uebernimm(flurstuecke) {
       aufraeumen();
       if (optionen.beimNeustart) optionen.beimNeustart();
-      auswahl = flurstuecke;
+      auswahl = [...flurstuecke];
       zeigeAuswahl(); // legt bei Bedarf auch die Karten-Ebenen an
       const gesamt = uebernehmen();
       setze("fertig", gesamt);
-      return flurstuecke;
     },
   };
 }

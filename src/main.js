@@ -35,13 +35,17 @@ import {
   loescheGarten,
   neuerGarten,
   alsGespeichertesFlurstueck,
-  findeGartenFuer,
+  sucheGaertenFuer,
+  freierName,
   flaecheVon,
   alsDateiText,
   dateiName,
   ausDateiText,
   uebernehmeAltePlaene,
 } from "./gaerten.js";
+
+// Rückfrage-Fenster für Entscheidungen mit mehr als zwei Möglichkeiten.
+import { frage } from "./rueckfrage.js";
 
 // -------------------------------------------------------------------------
 // 1. Konfiguration
@@ -89,6 +93,19 @@ const NRW_NAME = "Nordrhein-Westfalen";
 // Sie erscheint direkt unter den Suchtreffern.
 const OSM_QUELLE =
   'Adressdaten © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>-Mitwirkende';
+
+// Der Hinweis unter dem leeren Suchfeld.
+const START_HINWEIS = "Gib deine Adresse ein, um zu starten.";
+
+// Taugt die gesuchte Adresse als Name für einen neuen Garten? Nur, wenn sie
+// bei den gewählten Flurstücken liegt – höchstens so viele Meter daneben.
+const ADRESSE_NAH_METER = 100;
+
+// Nach „Als Datei sichern“ halten wir die erzeugte Datei noch so lange bereit
+// (Millisekunden). Manche Browser – vor allem auf dem iPhone – beginnen den
+// Download erst nach einer Rückfrage; gäben wir die Datei gleich wieder frei,
+// käme er nicht zustande.
+const SICHERUNG_FREIGABE_MS = 60000;
 
 // -------------------------------------------------------------------------
 // 2. Karte aufbauen
@@ -148,7 +165,7 @@ const editor = initEditor(map, {
 // „Garten erfassen“ öffnet sich der Editor mit dem passenden Garten;
 // „Neu beginnen“ räumt ihn mit auf.
 const grundstueck = initGrundstueck(map, {
-  beimErfassen: (parcels) => oeffneEditorFuer(parcels),
+  beimErfassen: (parcels) => oeffneEditorFuer(parcels).catch(console.error),
   beimNeustart: () => editor.leeren(),
 });
 
@@ -388,6 +405,8 @@ function selectPlace(place) {
   if (laufendeSuche) laufendeSuche.abort();
   input.value = trefferTexte(place).titel;
   gaertenOffen = false; // jetzt geht es um eine neue Adresse
+  vorgangNr++; // ein Garten, der gerade noch geöffnet wird, gilt nicht mehr
+  gewaehlteAdresse = { titel: trefferTexte(place).titel, lngLat };
   clearResults();
   showHint("Gefunden. Wähle als Nächstes dein Grundstück aus.");
 
@@ -425,7 +444,7 @@ function planeVorschlaege() {
   if (query.length < MIN_ZEICHEN) {
     if (laufendeSuche) laufendeSuche.abort();
     clearResults();
-    showHint("Gib deine Adresse ein, um zu starten.");
+    showHint(START_HINWEIS);
     return;
   }
 
@@ -519,21 +538,89 @@ const gaertenDatei = document.getElementById("gaerten-datei");
 let gaertenOffen = true;
 // Wird gerade ein Garten geöffnet? Dann zählen weitere Tipps auf die Liste nicht.
 let gartenWirdGeoeffnet = false;
+// Laufende Nummer dessen, was zuletzt begonnen wurde (Adresse gewählt, Garten
+// geöffnet). Muss beim Öffnen eines Gartens erst das Kataster befragt werden
+// und wurde inzwischen etwas anderes begonnen, erkennen wir das an der Nummer
+// – und lassen das verspätete Öffnen fallen.
+let vorgangNr = 0;
+// Die zuletzt in der Suche gewählte Adresse: { titel, lngLat } – oder null.
+// Sie dient als Namensvorschlag für einen neuen Garten.
+let gewaehlteAdresse = null;
+
+// Suchleiste (samt Gartenliste) und Bedienfeld – beide werden gesperrt,
+// solange ein Garten geöffnet wird.
+const suchleiste = document.querySelector(".search");
+const bedienfeld = document.getElementById("gp-panel");
 
 // Flächen hübsch auf Deutsch, z. B. „2.146 m²“.
 const alsFlaeche = (m2) => Math.round(m2).toLocaleString("de-DE") + " m²";
 
-// Namen, die nur als Platzhalter vergeben wurden (übernommene alte Pläne
-// heißen zunächst „Flurstück 544“). Sie weichen der Adresse, sobald wir sie kennen.
+// Namen, die nur als Platzhalter vergeben wurden („Mein Garten“; übernommene
+// alte Pläne heißen zunächst „Flurstück 544“). Sie weichen der amtlichen
+// Lagebezeichnung, sobald wir sie kennen.
 const istPlatzhalter = (name) =>
-  name === "Mein Garten" || /^Flurstück \d/.test(name);
+  /^Mein Garten( \(\d+\))?$/.test(name) || /^Flurstück \d/.test(name);
 
-// Ein Namensvorschlag für den Garten: die amtliche Lagebezeichnung des
-// Grundstücks („Mozartstraße 3“), sonst die gesuchte Adresse.
-function vorschlagName(parcels) {
+// Die amtliche Lagebezeichnung der Flurstücke („Mozartstraße 3“) – oder "",
+// wenn das Kataster für keines eine nennt. (Auf 70 Zeichen gekürzt: Namen
+// dürfen höchstens 80 lang sein, und für „ (2)“ soll noch Platz bleiben.)
+function lageVon(parcels) {
   const mitLage = parcels.find((p) => p.lage);
-  if (mitLage) return mitLage.lage;
-  return input.value.trim() || "Mein Garten";
+  return mitLage ? mitLage.lage.trim().slice(0, 70) : "";
+}
+
+// Liegt die zuletzt gesuchte Adresse bei den gewählten Flurstücken? (Wer nach
+// der Suche die Karte weit verschiebt und anderswo ein Grundstück wählt, soll
+// dafür nicht den Namen der gesuchten Adresse bekommen.)
+function adresseLiegtBei(parcels) {
+  if (!gewaehlteAdresse) return false;
+  // Rechteck um alle gewählten Flurstücke …
+  const rahmen = new maplibregl.LngLatBounds();
+  parcels.forEach((p) => p.ringLngLat.forEach((punkt) => rahmen.extend(punkt)));
+  // … die Adresse darf von seiner Mitte höchstens so weit entfernt sein, wie
+  // das Rechteck reicht, plus ADRESSE_NAH_METER.
+  const reichweite =
+    rahmen.getSouthWest().distanceTo(rahmen.getNorthEast()) / 2;
+  const abstand = maplibregl.LngLat.convert(gewaehlteAdresse.lngLat).distanceTo(
+    rahmen.getCenter(),
+  );
+  return abstand <= reichweite + ADRESSE_NAH_METER;
+}
+
+// Ein Namensvorschlag für einen neuen Garten: die amtliche Lagebezeichnung
+// des Grundstücks („Mozartstraße 3“), sonst die gesuchte Adresse (wenn sie
+// dort liegt), sonst der Platzhalter „Mein Garten“. Bewusst nie das, was
+// gerade im Suchfeld steht – das kann irgendein angefangener Text sein.
+function vorschlagName(parcels) {
+  const lage = lageVon(parcels);
+  if (lage) return lage;
+  if (adresseLiegtBei(parcels)) return gewaehlteAdresse.titel;
+  return "Mein Garten";
+}
+
+// Umfasst der Garten genau diese Flurstücke (die Reihenfolge ist egal)?
+function gleicheFlurstuecke(garten, parcels) {
+  const eigene = new Set(garten.flurstuecke.map((f) => f.id));
+  const andere = new Set(parcels.map((p) => p.id));
+  return (
+    eigene.size === andere.size && [...eigene].every((id) => andere.has(id))
+  );
+}
+
+// Bringt die gespeicherten Flurstücke eines Gartens auf den Stand der
+// übergebenen (Umriss, Lage, amtliche Fläche) und ersetzt einen Platzhalter-
+// Namen durch die Lagebezeichnung. Gespeichert wird nur, wenn sich dabei
+// etwas geändert hat.
+function aktualisiereFlurstuecke(garten, parcels) {
+  const vorher = JSON.stringify(garten.flurstuecke) + garten.name;
+  garten.flurstuecke = parcels.map(alsGespeichertesFlurstueck);
+  const lage = lageVon(parcels);
+  if (lage && istPlatzhalter(garten.name)) {
+    garten.name = freierName(lage, garten.id);
+  }
+  if (JSON.stringify(garten.flurstuecke) + garten.name !== vorher) {
+    speichereGarten(garten);
+  }
 }
 
 // Kurzbeschreibung für die Liste: „2.146 m² · 12 Objekte · geändert am 24.11.2026“.
@@ -641,76 +728,229 @@ function passeKarteEin(parcels) {
   map.jumpTo(kamera || { center: rahmen.getCenter(), zoom: ADDRESS_ZOOM });
 }
 
+// Bedienung sperren oder wieder freigeben: Suchleiste (samt Gartenliste) und
+// Bedienfeld reagieren dann weder auf Tippen noch auf die Tastatur.
+function sperreBedienung(gesperrt) {
+  suchleiste.toggleAttribute("inert", gesperrt);
+  bedienfeld.toggleAttribute("inert", gesperrt);
+}
+
 // Einen gespeicherten Garten wieder aufschlagen („Weiter planen“).
+//
+// Das geht in zwei Abschnitten. Erst werden seine Flurstücke vervollständigt:
+// Fehlt ein Umriss, wird das Kataster gefragt – das kann einige Sekunden
+// dauern. In dieser Zeit ist die Bedienung gesperrt, und an Karte und Speicher
+// ändert sich nichts. Erst danach – und nur, wenn das Öffnen dann noch
+// erwünscht ist und es den Garten noch gibt – wird er angezeigt.
 async function oeffneGarten(id) {
   if (gartenWirdGeoeffnet) return;
-  const garten = ladeGarten(id);
-  if (!garten) {
+  const gespeichert = ladeGarten(id);
+  if (!gespeichert) {
     aktualisiereGaertenAnzeige(); // der Eintrag ist inzwischen weg
     return;
   }
 
   gartenWirdGeoeffnet = true;
+  const nr = ++vorgangNr; // Nummer dieses Vorgangs (siehe vorgangNr)
+  // Eine noch geplante oder laufende Vorschlagssuche stoppen – ihre Treffer
+  // kämen sonst mitten ins Öffnen.
+  clearTimeout(debounceTimer);
+  if (laufendeSuche) laufendeSuche.abort();
+  sperreBedienung(true);
   setLoading(true);
-  try {
-    await karteBereit;
-    // Maske und Bemaßung wie nach „OK, übernehmen“. Fehlt der Umriss noch
-    // (übernommener alter Plan), wird er dabei vom Kataster geholt.
-    const parcels = await grundstueck.oeffne(garten.flurstuecke);
+  showHint("Garten wird geöffnet …");
 
-    // Was das Kataster nachgeliefert hat, gleich mitspeichern.
-    const vorher = JSON.stringify(garten.flurstuecke) + garten.name;
-    garten.flurstuecke = parcels.map(alsGespeichertesFlurstueck);
-    if (istPlatzhalter(garten.name)) garten.name = vorschlagName(parcels);
-    if (JSON.stringify(garten.flurstuecke) + garten.name !== vorher) {
-      speichereGarten(garten);
+  try {
+    // --- Abschnitt 1: Flurstücke vervollständigen (ändert noch nichts) ---
+    let parcels;
+    try {
+      await karteBereit;
+      parcels = await grundstueck.vervollstaendige(gespeichert.flurstuecke);
+    } catch (fehler) {
+      console.error(fehler);
+      showHint(
+        fehler.name === "FlurstueckFehlt"
+          ? "Das Flurstück dieses Gartens ist im Kataster nicht mehr zu finden – der Garten lässt sich so nicht öffnen."
+          : "Der Garten lässt sich gerade nicht öffnen (Kataster-Dienst nicht erreichbar).",
+        true,
+      );
+      return;
     }
 
-    // Oberfläche: Stecknadel einer früheren Suche weg, Name ins Suchfeld.
-    clearTimeout(debounceTimer);
-    if (laufendeSuche) laufendeSuche.abort();
-    if (marker) marker.remove();
-    input.value = garten.name;
-    gaertenOffen = false;
-    clearResults();
-    hint.hidden = true;
+    // Wurde inzwischen etwas anderes begonnen? Dann gilt dieses Öffnen nicht mehr.
+    if (nr !== vorgangNr) return;
 
-    editor.starten(parcels, garten);
-    passeKarteEin(parcels);
-  } catch (fehler) {
-    console.error(fehler);
-    showHint(
-      fehler.name === "FlurstueckFehlt"
-        ? "Das Flurstück dieses Gartens ist im Kataster nicht mehr zu finden – der Garten lässt sich so nicht öffnen."
-        : "Der Garten lässt sich gerade nicht öffnen (Kataster-Dienst nicht erreichbar).",
-      true,
-    );
+    // Den Garten frisch aus dem Speicher lesen: Wurde er während des Wartens
+    // gelöscht oder verändert (etwa in einem zweiten Fenster), darf hier
+    // nicht sein alter Stand wieder entstehen.
+    const garten = ladeGarten(id);
+    if (!garten) {
+      showHint("Diesen Garten gibt es nicht mehr.", true);
+      aktualisiereGaertenAnzeige();
+      return;
+    }
+    if (!gleicheFlurstuecke(garten, parcels)) {
+      showHint(
+        "Dieser Garten wurde inzwischen geändert – bitte noch einmal antippen.",
+        true,
+      );
+      aktualisiereGaertenAnzeige();
+      return;
+    }
+
+    // --- Abschnitt 2: Garten anzeigen ---
+    try {
+      // Was das Kataster nachgeliefert hat, gleich mitspeichern.
+      aktualisiereFlurstuecke(garten, parcels);
+
+      // Oberfläche: Stecknadel einer früheren Suche weg, Name ins Suchfeld.
+      if (marker) marker.remove();
+      gewaehlteAdresse = null;
+      input.value = garten.name;
+      gaertenOffen = false;
+      clearResults();
+      hint.hidden = true;
+
+      // Karte: Maske und Bemaßung wie nach „OK, übernehmen“, dann der Editor.
+      grundstueck.uebernimm(parcels);
+      editor.starten(parcels, garten);
+      passeKarteEin(parcels);
+    } catch (fehler) {
+      // Das darf eigentlich nicht vorkommen (die Daten wurden beim Lesen
+      // geprüft). Falls doch: nichts Halbes stehen lassen – Editor zu, Karte
+      // leer, Liste wieder da.
+      console.error(fehler);
+      editor.leeren();
+      editor.schliessen();
+      grundstueck.zuruecksetzen();
+      gaertenOffen = true;
+      aktualisiereGaertenAnzeige();
+      showHint(
+        "Dieser Garten lässt sich nicht öffnen – seine gespeicherten Daten sind beschädigt.",
+        true,
+      );
+    }
   } finally {
     gartenWirdGeoeffnet = false;
     setLoading(false);
+    sperreBedienung(false);
   }
 }
 
-// „Garten erfassen“ nach der Grundstückswahl: den Garten zu den gewählten
-// Flurstücken öffnen – einen vorhandenen, falls es schon einen gibt.
-function oeffneEditorFuer(parcels) {
-  let garten = findeGartenFuer(parcels.map((p) => p.id));
-  if (garten) {
-    // Flurstücke auf den Stand der aktuellen Auswahl bringen (Umriss, Lage –
-    // oder ein Flurstück mehr bzw. weniger als beim letzten Mal).
-    const vorher = JSON.stringify(garten.flurstuecke) + garten.name;
-    garten.flurstuecke = parcels.map(alsGespeichertesFlurstueck);
-    if (istPlatzhalter(garten.name)) garten.name = vorschlagName(parcels);
-    if (JSON.stringify(garten.flurstuecke) + garten.name !== vorher) {
-      speichereGarten(garten);
-    }
-  } else {
-    // Neuer Garten. Gespeichert wird er erst mit dem ersten Objekt – sonst
-    // stünde jedes nur angesehene Grundstück in der Liste.
-    garten = neuerGarten(parcels, vorschlagName(parcels));
-  }
+// Den Editor für einen Garten öffnen (die Flurstücke liegen schon auf der Karte).
+function starteEditor(parcels, garten) {
   gaertenOffen = false;
   editor.starten(parcels, garten);
+}
+
+// „1 Flurstück“ bzw. „3 Flurstücke“.
+const flurstueckeText = (anzahl) =>
+  anzahl === 1 ? "1 Flurstück" : anzahl + " Flurstücke";
+
+// Baut die Rückfrage für den Fall, dass sich die Auswahl mit einem
+// gespeicherten Garten nur überschneidet (siehe oeffneEditorFuer).
+function frageZuUeberschneidung(garten, parcels) {
+  const eigene = new Set(garten.flurstuecke.map((f) => f.id));
+  const gewaehlt = new Set(parcels.map((p) => p.id));
+  const gemeinsam = [...eigene].filter((id) => gewaehlt.has(id)).length;
+  // Ist die Auswahl nur größer geworden (alle bisherigen Flurstücke sind
+  // dabei)? Oder nur kleiner (alle gewählten gehören schon zum Garten)?
+  const erweitert = gemeinsam === eigene.size;
+  const verkleinert = gemeinsam === gewaehlt.size;
+
+  let lage;
+  if (erweitert) {
+    lage = `Der Garten „${garten.name}“ umfasst bisher ${flurstueckeText(eigene.size)} – jetzt sind ${gewaehlt.size} gewählt.`;
+  } else if (verkleinert) {
+    lage =
+      `Der Garten „${garten.name}“ umfasst ${flurstueckeText(eigene.size)} – jetzt ` +
+      (gewaehlt.size === 1 ? "ist nur 1" : `sind nur ${gewaehlt.size}`) +
+      " davon gewählt.";
+  } else {
+    lage = `Der Garten „${garten.name}“ umfasst zum Teil andere Flurstücke als die jetzt gewählten.`;
+  }
+
+  return {
+    titel: "Hier gibt es schon einen Garten",
+    text: lage + "\nDie eingezeichneten Objekte bleiben in jedem Fall erhalten.",
+    // Empfohlen (grün) ist das Umstellen nur, wenn dabei kein Flurstück
+    // wegfällt – sonst das unveränderte Öffnen.
+    knoepfe: [
+      {
+        wert: "umstellen",
+        text: "Garten auf diese Auswahl umstellen",
+        haupt: erweitert,
+      },
+      { wert: "oeffnen", text: "Garten unverändert öffnen", haupt: !erweitert },
+      { wert: "neu", text: "Neuen Garten anlegen" },
+    ],
+  };
+}
+
+// „Garten erfassen“ nach der Grundstückswahl: den Garten zu den gewählten
+// Flurstücken im Editor öffnen. Der Reihe nach:
+//   a) Liegt der Garten noch im Editor (er wurde nur geschlossen)? Dann genau
+//      dort weitermachen – auch wenn er sich nicht speichern ließ.
+//   b) Gibt es einen gespeicherten Garten mit genau diesen Flurstücken? Öffnen.
+//   c) Überschneidet sich die Auswahl nur mit einem Garten (ein Flurstück mehr
+//      oder weniger)? Nachfragen – die Flurstücke eines Gartens werden nie
+//      stillschweigend geändert.
+//   d) Sonst: ein neuer Garten.
+async function oeffneEditorFuer(parcels) {
+  // a) Derselbe Garten wie eben.
+  const offen = editor.aktuellerGarten();
+  if (offen && gleicheFlurstuecke(offen, parcels)) {
+    starteEditor(parcels, offen);
+    return;
+  }
+
+  const { genau, teilweise } = sucheGaertenFuer(parcels.map((p) => p.id));
+
+  // b) Genau passender Garten (gibt es mehrere, der zuletzt geänderte).
+  if (genau.length > 0) {
+    aktualisiereFlurstuecke(genau[0], parcels); // Umriss, Lage auf neuem Stand
+    starteEditor(parcels, genau[0]);
+    return;
+  }
+
+  // c) Nur eine Überschneidung: nachfragen (zum ähnlichsten Garten).
+  if (teilweise.length > 0) {
+    const vorhanden = teilweise[0];
+    const antwort = await frage(frageZuUeberschneidung(vorhanden, parcels));
+    if (antwort === "umstellen") {
+      aktualisiereFlurstuecke(vorhanden, parcels); // speichert die neue Auswahl
+      starteEditor(parcels, vorhanden);
+    } else if (antwort === "oeffnen") {
+      await oeffneGarten(vorhanden.id); // mit SEINEN Flurstücken, wie aus der Liste
+    } else if (antwort === "neu") {
+      starteEditor(parcels, neuerGartenFuer(parcels));
+    }
+    // („Abbrechen“: nichts tun – das Bedienfeld bietet weiter „Garten erfassen“ an.)
+    return;
+  }
+
+  // d) Neuer Garten.
+  starteEditor(parcels, neuerGartenFuer(parcels));
+}
+
+// Ein neuer Garten für die gewählten Flurstücke, mit einem Namen, den noch
+// kein anderer trägt. Gespeichert wird er erst mit dem ersten Objekt – sonst
+// stünde jedes nur angesehene Grundstück in der Liste.
+function neuerGartenFuer(parcels) {
+  return neuerGarten(parcels, freierName(vorschlagName(parcels)));
+}
+
+// Liegt der Garten mit dieser Kennung gerade auf der Karte (im Editor – auch
+// nach „Schließen“ noch)? Dann dort aufräumen wie bei einer neuen Adresse.
+// Sonst bliebe sein alter Stand stehen und würde mit der nächsten Änderung
+// wieder gespeichert, obwohl der Garten gelöscht oder ersetzt wurde.
+// Rückgabe: true, wenn aufgeräumt wurde.
+function raeumeKarteAuf(id) {
+  const offen = editor.aktuellerGarten();
+  if (!offen || offen.id !== id) return false;
+  grundstueck.zeigeStart(); // leert auch den Editor
+  input.value = "";
+  return true;
 }
 
 // „Als Datei sichern“: Der Browser lädt den Garten als kleine Datei herunter.
@@ -725,7 +965,8 @@ function sichereAlsDatei(garten) {
   document.body.append(link);
   link.click();
   link.remove();
-  setTimeout(() => URL.revokeObjectURL(adresse), 1000);
+  // Die Datei erst später wieder freigeben (siehe SICHERUNG_FREIGABE_MS).
+  setTimeout(() => URL.revokeObjectURL(adresse), SICHERUNG_FREIGABE_MS);
 }
 
 function loescheNachRueckfrage(garten) {
@@ -734,6 +975,8 @@ function loescheNachRueckfrage(garten) {
   );
   if (!sicher) return;
   loescheGarten(garten.id);
+  // Lag genau dieser Garten gerade auf der Karte? Dann auch dort entfernen.
+  if (raeumeKarteAuf(garten.id)) showHint(START_HINWEIS);
   aktualisiereGaertenAnzeige();
 }
 
@@ -770,6 +1013,11 @@ gaertenDatei.addEventListener("change", async () => {
     return;
   }
 
+  // Jeder Garten trägt einen eigenen Namen – zwei gleich benannte wären in
+  // der Liste nicht zu unterscheiden.
+  garten.name = freierName(garten.name, garten.id);
+  const ausgelassen = garten.verworfen; // Objekte, die nicht lesbar waren
+
   if (!speichereGarten(garten)) {
     showHint(
       "Der Garten konnte nicht gespeichert werden – der Speicher des Browsers ist voll oder gesperrt.",
@@ -777,9 +1025,19 @@ gaertenDatei.addEventListener("change", async () => {
     );
     return;
   }
+  // Lag der ersetzte Garten gerade auf der Karte? Dann dort den alten Stand
+  // entfernen – er gilt nicht mehr.
+  raeumeKarteAuf(garten.id);
   gaertenOffen = true;
   clearResults(); // zeigt die Liste mit dem neuen Garten
-  showHint(`„${garten.name}“ wurde geladen. Tippe darauf, um weiterzuplanen.`);
+  showHint(
+    `„${garten.name}“ wurde geladen. Tippe darauf, um weiterzuplanen.` +
+      (ausgelassen === 1
+        ? " 1 Objekt der Datei war nicht lesbar und wurde ausgelassen."
+        : ausgelassen > 1
+          ? ` ${ausgelassen} Objekte der Datei waren nicht lesbar und wurden ausgelassen.`
+          : ""),
+  );
 });
 
 // Beim Start: Pläne aus der ersten Version übernehmen und die Liste zeigen.

@@ -61,8 +61,13 @@ auch Nicht-Programmierer:innen dem Projekt folgen können.
   öffnet den Garten direkt im Editor – ohne Adresssuche und Antippen; die
   Karte springt auf das Grundstück.
 - Wer nach der Grundstückswahl „Garten erfassen“ drückt, landet in seinem
-  vorhandenen Garten, sobald mindestens ein Flurstück übereinstimmt (auch
-  wenn diesmal ein Flurstück mehr oder weniger gewählt wurde).
+  vorhandenen Garten, wenn genau dieselben Flurstücke gewählt sind. Überschneidet
+  sich die Auswahl nur mit einem Garten (ein Flurstück mehr oder weniger),
+  fragt Grünriss nach: Garten auf die neue Auswahl umstellen, unverändert
+  öffnen oder einen neuen Garten anlegen. Die Flurstücke eines Gartens werden
+  nie stillschweigend geändert.
+- Jeder Garten trägt einen eigenen Namen; ist ein Name schon vergeben, wird
+  „(2)“, „(3)“ … angehängt.
 - „Als Datei sichern“ lädt den Garten als kleine Datei herunter (Sicherung,
   Mitnehmen auf ein anderes Gerät); „Garten aus Datei laden“ holt ihn zurück.
 - Was aus dem Speicher oder einer Datei kommt, wird geprüft: Ein beschädigter
@@ -104,6 +109,8 @@ src/editor.js         Schritt 3a: Objekte zeichnen/setzen, bemaßen, speichern
 src/bestand.js        Schritt 3b: amtliche Gebäude automatisch erfassen
 src/gaerten.js        „Meine Gärten“: Speicherformat, Prüfung, Sichern/Laden
                       als Datei, Übernahme alter Pläne (ohne Karte/Oberfläche)
+src/rueckfrage.js     Rückfrage-Fenster mit beschrifteten Knöpfen (wenn eine
+                      Entscheidung mehr als „Ja/Nein“ braucht)
 tests/                Automatische Tests (siehe Abschnitt „Tests“)
 src/style.css         Gestaltung (Design-Tokens, Suchleiste, Panel, Editor)
 public/inselspiel.html  Eigenständiges Insel-Aufbauspiel (Bonus): eine einzelne
