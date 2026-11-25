@@ -693,3 +693,29 @@ body {
 .rueckfrage__knoepfe .btn--ghost:not([data-wert="abbrechen"]):hover {
   background: var(--border);
 }
+/* Per Tastatur angesteuert: ein ruhiger grüner Rahmen statt des schwarzen
+   Standard-Rahmens. */
+.rueckfrage__knoepfe .btn:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+/* Auf niedrigen Bildschirmen (Handy im Querformat) wäre das Fenster zu hoch:
+   Dann stehen die Antworten zu zweit nebeneinander, und alles rückt enger. */
+@media (max-height: 480px) {
+  .rueckfrage {
+    width: min(560px, calc(100% - 32px));
+    padding: 14px 16px;
+  }
+  .rueckfrage__text {
+    margin-bottom: 10px;
+  }
+  .rueckfrage__knoepfe {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .rueckfrage__knoepfe .btn {
+    width: auto;
+    flex: 1 1 calc(50% - 4px);
+  }
+}

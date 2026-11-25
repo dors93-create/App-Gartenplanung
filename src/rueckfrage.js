@@ -77,9 +77,12 @@ export function frage({ titel, text, knoepfe }) {
     knopf.dataset.wert = k.wert;
     knopf.textContent = k.text;
     knopf.addEventListener("click", (e) => {
-      // Zu früh? (Zählung 0 = Tastatur – die ist nie ein Doppelklick.)
-      const zuFrueh = performance.now() - geoeffnetUm < KNOPF_SPERRE_MS;
-      if (zuFrueh && e.detail > 0) return;
+      // Zu früh? Es zählt, wann getippt wurde – nicht, wann der Browser den
+      // Tipp abarbeitet (das kann sich verzögern, wenn er gerade zeichnet).
+      // (Zählung 0 = Tastatur – die ist nie ein Doppelklick.)
+      const jetzt = performance.now();
+      const getippt = e.timeStamp > 0 ? Math.min(e.timeStamp, jetzt) : jetzt;
+      if (e.detail > 0 && getippt - geoeffnetUm < KNOPF_SPERRE_MS) return;
       schliesse(k.wert === "abbrechen" ? null : k.wert);
     });
     knopfFeld.append(knopf);

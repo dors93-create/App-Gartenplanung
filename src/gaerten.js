@@ -41,6 +41,7 @@ const BAUM_RADIUS_ALT = 3;
 // liegt, ist ein Fehler in den Daten und wird nicht übernommen.
 const RADIUS_MAX = 500; // Meter – größer ist kein Baum und kein Garten
 const KENNZEICHEN_MAX = 100; // Zeichen – ein Flurstückskennzeichen hat 20
+const NAME_MAX = 80; // Zeichen – so lang darf der Name eines Gartens sein
 
 // -------------------------------------------------------------------------
 // Zugriff auf den Speicher des Browsers. Er kann fehlen oder voll sein
@@ -111,12 +112,18 @@ function bereinigeRing(r) {
   if (erster[0] !== letzter[0] || erster[1] !== letzter[1]) {
     ring.push([erster[0], erster[1]]);
   }
-  return ring.length >= 4 ? ring : null;
+  // Eine Fläche braucht mindestens drei VERSCHIEDENE Ecken. (Lauter gleiche
+  // Punkte ergäben ein Objekt ohne Fläche, das sich im Editor nicht einmal
+  // antippen – also auch nicht löschen – ließe.)
+  const verschiedene = new Set(ring.map((p) => p[0] + "," + p[1]));
+  return ring.length >= 4 && verschiedene.size >= 3 ? ring : null;
 }
 
 // Umriss eines Flurstücks in Metern (EPSG:25832). Zur Sicherheit nur Werte
 // annehmen, die in und um NRW vorkommen können – alles andere ist ein Fehler
 // in der Datei, und der Umriss wird dann beim Öffnen neu vom Kataster geholt.
+// Dasselbe gilt für einen offenen Umriss (Schlusspunkt fehlt): Fläche und
+// Seitenlängen würden aus ihm falsch gerechnet.
 const istPunkt25832 = (p) =>
   Array.isArray(p) &&
   p.length >= 2 &&
@@ -127,7 +134,11 @@ const istPunkt25832 = (p) =>
   p[1] > 5400000 &&
   p[1] < 5900000;
 const istRing25832 = (r) =>
-  Array.isArray(r) && r.length >= 4 && r.every(istPunkt25832);
+  Array.isArray(r) &&
+  r.length >= 4 &&
+  r.every(istPunkt25832) &&
+  r[0][0] === r[r.length - 1][0] &&
+  r[0][1] === r[r.length - 1][1];
 
 // Ein einzelnes Objekt prüfen. Rückgabe: das (ggf. umgewandelte) Objekt
 // oder null, wenn es nicht zu gebrauchen ist.
@@ -221,15 +232,22 @@ export function bereinigeGarten(daten) {
   if (daten.format !== FORMAT_NAME) return null;
   if (!istZahl(daten.version) || daten.version > FORMAT_VERSION) return null;
 
+  // Jedes Flurstück zählt nur einmal – doppelt genannt, stimmte die Fläche nicht.
+  const gesehen = new Set();
   const flurstuecke = (Array.isArray(daten.flurstuecke) ? daten.flurstuecke : [])
     .map(bereinigeFlurstueck)
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((f) => {
+      if (gesehen.has(f.id)) return false;
+      gesehen.add(f.id);
+      return true;
+    });
   if (flurstuecke.length === 0) return null; // ohne Grundstück kein Garten
 
   const { objekte, verworfen } = pruefeObjekte(daten.objekte);
   const name =
     typeof daten.name === "string" && daten.name.trim()
-      ? daten.name.trim().slice(0, 80)
+      ? daten.name.trim().slice(0, NAME_MAX)
       : "Mein Garten";
 
   return {
@@ -296,7 +314,7 @@ export function neuerGarten(flurstuecke, name) {
     format: FORMAT_NAME,
     version: FORMAT_VERSION,
     id: "g-" + zufall(),
-    name: (name || "").trim().slice(0, 80) || "Mein Garten",
+    name: (name || "").trim().slice(0, NAME_MAX) || "Mein Garten",
     geaendert: Date.now(),
     flurstuecke: flurstuecke.map(alsGespeichertesFlurstueck),
     objekte: [],
@@ -352,16 +370,26 @@ export function sucheGaertenFuer(flurstueckIds) {
 // Ein Name, den noch kein anderer Garten trägt: Ist der Wunschname vergeben,
 // wird „ (2)“, „ (3)“ … angehängt. „ausserId“ nennt den Garten, der den Namen
 // selbst tragen darf (beim Umbenennen).
+//
+// Ein Name ist höchstens NAME_MAX Zeichen lang; was darüber hinausgeht, fiele
+// beim Speichern weg – auch ein angehängtes „ (2)“. Darum wird der Wunsch
+// zuerst so gekürzt wie beim Speichern und für die Nummer bei Bedarf noch
+// etwas mehr.
 export function freierName(wunsch, ausserId) {
   const vergeben = new Set(
     alleGaerten()
       .filter((garten) => garten.id !== ausserId)
       .map((garten) => garten.name),
   );
-  if (!vergeben.has(wunsch)) return wunsch;
+  const name = wunsch.trim().slice(0, NAME_MAX);
+  if (!vergeben.has(name)) return name;
+  const mitNummer = (nummer) => {
+    const zusatz = ` (${nummer})`;
+    return name.slice(0, NAME_MAX - zusatz.length).trimEnd() + zusatz;
+  };
   let nummer = 2;
-  while (vergeben.has(`${wunsch} (${nummer})`)) nummer++;
-  return `${wunsch} (${nummer})`;
+  while (vergeben.has(mitNummer(nummer))) nummer++;
+  return mitNummer(nummer);
 }
 
 // -------------------------------------------------------------------------
@@ -490,10 +518,12 @@ export function uebernehmeAltePlaene() {
             format: FORMAT_NAME,
             version: FORMAT_VERSION,
             id,
-            name:
+            // (freierName: Dieselbe Flurstücksnummer gibt es in jeder Flur.)
+            name: freierName(
               "Flurstück " +
-              flurstuecksNummer(kennzeichen[0]) +
-              (kennzeichen.length > 1 ? " u. a." : ""),
+                flurstuecksNummer(kennzeichen[0]) +
+                (kennzeichen.length > 1 ? " u. a." : ""),
+            ),
             geaendert: Date.now(),
             flurstuecke: kennzeichen.map((k) => bereinigeFlurstueck({ id: k })),
             objekte,

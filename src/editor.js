@@ -187,6 +187,7 @@ export function initEditor(map, optionen = {}) {
   let speicherFehler = false; // konnte dieser Garten zuletzt nicht gespeichert werden?
   let sperreBis = -Infinity; // bis zu diesem Zeitpunkt zählen Klicks noch nicht
   let sperreTimer = null; // schaltet danach den Doppelklick-Zoom wieder ein
+  let sperreNr = 0; // laufende Nummer der Start-Sperre (ältere gelten nicht mehr)
   let chipEls = [];
   let parcelGeom = null; // Grundstücksfläche (für „Restfläche als Rasen“)
   let parcelsData = []; // die gewählten Flurstücke (für die Auto-Erfassung)
@@ -396,6 +397,20 @@ export function initEditor(map, optionen = {}) {
 
   const neueId = () =>
     Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+
+  // Fällt dieser Klick oder Tipp noch in die Start-Sperre (START_SPERRE_MS)?
+  // Es zählt der Zeitpunkt, zu dem getippt wurde – nicht der, zu dem der
+  // Browser den Tipp abarbeitet: Solange die Karte den eben geöffneten Garten
+  // zeichnet, kommt ein Tipp leicht eine halbe Sekunde verspätet hier an.
+  // (Sehr alte Browser zählen den Zeitstempel anders; dann gilt „jetzt“.)
+  function inStartSperre(ereignis) {
+    const jetzt = performance.now();
+    const getippt =
+      ereignis && ereignis.timeStamp > 0
+        ? Math.min(ereignis.timeStamp, jetzt)
+        : jetzt;
+    return getippt < sperreBis;
+  }
 
   // Nach dem Ziehen: speichern UND Bemaßung neu setzen.
   function gespeichertMass() {
@@ -665,7 +680,7 @@ export function initEditor(map, optionen = {}) {
   map.on("click", (e) => {
     if (!aktiv) return;
     // Gerade erst geöffnet? Dann ist das der zweite Klick eines Doppelklicks.
-    if (performance.now() < sperreBis) return;
+    if (inStartSperre(e.originalEvent)) return;
 
     // Ein Tipp auf einen Griff (ohne zu ziehen) gilt dem Griff, nicht der
     // Karte – sonst würde er die Auswahl aufheben oder ein anderes Objekt wählen.
@@ -845,7 +860,7 @@ export function initEditor(map, optionen = {}) {
   toolbar.addEventListener(
     "click",
     (e) => {
-      if (e.detail > 0 && performance.now() < sperreBis) {
+      if (e.detail > 0 && inStartSperre(e)) {
         e.stopPropagation();
         e.preventDefault();
       }
@@ -859,6 +874,7 @@ export function initEditor(map, optionen = {}) {
   function beenden() {
     aktiv = false;
     // Die Start-Sperre ist damit erledigt; der Doppelklick-Zoom gilt wieder.
+    sperreNr++;
     clearTimeout(sperreTimer);
     sperreBis = -Infinity;
     map.doubleClickZoom.enable();
@@ -940,9 +956,19 @@ export function initEditor(map, optionen = {}) {
       sperreBis = performance.now() + START_SPERRE_MS;
       map.doubleClickZoom.disable();
       clearTimeout(sperreTimer);
-      sperreTimer = setTimeout(() => {
-        if (aktiv) map.doubleClickZoom.enable();
-      }, START_SPERRE_MS);
+      // Den Zoom erst wieder einschalten, wenn die Karte den Garten gezeichnet
+      // hat (zwei Bilder später) und danach die Sperrzeit vergangen ist.
+      // Solange sie zeichnet, kommt ein Doppeltipp verspätet an – er soll die
+      // Karte dann trotzdem nicht mehr zoomen.
+      const nr = ++sperreNr;
+      const wiederEin = () => {
+        if (aktiv && nr === sperreNr) map.doubleClickZoom.enable();
+      };
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          if (nr === sperreNr) sperreTimer = setTimeout(wiederEin, START_SPERRE_MS);
+        }),
+      );
     },
 
     // Den Editor schließen – dasselbe wie der Knopf „Schließen“.

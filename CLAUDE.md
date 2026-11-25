@@ -163,7 +163,7 @@ Vor jeder Veröffentlichung laufen die automatischen Tests:
 
 ```bash
 npm test               # Speicher-Baustein (gaerten.js), ohne Browser, Sekunden
-npm run test:browser   # alle Browser-Tests, rund 15 Minuten
+npm run test:browser   # alle Browser-Tests, rund 7 Minuten
 npm run test:browser -- gaerten   # nur einen davon (ablauf, feinheiten, gaerten)
 ```
 
@@ -176,6 +176,10 @@ npm run test:browser -- gaerten   # nur einen davon (ablauf, feinheiten, gaerten
   werden in den Tests nicht belastet.
 - Neue Funktionen bekommen eigene Prüfungen; ein Fehler, der einmal gefunden
   wurde, bekommt eine Prüfung, damit er nicht zurückkommt.
+- Ein Seitenfehler oder ein unerwartetes Browser-Fenster lässt den Test
+  scheitern – auch wenn sonst alles stimmt.
+- Der Garten-Test (`tests/gaerten.test.cjs`) besteht aus Teilen mit je einer
+  frischen Seite; jede Kataster-Abfrage geht dabei nur einmal hinaus.
 - Bildschirmfotos der Tests landen in `tests/ausgabe/` (nicht im Git).
 
 ## Lokal starten

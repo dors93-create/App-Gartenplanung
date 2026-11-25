@@ -44,14 +44,28 @@ const fuehreAus = (kommando, argumente) =>
     process.exit(1);
   }
 
-  const server = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], { cwd: WURZEL, stdio: 'ignore' });
+  // Läuft auf dem Port schon etwas (z. B. der Server eines abgebrochenen
+  // Laufs)? Dann wäre nicht sicher, welcher Stand der App geprüft wird.
+  if (await erreichbar()) {
+    console.error(`Auf Port ${PORT} läuft schon ein Server. Bitte erst beenden – die Tests starten ihren eigenen.`);
+    process.exit(1);
+  }
+
+  // Vite direkt mit Node starten (nicht über „npx“): Nur so trifft
+  // server.kill() wirklich den Server und nicht bloß ein Hilfsprogramm davor –
+  // sonst liefe er nach den Tests unbemerkt weiter.
+  const vite = path.join(WURZEL, 'node_modules', 'vite', 'bin', 'vite.js');
+  const server = spawn(process.execPath, [vite, '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], { cwd: WURZEL, stdio: 'ignore' });
+  // Den Server in jedem Fall wieder beenden – auch bei einem Abbruch mit Strg + C.
+  process.on('exit', () => server.kill());
+  for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => process.exit(1));
+
   let bereit = false;
   for (let versuch = 0; versuch < 40 && !bereit; versuch++) {
     await new Promise((weiter) => setTimeout(weiter, 500));
     bereit = await erreichbar();
   }
   if (!bereit) {
-    server.kill();
     console.error('Der Entwicklungsserver ist nicht gestartet.');
     process.exit(1);
   }
@@ -63,7 +77,6 @@ const fuehreAus = (kommando, argumente) =>
     if (code !== 0) fehlgeschlagen.push(test);
   }
 
-  server.kill();
   console.log(
     fehlgeschlagen.length
       ? `\nFEHLGESCHLAGEN: ${fehlgeschlagen.join(', ')}`

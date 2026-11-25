@@ -29,9 +29,16 @@ const warte = (ms) => new Promise((r) => setTimeout(r, ms));
 (async () => {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  // Fehler der Seite: Am Ende zählt jeder als gescheiterte Prüfung. Dazu
+  // gehören auch Fehlermeldungen in der Konsole – außer denen, die zum
+  // Testaufbau gehören (das Luftbild ist blockiert, die Karte meldet deshalb
+  // jede Kachel als nicht ladbar) – und jedes Fenster des Browsers
+  // („OK / Abbrechen“): Dieser Test erwartet keines.
   const fehler = [];
-  page.on('pageerror', (e) => fehler.push('pageerror: ' + e.message));
-  page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource|net::ERR/.test(m.text())) fehler.push('console: ' + m.text().slice(0, 200)); });
+  const harmlos = (t) => /Failed to load resource|net::ERR_/.test(t) || (/Failed to fetch/.test(t) && /maplibre/.test(t));
+  page.on('pageerror', (e) => fehler.push('Seitenfehler: ' + e.message));
+  page.on('console', (m) => { if (m.type() === 'error' && !harmlos(m.text())) fehler.push('Konsole: ' + m.text().split('\n')[0].slice(0, 200)); });
+  page.on('dialog', async (d) => { fehler.push(`Unerwartetes Browser-Fenster (${d.type()}): ${d.message()}`); try { await d.dismiss(); } catch (e) { /* Seite schon zu */ } });
   const wfs = [];
   page.on('request', (r) => { if (r.url().includes('wfs.nrw.de')) wfs.push(r.url()); });
   const nominatim = [];
@@ -105,14 +112,14 @@ const warte = (ms) => new Promise((r) => setTimeout(r, ms));
   // ---- 4. Grundstückswahl: verspätete Antwort nach „Abbrechen“ ----
   await page.click('#gp-aktion');
   await page.route('**/www.wfs.nrw.de/**', async (r) => { await warte(2500); r.continue(); });
-  await page.mouse.click(640, 310); await page.waitForTimeout(400);
+  await page.mouse.click(640, 310); await page.waitForTimeout(600);
   await page.click('#gp-zurueck'); // Abbrechen, bevor die Antwort da ist
   await page.waitForTimeout(3500);
   pruefe('4 Verspätete Antwort nach „Abbrechen“ wird verworfen', /Wähle dein Grundstück/.test(await text('#gp-text')) && (await text('#gp-aktion')) === 'Grundstück auswählen', await text('#gp-text'));
   await page.unroute('**/www.wfs.nrw.de/**');
 
   // ---- 4. Doppelklick wählt genau einmal ----
-  await page.click('#gp-aktion');
+  await page.click('#gp-aktion'); await page.waitForTimeout(600);
   const vorher = wfs.length;
   await page.mouse.dblclick(640, 310); await page.waitForTimeout(4000);
   pruefe('4 Doppelklick: Flurstück bleibt gewählt, nur eine Abfrage', /1 Flurstück gewählt/.test(await text('#gp-text')) && wfs.length - vorher === 1, `${await text('#gp-text')} | Abfragen: ${wfs.length - vorher}`);
@@ -188,11 +195,12 @@ const warte = (ms) => new Promise((r) => setTimeout(r, ms));
   // Zurück zur ersten Adresse: der gespeicherte Plan ist noch da
   await page.fill('#search-input', 'Mozartstraße'); await page.waitForSelector('.results__item'); await page.click('.results__item');
   await page.waitForTimeout(7000);
-  await page.click('#gp-aktion'); await page.mouse.click(640, 310); await page.waitForTimeout(3500);
-  await page.click('#gp-aktion'); await page.waitForTimeout(500); await page.click('#gp-aktion'); await page.waitForTimeout(800);
+  await page.click('#gp-aktion'); await page.waitForTimeout(600); await page.mouse.click(640, 310); await page.waitForTimeout(3500);
+  await page.click('#gp-aktion'); await page.waitForTimeout(700); await page.click('#gp-aktion'); await page.waitForTimeout(800);
   pruefe('2 Gespeicherter Plan erscheint beim erneuten Öffnen wieder', (await anzahl('.masslabel')) > 8 && !(await sichtbar('#ed-auto')), 'Etiketten: ' + (await anzahl('.masslabel')));
 
-  console.log('\nSeitenfehler: ' + (fehler.length ? fehler.join(' | ') : 'keine'));
+  await page.waitForTimeout(500); // auch späte Fehler noch mitnehmen
+  pruefe('Keine Fehler auf der Seite, kein unerwartetes Browser-Fenster', fehler.length === 0, fehler.join(' | '));
   const bad = ergebnisse.filter((e) => !e.ok);
   console.log(`\nERGEBNIS: ${ergebnisse.length - bad.length} von ${ergebnisse.length} Prüfungen bestanden` + (bad.length ? ' – FEHLER: ' + bad.map((b) => b.name).join(' ; ') : ''));
   await browser.close();

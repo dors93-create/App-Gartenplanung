@@ -24,6 +24,22 @@ const ergebnisse = [];
 const pruefe = (name, ok, detail = '') => { ergebnisse.push({ name, ok }); console.log((ok ? 'OK    ' : 'FEHLER') + ' ' + name + (detail ? '  -> ' + detail : '')); };
 const warte = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Fehler der Seite sammeln: Am Ende zählt jeder als gescheiterte Prüfung.
+// Dazu gehören auch Fehlermeldungen in der Konsole – außer denen, die zum
+// Testaufbau gehören (das Luftbild ist blockiert, die Karte meldet deshalb
+// jede Kachel als nicht ladbar) und denen, die ein Abschnitt absichtlich
+// auslöst (Muster in „erlaubt“) – und jedes Fenster des Browsers
+// („OK / Abbrechen“): Dieser Test erwartet keines.
+function sammleFehler(page) {
+  const fehler = [];
+  fehler.erlaubt = [];
+  const harmlos = (t) => /Failed to load resource|net::ERR_/.test(t) || (/Failed to fetch/.test(t) && /maplibre/.test(t));
+  page.on('pageerror', (e) => fehler.push('Seitenfehler: ' + e.message));
+  page.on('console', (m) => { if (m.type() === 'error' && !harmlos(m.text()) && !fehler.erlaubt.some((muster) => muster.test(m.text()))) fehler.push('Konsole: ' + m.text().split('\n')[0].slice(0, 200)); });
+  page.on('dialog', async (d) => { fehler.push(`Unerwartetes Browser-Fenster (${d.type()}): ${d.message()}`); try { await d.dismiss(); } catch (e) { /* Seite schon zu */ } });
+  return fehler;
+}
+
 async function suchAttrappe(page, protokoll) {
   await page.route('**/nominatim.openstreetmap.org/**', async (r) => {
     const q = new URL(r.request().url()).searchParams.get('q');
@@ -49,8 +65,7 @@ async function suchAttrappe(page, protokoll) {
 
   // =================== Desktop ===================
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-  const fehler = [];
-  page.on('pageerror', (e) => fehler.push('pageerror: ' + e.message));
+  const fehler = sammleFehler(page);
   await page.route('**/www.wms.nrw.de/**', (r) => r.abort());
   const fragen = []; await suchAttrappe(page, fragen);
   const text = (sel) => page.evaluate((s) => (document.querySelector(s) || {}).innerText || '', sel);
@@ -90,11 +105,13 @@ async function suchAttrappe(page, protokoll) {
   pruefe('Suche: zweites Enter übernimmt', (await page.inputValue('#search-input')) === 'Langsamweg' && (await sichtbar('#gp-panel')));
   // Hängende Suche: nach dem Zeitlimit Meldung, danach geht Enter wieder
   n0 = fragen.length;
+  fehler.erlaubt = [/AbortError/]; // das Zeitlimit bricht die Suche ab – die App schreibt das in die Konsole
   await page.fill('#search-input', 'Haengt Test'); await page.waitForTimeout(700);
   await page.press('#search-input', 'Enter'); await page.waitForTimeout(300);
   pruefe('Suche: hängende Suche – Enter fragt (noch) nicht doppelt, Spinner läuft', fragen.length - n0 === 1 && (await sichtbar('#search-spinner')));
   await page.waitForTimeout(15200);
   pruefe('Suche: nach 15 s endet die hängende Suche mit Meldung', !(await sichtbar('#search-spinner')) && /nicht erreichbar/.test(await text('#search-hint')), await text('#search-hint'));
+  fehler.erlaubt = [];
   await page.press('#search-input', 'Enter'); await page.waitForTimeout(300);
   pruefe('Suche: danach startet Enter die Suche wieder', fragen.length - n0 === 2, `Anfragen ${fragen.length - n0}`);
 
@@ -159,12 +176,14 @@ async function suchAttrappe(page, protokoll) {
   await page.click('#gp-zurueck'); await page.waitForTimeout(700); // Neu beginnen
   await page.click('#gp-aktion'); await page.waitForTimeout(600); // Grundstück auswählen
   haengen = true;
+  fehler.erlaubt = [/AbortError/]; // auch hier: Abbruch durch das Zeitlimit, von der App gemeldet
   await page.mouse.click(640, 310); await page.waitForTimeout(1500);
   haengen = false; verzoegerung = 0;
   await page.mouse.click(700, 420); await page.waitForTimeout(2500);
   pruefe('Wahl: trotz hängender Abfrage geht ein weiterer Tipp (Such-Hinweis bleibt)', /Suche Flurstück/.test(await text('#gp-text')) && (await sichtbar('#gp-aktion')), await text('#gp-text'));
   await page.waitForTimeout(13500);
   pruefe('Wahl: nach dem Zeitlimit endet der Such-Hinweis', !/Suche Flurstück/.test(await text('#gp-text')), await text('#gp-text'));
+  fehler.erlaubt = [];
   await page.unroute('**/www.wfs.nrw.de/**');
 
   // ---- Editor: späte Antwort von „Automatisch erfassen“ ----
@@ -172,7 +191,7 @@ async function suchAttrappe(page, protokoll) {
   await page.click('#gp-aktion'); await page.waitForTimeout(600); await page.mouse.click(640, 310); await page.waitForTimeout(3500);
   await page.click('#gp-aktion'); await page.waitForTimeout(700); await page.click('#gp-aktion'); await page.waitForTimeout(600);
   await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('gruenriss:garten:')) localStorage.removeItem(k); });
-  await page.click('#ed-close'); await page.waitForTimeout(300); await page.click('#gp-aktion'); await page.waitForTimeout(500);
+  await page.click('#ed-close'); await page.waitForTimeout(300); await page.click('#gp-aktion'); await page.waitForTimeout(700);
   await page.route('**/www.wfs.nrw.de/**', async (r) => { await warte(3000); try { await r.continue(); } catch (e) {} });
   await page.click('#ed-auto'); await page.waitForTimeout(300);
   await page.click('#ed-close'); await page.waitForTimeout(300);
@@ -185,7 +204,7 @@ async function suchAttrappe(page, protokoll) {
   for (const [w, h, klick] of [[1280, 560, [640, 200]], [560, 700, [280, 260]]]) {
     await page.setViewportSize({ width: w, height: h });
     await page.fill('#search-input', 'Mozartstraße'); await page.waitForSelector('.results__item'); await page.click('.results__item'); await page.waitForTimeout(6500);
-    await page.click('#gp-aktion'); await page.waitForTimeout(500); await page.mouse.click(klick[0], klick[1]); await page.waitForTimeout(3500);
+    await page.click('#gp-aktion'); await page.waitForTimeout(600); await page.mouse.click(klick[0], klick[1]); await page.waitForTimeout(3500);
     if (!/Flurstück gewählt/.test(await text('#gp-text'))) { await page.waitForTimeout(700); await page.mouse.click(klick[0], klick[1] + 40); await page.waitForTimeout(3500); }
     await page.click('#gp-aktion'); await page.waitForTimeout(700); await page.click('#gp-aktion'); await page.waitForTimeout(600);
     const chips = await page.evaluate(() => { const box = document.getElementById('ed-toolbar').getBoundingClientRect(); return [...document.querySelectorAll('.chip')].filter((c) => { const r = c.getBoundingClientRect(); return r.width > 0 && r.left >= box.left && r.right <= box.right; }).length; });
@@ -193,13 +212,14 @@ async function suchAttrappe(page, protokoll) {
     await page.screenshot({ path: `n2-fenster-${w}x${h}.png` });
     await page.click('#ed-close'); await page.waitForTimeout(300);
   }
-  console.log('Seitenfehler Desktop: ' + (fehler.length ? fehler.join(' | ') : 'keine'));
+  await page.waitForTimeout(500); // auch späte Fehler noch mitnehmen
+  pruefe('Desktop: keine Fehler auf der Seite, kein unerwartetes Browser-Fenster', fehler.length === 0, fehler.join(' | '));
   await page.close();
 
   // =================== Handy ===================
   const ctx = await browser.newContext({ ...devices['iPhone 13'] });
   const p = await ctx.newPage();
-  const fehlerM = []; p.on('pageerror', (e) => fehlerM.push(e.message));
+  const fehlerM = sammleFehler(p);
   await p.route('**/www.wms.nrw.de/**', (r) => r.abort());
   await suchAttrappe(p, []);
   const vp = p.viewportSize();
@@ -246,7 +266,8 @@ async function suchAttrappe(page, protokoll) {
   await p.setViewportSize({ width: 390, height: 664 }); await p.waitForTimeout(900);
   const lage = await p.evaluate(() => { const c = document.getElementById('ed-chips').getBoundingClientRect(); const r = document.querySelector('.chip.is-active').getBoundingClientRect(); return { chipLinks: Math.round(r.left), chipRechts: Math.round(r.right), reiheLinks: Math.round(c.left), reiheRechts: Math.round(c.right) }; });
   pruefe('Handy: nach dem Drehen liegt der gewählte Typ im sichtbaren Teil', lage.chipLinks >= lage.reiheLinks && lage.chipRechts <= lage.reiheRechts, JSON.stringify(lage));
-  console.log('Seitenfehler Handy: ' + (fehlerM.length ? fehlerM.join(' | ') : 'keine'));
+  await p.waitForTimeout(500); // auch späte Fehler noch mitnehmen
+  pruefe('Handy: keine Fehler auf der Seite, kein unerwartetes Browser-Fenster', fehlerM.length === 0, fehlerM.join(' | '));
 
   const bad = ergebnisse.filter((e) => !e.ok);
   console.log(`\nERGEBNIS: ${ergebnisse.length - bad.length} von ${ergebnisse.length} Prüfungen bestanden` + (bad.length ? ' – FEHLER: ' + bad.map((b) => b.name).join(' ; ') : ''));
