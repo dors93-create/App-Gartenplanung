@@ -19,7 +19,10 @@ const path = require('path');
 const WURZEL = path.join(__dirname, '..');
 const PORT = 5199;
 const ADRESSE = `http://127.0.0.1:${PORT}/`;
-const TESTS = ['ablauf', 'feinheiten', 'gaerten'];
+// Die ersten drei prüfen den Gartenplaner, die übrigen das Inselspiel
+// (public/inselspiel.html). Die Spiel-Tests brauchen kein Netz: Die
+// Firebase-Datenbank wird nachgebaut (tests/firebase-nachbau.cjs).
+const TESTS = ['ablauf', 'feinheiten', 'gaerten', 'inselspiel', 'zuzweit', 'zuzweit-verbindung'];
 
 // Antwortet der Server schon?
 const erreichbar = () =>

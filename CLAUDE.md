@@ -116,7 +116,9 @@ src/style.css         Gestaltung (Design-Tokens, Suchleiste, Panel, Editor)
 public/inselspiel.html  Eigenständiges Insel-Aufbauspiel (Bonus): eine einzelne
                         Datei, läuft auch ohne Server; wird mit veröffentlicht.
                         Lässt sich als App auf den Homescreen laden (PWA) und
-                        läuft dann im Vollbild, auch ohne Internet.
+                        läuft dann im Vollbild, auch ohne Internet. Ziel: als
+                        Erste:r 1500 Siedler. Beim ersten Start erscheint eine
+                        kurze, überspringbare Anleitung (später über ❓).
 public/manifest.webmanifest
                         App-Beschreibung für die Installation (Name, Icons,
                         Startseite, Vollbildmodus)
@@ -163,8 +165,10 @@ Vor jeder Veröffentlichung laufen die automatischen Tests:
 
 ```bash
 npm test               # Speicher-Baustein (gaerten.js), ohne Browser, Sekunden
-npm run test:browser   # alle Browser-Tests, rund 7 Minuten
-npm run test:browser -- gaerten   # nur einen davon (ablauf, feinheiten, gaerten)
+npm run test:browser   # alle Browser-Tests, rund 11 Minuten
+npm run test:browser -- gaerten   # nur einen davon: ablauf, feinheiten, gaerten
+                                  # (Gartenplaner) oder inselspiel, zuzweit,
+                                  # zuzweit-verbindung (Inselspiel)
 ```
 
 - Die Browser-Tests (`tests/*.test.cjs`) bedienen die App wie ein Mensch – am
@@ -180,6 +184,14 @@ npm run test:browser -- gaerten   # nur einen davon (ablauf, feinheiten, gaerten
   scheitern – auch wenn sonst alles stimmt.
 - Der Garten-Test (`tests/gaerten.test.cjs`) besteht aus Teilen mit je einer
   frischen Seite; jede Kataster-Abfrage geht dabei nur einmal hinaus.
+- Das Inselspiel hat drei eigene Browser-Tests im Handy-Format: `inselspiel`
+  (kurze Anleitung, Siegziel, Spielstände), `zuzweit` (gemeinsamer Start, Tempo
+  und Pause vom Gastgeber, ruhige Fahrt beim Gast, kein Spielstand geht
+  verloren) und `zuzweit-verbindung` (Eröffnen, Beitreten, Meldungen bei
+  fehlender Freigabe oder Funkstille). Sie spielen zu zweit in zwei Fenstern
+  über die echten Knöpfe. Die Firebase-Datenbank ist dabei nachgebaut
+  (`tests/firebase-nachbau.cjs`): Es geht nichts ins Netz und nichts in die
+  echte Datenbank – die echte Firebase-Strecke prüfen sie also nicht.
 - Bildschirmfotos der Tests landen in `tests/ausgabe/` (nicht im Git).
 
 ## Lokal starten
