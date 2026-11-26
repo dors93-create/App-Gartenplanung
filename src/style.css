@@ -40,6 +40,13 @@
   box-sizing: border-box;
 }
 
+/* Das HTML-Attribut „hidden“ blendet ein Element aus. Eigene display-Angaben
+   (z. B. „display: flex“ beim Bedienfeld) würden das sonst überstimmen –
+   darum legen wir es hier ausdrücklich und mit Vorrang fest. */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -193,6 +200,140 @@ body {
   margin-top: 2px;
 }
 
+/* Quellenangabe unter den Treffern (Adressdaten von OpenStreetMap).
+   Sie bleibt am unteren Rand der Liste stehen, auch wenn die Treffer bei
+   voller Liste scrollen (bottom: -6px gleicht den Innenabstand der Liste aus). */
+.results__quelle {
+  position: sticky;
+  bottom: -6px;
+  background: var(--surface);
+  padding: 6px 12px 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+}
+.results__quelle a {
+  color: inherit;
+}
+
+/* 5b. „Meine Gärten“ (gespeicherte Pläne unter der Suchleiste) ------------ */
+/* Kleiner Knopf unter dem Hinweis, der die Liste einblendet */
+.search__link {
+  display: block;
+  margin: 8px auto 0;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent-strong);
+  background: rgba(255, 255, 255, 0.92);
+  border: none;
+  border-radius: 999px;
+  padding: 7px 14px;
+  box-shadow: var(--shadow-soft);
+  cursor: pointer;
+}
+
+.gaerten {
+  margin: 8px 0 0;
+  padding: 6px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+}
+
+.gaerten__kopf {
+  padding: 8px 12px 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.gaerten__liste {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  /* Höchstens so hoch, dass die Liste samt Suchleiste auf den Bildschirm
+     passt (wichtig beim Handy im Querformat) – sonst rollte die ganze Seite
+     mitsamt der Karte. Die Liste selbst lässt sich dann rollen. */
+  max-height: min(290px, calc(100vh - 230px));
+  max-height: min(290px, calc(100dvh - 230px));
+  overflow-y: auto;
+}
+
+/* Ein Garten: oben der große Knopf zum Weiterplanen, darunter klein die
+   Aktionen „Weiter planen“, „Als Datei sichern“ und „Löschen“. */
+.garten + .garten {
+  border-top: 1px solid var(--border);
+}
+
+.garten__oeffnen {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px 6px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.garten__oeffnen:hover {
+  background: var(--bg);
+}
+
+.garten__name {
+  font-size: 15px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.garten__info {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.garten__aktionen {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 0 4px 6px;
+}
+
+/* kleine Text-Knöpfe in der Gartenliste */
+.garten__aktion {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.garten__aktion:hover {
+  background: var(--bg);
+}
+.garten__aktion--weiter {
+  margin-right: auto; /* links, die übrigen Aktionen rechts */
+  color: var(--accent-strong);
+  font-weight: 500;
+}
+.garten__aktion--loeschen {
+  color: #dc2626;
+}
+
+.gaerten__fuss {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 0 0;
+  border-top: 1px solid var(--border);
+}
+
 /* 6. Marker (Stecknadel) ------------------------------------------------- */
 .marker {
   width: 22px;
@@ -334,12 +475,65 @@ body {
   padding: 12px;
 }
 
-/* Waagerecht scrollbare Reihe der Objekt-Typen */
+/* Reihe der Objekt-Typen.
+   Handy: eine waagerecht wischbare Reihe. Wo es noch weitergeht, liegt am
+   Rand ein kleiner Pfeil auf weichem weißem Verlauf (‹ links, › rechts) – die
+   Klassen „hat-mehr-…“ setzt editor.js je nach Wischposition.
+   Große Bildschirme und Geräte mit Maus: siehe weiter unten, dort bricht die
+   Reihe um und zeigt alle Typen auf einmal. */
 .toolbar__chips {
   display: flex;
   gap: 8px;
   overflow-x: auto;
   padding-bottom: 4px;
+}
+
+/* Die beiden Rand-Pfeile „kleben“ am linken bzw. rechten Rand der Reihe
+   (position: sticky) und brauchen selbst keinen Platz: Der negative Abstand
+   hebt ihre Breite (40 px) samt Lücke (8 px) wieder auf. Sie sind nur gemalt
+   (pointer-events: none); ein Tipp in ihren Bereich blättert die Reihe weiter
+   – das erledigt editor.js. */
+.toolbar__chips::before,
+.toolbar__chips::after {
+  display: none; /* nur sichtbar, wenn es auf dieser Seite weitergeht */
+  position: sticky;
+  z-index: 1;
+  flex: none;
+  width: 40px;
+  align-items: center;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.toolbar__chips.hat-mehr-links::before {
+  content: "‹";
+  display: flex;
+  left: 0;
+  margin-right: -48px;
+  justify-content: flex-start;
+  background: linear-gradient(to left, rgba(255, 255, 255, 0), var(--surface) 55%);
+}
+.toolbar__chips.hat-mehr-rechts::after {
+  content: "›";
+  display: flex;
+  right: 0;
+  margin-left: -48px;
+  justify-content: flex-end;
+  background: linear-gradient(to right, rgba(255, 255, 255, 0), var(--surface) 55%);
+}
+
+/* Große Bildschirme (Tablet hochkant, Desktop) und alle Geräte mit Maus: Die
+   Chips brechen in mehrere Zeilen um, alle Typen sind auf einmal sichtbar
+   (mit dem Mausrad ließe sich die Reihe ohnehin nicht blättern). Nur am
+   kleinen Touch-Gerät – Handy hochkant oder quer – bleibt es bei der einen
+   wischbaren Reihe. */
+@media (min-width: 600px) and (min-height: 600px),
+  (hover: hover) and (pointer: fine) {
+  .toolbar__chips {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
 }
 
 .chip {
@@ -387,6 +581,14 @@ body {
   color: var(--text-muted);
 }
 
+/* Warnung, wenn der Plan nicht gespeichert werden konnte */
+.toolbar__warnung {
+  margin: 8px 2px 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #dc2626;
+}
+
 /* Segment-Umschalter „Frei zeichnen | Rechteck“ */
 .seg-group {
   display: inline-flex;
@@ -430,4 +632,94 @@ body {
 /* Griff zum Ändern des Radius (eines Baumkreises) */
 .ed-griff--radius {
   border-color: var(--accent-strong);
+}
+
+/* 11. Rückfrage-Fenster (Frage mit beschrifteten Knöpfen) ------------------ */
+.rueckfrage {
+  /* Mittig auf dem Bildschirm, über allem anderen */
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  z-index: 100;
+  width: min(420px, calc(100% - 32px));
+  height: fit-content;
+  max-height: calc(100% - 32px);
+  overflow-y: auto;
+
+  padding: 20px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lift);
+}
+/* Geschlossen heißt unsichtbar (sehr alte Browser kennen <dialog> nicht). */
+.rueckfrage:not([open]) {
+  display: none;
+}
+/* Der Rest der Seite tritt zurück, solange die Frage offen ist. */
+.rueckfrage::backdrop {
+  background: rgba(16, 24, 40, 0.35);
+}
+
+.rueckfrage__titel {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.rueckfrage__text {
+  margin: 0 0 16px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  white-space: pre-line; /* Zeilenumbrüche im Text bleiben erhalten */
+}
+
+/* Die Antworten stehen untereinander, in voller Breite und gut zu treffen. */
+.rueckfrage__knoepfe {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rueckfrage__knoepfe .btn {
+  width: 100%;
+  min-height: 44px;
+  white-space: normal; /* lange Beschriftungen dürfen umbrechen */
+}
+/* Antworten ohne Grün bekommen hier einen zarten Hintergrund, damit sie als
+   Knöpfe zu erkennen sind. „Abbrechen“ bleibt schlicht. */
+.rueckfrage__knoepfe .btn--ghost:not([data-wert="abbrechen"]) {
+  background: var(--bg);
+  color: var(--text);
+}
+.rueckfrage__knoepfe .btn--ghost:not([data-wert="abbrechen"]):hover {
+  background: var(--border);
+}
+/* Per Tastatur angesteuert: ein ruhiger grüner Rahmen statt des schwarzen
+   Standard-Rahmens. */
+.rueckfrage__knoepfe .btn:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+/* Auf niedrigen Bildschirmen (Handy im Querformat) wäre das Fenster zu hoch:
+   Dann stehen die Antworten zu zweit nebeneinander, und alles rückt enger. */
+@media (max-height: 480px) {
+  .rueckfrage {
+    width: min(560px, calc(100% - 32px));
+    padding: 14px 16px;
+  }
+  .rueckfrage__text {
+    margin-bottom: 10px;
+  }
+  .rueckfrage__knoepfe {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .rueckfrage__knoepfe .btn {
+    width: auto;
+    flex: 1 1 calc(50% - 4px);
+  }
 }

@@ -28,6 +28,25 @@ import proj4 from "proj4";
 // Adresse des NRW-Kataster-Dienstes (amtliche Flurstücke).
 const WFS_URL = "https://www.wfs.nrw.de/geobasis/wfs_nw_alkis_vereinfacht";
 
+// Fertige Abfrage des Dienstes, die ein Flurstück über sein Kennzeichen
+// liefert (für gespeicherte Gärten, deren Umriss noch fehlt).
+const ABFRAGE_NACH_KENNZEICHEN =
+  "http://repository.gdi-de.org/query/adv/produkt/alkis-vereinfacht/2.0/flst-by-kennzeichen";
+
+// Ein Tipp, der so kurz nach dem vorigen und so nah an derselben Stelle kommt,
+// gilt als zweiter Teil eines Doppeltipps und wird ignoriert.
+const DOPPELTIPP_MS = 600; // Millisekunden
+const DOPPELTIPP_PIXEL = 30; // Bildschirm-Pixel
+
+// So lange nach einem Wechsel des Bedienfelds ignorieren wir Klicks auf seine
+// Knöpfe. Bei einem Doppelklick träfe der zweite Klick sonst den Knopf, der
+// inzwischen an derselben Stelle erschienen ist (z. B. „Abbrechen“).
+const KNOPF_SPERRE_MS = 400;
+
+// Antwortet der Kataster-Dienst nicht, brechen wir die Abfrage nach dieser
+// Zeit ab und melden es (statt endlos „Suche Flurstück …“ zu zeigen).
+const ABFRAGE_ZEITLIMIT_MS = 15000;
+
 // EPSG:25832 (UTM-Zone 32N) für proj4 bekannt machen. EPSG:4326 (Lat/Lon)
 // kennt proj4 bereits von Haus aus.
 proj4.defs(
@@ -61,7 +80,8 @@ const quadratmeter = (wert) =>
 // -------------------------------------------------------------------------
 // Hauptfunktion: richtet die gesamte Grundstücks-Logik ein.
 // Wird von main.js mit der fertigen Karte aufgerufen und gibt eine kleine
-// Steuerung zurück ({ zeigeStart }).
+// Steuerung zurück ({ zeigeStart, sperreKnoepfeKurz, zuruecksetzen,
+// vervollstaendige, uebernimm }).
 // -------------------------------------------------------------------------
 export function initGrundstueck(map, optionen = {}) {
   // Verweise auf das untere Bedienfeld und seine Knöpfe.
@@ -71,11 +91,26 @@ export function initGrundstueck(map, optionen = {}) {
   const btnZurueck = document.getElementById("gp-zurueck"); // dezenter Knopf
 
   // Zustand der Auswahl: "aus" | "bereit" | "auswaehlen" | "fertig"
+  // ("aus" = Bedienfeld verborgen, so wie direkt nach dem Seitenaufruf)
   let zustand = "aus";
   // Liste der aktuell gewählten Flurstücke (Mehrfachauswahl möglich).
   let auswahl = [];
   // Liste der Maß-Beschriftungen (HTML-Marker), damit wir sie aufräumen können.
   let masseMarker = [];
+  // Alle gerade laufenden Kataster-Abfragen (je ein AbortController). Mehrere
+  // zugleich sind möglich, z. B. wenn zügig zwei Flurstücke angetippt werden.
+  // Über diese Liste können wir Abfragen verwerfen, die nicht mehr gebraucht
+  // werden (Abbrechen, OK, neue Adresse).
+  const offeneAbfragen = new Set();
+  // Zeitpunkt und Stelle des letzten Tipps – zum Erkennen eines Doppeltipps.
+  let letzterTipp = { zeit: -Infinity, x: 0, y: 0 };
+  // Die Tipps werden durchgezählt. Je Flurstück merken wir, welcher Tipp
+  // zuletzt über es entschieden hat: Eine verspätete Antwort auf einen älteren
+  // Tipp darf einen neueren nicht überstimmen.
+  let tippNr = 0;
+  const zuletztEntschieden = new Map(); // Flurstücks-Kennung -> Nummer des Tipps
+  // Zeitpunkt des letzten Zustandswechsels (siehe KNOPF_SPERRE_MS).
+  let zustandSeit = -Infinity;
 
   // -----------------------------------------------------------------------
   // Karten-Ebenen einmalig anlegen (leer); später füllen wir sie mit Daten.
@@ -125,7 +160,9 @@ export function initGrundstueck(map, optionen = {}) {
   // -----------------------------------------------------------------------
   // GML (XML) des Dienstes auswerten -> Liste von Flurstücken.
   // Jedes Flurstück: { id, ring25832: [[e,n],...], ringLngLat: [[lng,lat],...],
-  //                    info: "Gemarkung …, Flur …, Flurstück …" }
+  //                    info: "Gemarkung …, Flur …, Flurstück …",
+  //                    lage: "Mozartstraße 3" (amtliche Lagebezeichnung),
+  //                    amtlicheFlaeche: 2149 (m² laut Kataster) }
   // -----------------------------------------------------------------------
   function leseFlurstuecke(xmlText) {
     const xml = new DOMParser().parseFromString(xmlText, "application/xml");
@@ -166,6 +203,8 @@ export function initGrundstueck(map, optionen = {}) {
         ring25832,
         ringLngLat,
         info: teile.join(", "),
+        lage: feld("lagebeztxt"),
+        amtlicheFlaeche: Number(feld("flaeche")) || null,
       });
     }
     return ergebnisse;
@@ -203,8 +242,9 @@ export function initGrundstueck(map, optionen = {}) {
 
   // -----------------------------------------------------------------------
   // Ein Flurstück am angeklickten Punkt vom Kataster-Dienst holen.
+  // „signal“ erlaubt es, die Abfrage abzubrechen (siehe abfragenAbbrechen).
   // -----------------------------------------------------------------------
-  async function holeFlurstueck(lng, lat) {
+  async function holeFlurstueck(lng, lat, signal) {
     // Klickpunkt nach UTM32 umrechnen und eine kleine Box (±1 m) bilden.
     const [e, n] = nach25832(lng, lat);
     const d = 1;
@@ -215,7 +255,7 @@ export function initGrundstueck(map, optionen = {}) {
       `&TYPENAMES=ave:Flurstueck&COUNT=5` +
       `&SRSNAME=urn:ogc:def:crs:EPSG::25832&BBOX=${bbox}`;
 
-    const antwort = await fetch(url);
+    const antwort = await fetch(url, { signal });
     if (!antwort.ok) throw new Error("WFS-Status " + antwort.status);
     const text = await antwort.text();
 
@@ -226,6 +266,29 @@ export function initGrundstueck(map, optionen = {}) {
     // dasjenige nehmen, in dem der Klickpunkt wirklich liegt.
     const treffer = liste.find((f) => punktImRing(e, n, f.ring25832));
     return treffer || liste[0];
+  }
+
+  // -----------------------------------------------------------------------
+  // Ein Flurstück gezielt über sein Kennzeichen holen (für gespeicherte
+  // Gärten, deren Umriss noch nicht gespeichert ist).
+  // -----------------------------------------------------------------------
+  async function holeNachKennzeichen(kennzeichen) {
+    const url =
+      `${WFS_URL}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature` +
+      `&STOREDQUERY_ID=${ABFRAGE_NACH_KENNZEICHEN}` +
+      `&CRS=urn:ogc:def:crs:EPSG::25832` +
+      `&kennzeichen=${encodeURIComponent(kennzeichen)}`;
+
+    // Antwortet der Dienst nicht, geben wir nach dem Zeitlimit auf.
+    const abfrage = new AbortController();
+    const zeitlimit = setTimeout(() => abfrage.abort(), ABFRAGE_ZEITLIMIT_MS);
+    try {
+      const antwort = await fetch(url, { signal: abfrage.signal });
+      if (!antwort.ok) throw new Error("WFS-Status " + antwort.status);
+      return leseFlurstuecke(await antwort.text())[0] || null;
+    } finally {
+      clearTimeout(zeitlimit);
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -337,9 +400,22 @@ export function initGrundstueck(map, optionen = {}) {
   }
 
   // -----------------------------------------------------------------------
+  // Alle noch laufenden Kataster-Abfragen verwerfen. Ihre Antworten kämen
+  // sonst verspätet an und würden die Auswahl verändern, obwohl inzwischen
+  // z. B. „Abbrechen“ oder „OK, übernehmen“ gedrückt wurde.
+  // -----------------------------------------------------------------------
+  function abfragenAbbrechen() {
+    const offene = [...offeneAbfragen];
+    offeneAbfragen.clear(); // zuerst leeren – daran erkennt der Klick-Code „verworfen“
+    offene.forEach((abfrage) => abfrage.abort());
+  }
+
+  // -----------------------------------------------------------------------
   // Alles zurücksetzen (Auswahl + Grafik + Maße entfernen).
   // -----------------------------------------------------------------------
   function aufraeumen() {
+    abfragenAbbrechen();
+    zuletztEntschieden.clear();
     auswahl = [];
     masseLoeschen();
     if (map.getSource(SRC_FLUR)) {
@@ -376,6 +452,7 @@ export function initGrundstueck(map, optionen = {}) {
   // -----------------------------------------------------------------------
   function setze(neuerZustand, gesamtflaeche) {
     zustand = neuerZustand;
+    zustandSeit = performance.now();
 
     // Fadenkreuz nur während des Auswählens.
     map.getContainer().classList.toggle(
@@ -383,7 +460,17 @@ export function initGrundstueck(map, optionen = {}) {
       zustand === "auswaehlen",
     );
 
-    if (zustand === "bereit") {
+    // Während des Auswählens soll ein Doppeltipp nicht in die Karte
+    // hineinzoomen – er gilt hier dem Grundstück (siehe istDoppeltipp).
+    if (zustand === "auswaehlen") {
+      map.doubleClickZoom.disable();
+    } else {
+      map.doubleClickZoom.enable();
+    }
+
+    if (zustand === "aus") {
+      panel.hidden = true;
+    } else if (zustand === "bereit") {
       panel.hidden = false;
       panelText.textContent = "Wähle dein Grundstück auf der Karte aus.";
       btnAktion.hidden = false;
@@ -411,44 +498,111 @@ export function initGrundstueck(map, optionen = {}) {
   }
 
   // -----------------------------------------------------------------------
+  // Ist dieser Tipp der zweite Teil eines Doppeltipps? Dann soll er das
+  // gerade gewählte Flurstück nicht gleich wieder abwählen. Erkannt wird er an
+  // Zeit und Ort: kurz nach dem vorigen Tipp und an fast derselben Stelle.
+  // Auch ignorierte Tipps zählen als „voriger Tipp“ – wer ungeduldig mehrmals
+  // auf dieselbe Stelle tippt, löst also nur eine Abfrage aus. Der Preis: Ein
+  // bewusster zweiter Tipp (abwählen) braucht eine kurze Pause.
+  // -----------------------------------------------------------------------
+  function istDoppeltipp(e) {
+    // Zeitstempel des Ereignisses nehmen (nicht „jetzt“): Zeichnet die Karte
+    // gerade neu, kommt ein Tipp mit Verzögerung hier an.
+    const zeit = e.originalEvent ? e.originalEvent.timeStamp : performance.now();
+    const abstand = Math.hypot(
+      e.point.x - letzterTipp.x,
+      e.point.y - letzterTipp.y,
+    );
+    const doppelt =
+      zeit - letzterTipp.zeit < DOPPELTIPP_MS && abstand < DOPPELTIPP_PIXEL;
+    letzterTipp = { zeit, x: e.point.x, y: e.point.y };
+    return doppelt;
+  }
+
+  // -----------------------------------------------------------------------
   // Klick auf die Karte: nur während des Auswählens. Ein Flurstück wird
   // hinzugefügt – oder, wenn es schon gewählt ist, wieder entfernt (Umschalten).
   // -----------------------------------------------------------------------
   map.on("click", async (e) => {
     if (zustand !== "auswaehlen") return;
+    if (istDoppeltipp(e)) return;
+
+    // Was war beim Tippen schon gewählt? Daran erkennen wir später, was der
+    // Tipp bezwecken sollte (hinzufügen oder entfernen) – auch wenn die
+    // Antwort des Katasters auf sich warten lässt und inzwischen ungeduldig
+    // noch einmal getippt wurde.
+    const vorherGewaehlt = new Set(auswahl.map((f) => f.id));
+    const nr = ++tippNr; // laufende Nummer dieses Tipps
+
+    const abfrage = new AbortController();
+    offeneAbfragen.add(abfrage);
+    const zeitlimit = setTimeout(() => abfrage.abort(), ABFRAGE_ZEITLIMIT_MS);
 
     panelText.textContent = "Suche Flurstück …";
+    let hinweis = ""; // Meldung, falls kein Flurstück geliefert wurde
     try {
-      const flurstueck = await holeFlurstueck(e.lngLat.lng, e.lngLat.lat);
+      const flurstueck = await holeFlurstueck(
+        e.lngLat.lng,
+        e.lngLat.lat,
+        abfrage.signal,
+      );
+      // Wurde die Abfrage inzwischen verworfen (Abbrechen, OK, neue Adresse)?
+      // Dann gehört die Antwort nicht mehr hierher.
+      if (!offeneAbfragen.has(abfrage)) return;
+
       if (!flurstueck) {
-        panelText.textContent =
+        hinweis =
           "Hier wurde kein Flurstück gefunden. Bitte direkt auf das Grundstück tippen.";
-        return;
-      }
+      } else if ((zuletztEntschieden.get(flurstueck.id) || 0) < nr) {
+        // (Hat inzwischen ein späterer Tipp über dieses Flurstück entschieden,
+        // bleibt es dabei – diese Antwort kommt dann zu spät.)
+        zuletztEntschieden.set(flurstueck.id, nr);
 
-      // Schon gewählt? Dann entfernen (Umschalten), sonst hinzufügen.
-      const index = auswahl.findIndex((f) => f.id === flurstueck.id);
-      if (index >= 0) {
-        auswahl.splice(index, 1);
-      } else {
-        auswahl.push(flurstueck);
+        // Umschalten: War das Flurstück beim Tippen schon gewählt, wird es
+        // entfernt – sonst hinzugefügt. Zwei Tipps auf dasselbe, noch nicht
+        // gewählte Flurstück wählen es also nur einmal.
+        const index = auswahl.findIndex((f) => f.id === flurstueck.id);
+        if (vorherGewaehlt.has(flurstueck.id)) {
+          if (index >= 0) auswahl.splice(index, 1);
+        } else if (index < 0) {
+          auswahl.push(flurstueck);
+        }
+        zeigeAuswahl();
       }
-
-      zeigeAuswahl();
-      aktualisiereAuswahlText();
     } catch (fehler) {
+      // Bewusst verworfene Abfrage (siehe abfragenAbbrechen): nichts melden.
+      if (!offeneAbfragen.has(abfrage)) return;
       console.error(fehler);
-      panelText.textContent = "Kataster-Dienst gerade nicht erreichbar.";
+      hinweis = "Kataster-Dienst gerade nicht erreichbar.";
+    } finally {
+      clearTimeout(zeitlimit);
+      offeneAbfragen.delete(abfrage);
     }
+
+    // Bedienfeld nachführen. Läuft noch eine weitere Abfrage, bleibt der
+    // Such-Hinweis stehen, bis auch sie beantwortet ist.
+    if (hinweis && offeneAbfragen.size === 0) {
+      panelText.textContent = hinweis;
+      return;
+    }
+    aktualisiereAuswahlText();
+    if (offeneAbfragen.size > 0) panelText.textContent = "Suche Flurstück …";
   });
 
   // -----------------------------------------------------------------------
   // Knöpfe im Bedienfeld
   // -----------------------------------------------------------------------
+  // Kurz nach einem Wechsel des Bedienfelds zählt ein Klick noch nicht – er
+  // ist dann meist der zweite Teil eines Doppelklicks auf den vorigen Knopf.
+  const zuFrueh = () => performance.now() - zustandSeit < KNOPF_SPERRE_MS;
+
   btnAktion.addEventListener("click", () => {
+    if (zuFrueh()) return;
     if (zustand === "bereit") {
       setze("auswaehlen"); // los geht's: auf das/die Grundstück(e) tippen
+      if (optionen.beimAuswaehlen) optionen.beimAuswaehlen();
     } else if (zustand === "auswaehlen" && auswahl.length > 0) {
+      abfragenAbbrechen(); // noch ausstehende Antworten zählen jetzt nicht mehr
       const gesamt = uebernehmen(); // weiß ausblenden + bemaßen
       setze("fertig", gesamt);
     } else if (zustand === "fertig") {
@@ -458,6 +612,7 @@ export function initGrundstueck(map, optionen = {}) {
   });
 
   btnZurueck.addEventListener("click", () => {
+    if (zuFrueh()) return;
     if (zustand === "auswaehlen") {
       aufraeumen();
       setze("bereit"); // Auswahl abgebrochen
@@ -474,7 +629,74 @@ export function initGrundstueck(map, optionen = {}) {
   return {
     zeigeStart() {
       aufraeumen();
+      // Auch den Editor leeren – sonst blieben Objekte und Etiketten des zuvor
+      // geöffneten Plans auf der Karte stehen. (Der Plan selbst bleibt
+      // gespeichert und erscheint wieder, sobald für sein Grundstück erneut
+      // „Garten erfassen“ gewählt wird.)
+      if (optionen.beimNeustart) optionen.beimNeustart();
       setze("bereit");
+    },
+
+    // Die Knöpfe des Bedienfelds kurz sperren (siehe KNOPF_SPERRE_MS). main.js
+    // ruft das auf, wenn das Bedienfeld wieder erscheint, weil der Editor
+    // geschlossen wurde: Der zweite Tipp eines Doppeltipps auf „Schließen“
+    // träfe sonst „Neu beginnen“, das an derselben Stelle auftaucht.
+    sperreKnoepfeKurz() {
+      zustandSeit = performance.now();
+    },
+
+    // Alles ausschalten: Auswahl, Maske und Bemaßung weg, Bedienfeld verborgen
+    // (so wie direkt nach dem Seitenaufruf). Gebraucht, wenn sich ein
+    // gespeicherter Garten nicht anzeigen lässt.
+    zuruecksetzen() {
+      aufraeumen();
+      if (optionen.beimNeustart) optionen.beimNeustart();
+      setze("aus");
+    },
+
+    // Einen gespeicherten Garten wieder aufschlagen – das geht in zwei
+    // Schritten, damit main.js dazwischen prüfen kann, ob das Öffnen noch
+    // erwünscht ist:
+    //
+    // Schritt 1 – vervollstaendige(): macht aus den gespeicherten Flurstücken
+    // vollständige (mit dem Umriss in Lat/Lon für die Karte). Fehlt einem der
+    // Umriss, holen wir ihn über das Kennzeichen vom Kataster. Das kann
+    // einige Sekunden dauern, ändert aber NICHTS an Karte und Bedienfeld.
+    // Wirft einen Fehler, wenn der Dienst nicht antwortet oder ein Flurstück
+    // nicht mehr gefunden wird (dann mit dem Namen „FlurstueckFehlt“).
+    async vervollstaendige(gespeicherte) {
+      const flurstuecke = [];
+      for (const g of gespeicherte) {
+        if (g.ring25832) {
+          flurstuecke.push({
+            ...g,
+            ringLngLat: g.ring25832.map(([e, n]) => nachLngLat(e, n)),
+          });
+        } else {
+          const geholt = await holeNachKennzeichen(g.id);
+          if (!geholt) {
+            // Der Dienst hat geantwortet, kennt das Flurstück aber nicht mehr
+            // (z. B. nach einer Teilung) – das ist kein Verbindungsfehler.
+            const fehler = new Error("Flurstück nicht gefunden: " + g.id);
+            fehler.name = "FlurstueckFehlt";
+            throw fehler;
+          }
+          flurstuecke.push(geholt);
+        }
+      }
+      return flurstuecke;
+    },
+
+    // Schritt 2 – uebernimm(): zeigt die (vollständigen) Flurstücke sofort so
+    // an wie nach „OK, übernehmen“ – weiße Maske, Bemaßung –, ganz ohne
+    // Antippen.
+    uebernimm(flurstuecke) {
+      aufraeumen();
+      if (optionen.beimNeustart) optionen.beimNeustart();
+      auswahl = [...flurstuecke];
+      zeigeAuswahl(); // legt bei Bedarf auch die Karten-Ebenen an
+      const gesamt = uebernehmen();
+      setze("fertig", gesamt);
     },
   };
 }

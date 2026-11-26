@@ -16,32 +16,49 @@
 // Die Griffe sind native, ziehbare MapLibre-Marker – das funktioniert
 // zuverlässig auf Touch (Handy) und Maus.
 //
-// Alles wird lokal im Browser gespeichert (localStorage, je Grundstück).
+// Alles wird lokal im Browser gespeichert – als Teil des „Gartens“, zu dem
+// der Plan gehört (siehe gaerten.js).
 // Die spätere automatische Bestandsaufnahme (3b) befüllt dasselbe Modell.
 // =========================================================================
 
 import maplibregl from "maplibre-gl";
 import polygonClipping from "polygon-clipping";
 import { erfasseGebaeude } from "./bestand.js";
+import { speichereGarten } from "./gaerten.js";
 
 // -------------------------------------------------------------------------
-// Objekt-Typen: Name, Art (Fläche oder Kreis) und Farben.
+// Objekt-Typen: Name, Art (Fläche oder Kreis), Farben und Rang.
+// Der „rang“ legt die Stapelfolge auf der Karte fest: kleine Werte liegen
+// unten, große oben (Rasen ganz unten, Bäume ganz oben). So verdeckt ein
+// später angelegter Rasen weder Beete noch Terrassen oder Bäume.
 // -------------------------------------------------------------------------
 const TYPEN = {
-  haus: { name: "Haus", art: "flaeche", farbe: "#9aa0a6", rand: "#6b7280" },
-  gartenhaus: { name: "Gartenhaus", art: "flaeche", farbe: "#b08968", rand: "#8a6a4f" },
-  gewaechshaus: { name: "Gewächshaus", art: "flaeche", farbe: "#a9d6cf", rand: "#79b3aa" },
-  carport: { name: "Carport", art: "flaeche", farbe: "#aab2bd", rand: "#828c99" },
-  stellplatz: { name: "Stellplatz", art: "flaeche", farbe: "#bfc3c7", rand: "#9298a0" },
-  terrasse: { name: "Terrasse", art: "flaeche", farbe: "#caa472", rand: "#a07d4e" },
-  weg: { name: "Weg", art: "flaeche", farbe: "#cdbb98", rand: "#a3916f" },
-  pool: { name: "Pool", art: "flaeche", farbe: "#5bb0d8", rand: "#2f8fbf" },
-  beet: { name: "Beet", art: "flaeche", farbe: "#caa6d6", rand: "#9a6fb0" },
-  rasen: { name: "Rasen", art: "flaeche", farbe: "#8cc06a", rand: "#5fa03f" },
-  baum: { name: "Baum", art: "kreis", farbe: "#3f9b46", rand: "#2f7a34" },
+  haus: { name: "Haus", art: "flaeche", rang: 4, farbe: "#9aa0a6", rand: "#6b7280" },
+  gartenhaus: { name: "Gartenhaus", art: "flaeche", rang: 4, farbe: "#b08968", rand: "#8a6a4f" },
+  gewaechshaus: { name: "Gewächshaus", art: "flaeche", rang: 4, farbe: "#a9d6cf", rand: "#79b3aa" },
+  carport: { name: "Carport", art: "flaeche", rang: 4, farbe: "#aab2bd", rand: "#828c99" },
+  stellplatz: { name: "Stellplatz", art: "flaeche", rang: 2, farbe: "#bfc3c7", rand: "#9298a0" },
+  terrasse: { name: "Terrasse", art: "flaeche", rang: 2, farbe: "#caa472", rand: "#a07d4e" },
+  weg: { name: "Weg", art: "flaeche", rang: 2, farbe: "#cdbb98", rand: "#a3916f" },
+  pool: { name: "Pool", art: "flaeche", rang: 3, farbe: "#5bb0d8", rand: "#2f8fbf" },
+  beet: { name: "Beet", art: "flaeche", rang: 1, farbe: "#caa6d6", rand: "#9a6fb0" },
+  rasen: { name: "Rasen", art: "flaeche", rang: 0, farbe: "#8cc06a", rand: "#5fa03f" },
+  baum: { name: "Baum", art: "kreis", rang: 5, farbe: "#3f9b46", rand: "#2f7a34" },
 };
 
+// Rang eines Objekts (unbekannte Typen – etwa aus einer fremden Datei –
+// landen in der Mitte).
+const rangVon = (o) =>
+  Object.prototype.hasOwnProperty.call(TYPEN, o.typ) ? TYPEN[o.typ].rang : 2;
+
 const BAUM_RADIUS = 3; // Standard-Radius eines neuen Baums in Metern
+
+// So lange nach dem Öffnen des Editors zählen Klicks noch nicht
+// (Millisekunden). Wer einen Garten mit einem Doppelklick oder Doppeltipp
+// öffnet, träfe mit dem zweiten Klick sonst schon die Karte oder einen Knopf
+// der Werkzeugleiste, die inzwischen an derselben Stelle erschienen ist –
+// und die Karte würde obendrein hineinzoomen.
+const START_SPERRE_MS = 400;
 
 // IDs der Karten-Quellen/-Ebenen.
 const SRC_OBJ = "ed-objekte";
@@ -119,15 +136,25 @@ function polygonFlaeche(ringe) {
   return Math.max(0, a);
 }
 
+// Fläche eines Objekts in m² – egal ob Kreis (Baum), einfache Fläche oder
+// zusammengesetzte Fläche (Rest-Rasen).
+function objektFlaeche(o) {
+  if (o.art === "kreis") return Math.PI * o.radius * o.radius;
+  const polys = o.multi ? o.multi : [[o.coords]];
+  return polys.reduce((summe, p) => summe + polygonFlaeche(p), 0);
+}
+
 // Zahlen hübsch auf Deutsch.
 const fMeter = (w) =>
   w.toLocaleString("de-DE", { maximumFractionDigits: 1 }) + " m";
 const fQm = (w) => Math.round(w).toLocaleString("de-DE") + " m²";
 
 // -------------------------------------------------------------------------
-// Hauptfunktion: richtet den Editor ein. Rückgabe: { starten, leeren }.
+// Hauptfunktion: richtet den Editor ein.
+// Rückgabe: { starten, leeren, schliessen, aktuellerGarten }.
+// „optionen.beimSchliessen“ wird aufgerufen, wenn der Editor geschlossen wird.
 // -------------------------------------------------------------------------
-export function initEditor(map) {
+export function initEditor(map, optionen = {}) {
   // HTML-Elemente
   const toolbar = document.getElementById("ed-toolbar");
   const chipBox = document.getElementById("ed-chips");
@@ -143,6 +170,7 @@ export function initEditor(map) {
   const btnClose = document.getElementById("ed-close");
   const btnRest = document.getElementById("ed-rest");
   const btnAuto = document.getElementById("ed-auto");
+  const warnung = document.getElementById("ed-warnung");
   const suchleiste = document.querySelector(".search");
   const gpPanel = document.getElementById("gp-panel");
 
@@ -155,7 +183,11 @@ export function initEditor(map) {
   let objekte = []; // alle erfassten Objekte
   let selektiertId = null; // gerade ausgewähltes Objekt
   let griffe = []; // ziehbare Marker des ausgewählten Objekts
-  let planKey = "gruenriss:plan:default";
+  let garten = null; // der gerade geöffnete Garten (Aufbau siehe gaerten.js)
+  let speicherFehler = false; // konnte dieser Garten zuletzt nicht gespeichert werden?
+  let sperreBis = -Infinity; // bis zu diesem Zeitpunkt zählen Klicks noch nicht
+  let sperreTimer = null; // schaltet danach den Doppelklick-Zoom wieder ein
+  let sperreNr = 0; // laufende Nummer der Start-Sperre (ältere gelten nicht mehr)
   let chipEls = [];
   let parcelGeom = null; // Grundstücksfläche (für „Restfläche als Rasen“)
   let parcelsData = []; // die gewählten Flurstücke (für die Auto-Erfassung)
@@ -175,6 +207,61 @@ export function initEditor(map) {
     chip.addEventListener("click", () => waehleTyp(schluessel));
     chipBox.append(chip);
     chipEls.push(chip);
+  });
+
+  // Am Handy passen nicht alle Typen nebeneinander; die Reihe ist dann
+  // wischbar. Ein kleiner Pfeil am Rand (siehe style.css) zeigt an, auf
+  // welcher Seite noch weitere Typen liegen.
+  function aktualisiereChipRand() {
+    const rechtsUebrig =
+      chipBox.scrollWidth - chipBox.clientWidth - chipBox.scrollLeft;
+    chipBox.classList.toggle("hat-mehr-links", chipBox.scrollLeft > 4);
+    chipBox.classList.toggle("hat-mehr-rechts", rechtsUebrig > 4);
+  }
+
+  // Den gewählten Chip in die Mitte der (am Handy wischbaren) Reihe holen –
+  // so bleibt er sichtbar, und auch seine Nachbarn kommen ins Bild.
+  function zentriereAktivenChip() {
+    const chip = chipEls.find((c) => c.dataset.typ === aktiverTyp);
+    if (!chip) return;
+    const mitte = chip.offsetLeft - chipBox.offsetLeft + chip.offsetWidth / 2;
+    chipBox.scrollTo({ left: mitte - chipBox.clientWidth / 2, behavior: "smooth" });
+  }
+
+  chipBox.addEventListener("scroll", aktualisiereChipRand, { passive: true });
+
+  // Ein Tipp auf einen der Rand-Pfeile blättert die Reihe weiter. Der Pfeil
+  // ist nur gemalt und kann selbst keine Tipps annehmen; deshalb prüfen wir
+  // hier, ob der Tipp im Pfeilbereich am linken oder rechten Rand liegt, und
+  // fangen ihn ab, bevor er den (verdeckten) Chip darunter wählen würde.
+  const PFEIL_BREITE = 40; // Pixel, wie in style.css
+  chipBox.addEventListener(
+    "click",
+    (e) => {
+      // Nur echte Tipps und Mausklicks haben eine Position. Eine Auswahl per
+      // Tastatur (Enter/Leertaste auf einem Chip) lassen wir immer durch.
+      if (e.detail === 0) return;
+      const rand = chipBox.getBoundingClientRect();
+      const links =
+        chipBox.classList.contains("hat-mehr-links") &&
+        e.clientX < rand.left + PFEIL_BREITE;
+      const rechts =
+        chipBox.classList.contains("hat-mehr-rechts") &&
+        e.clientX > rand.right - PFEIL_BREITE;
+      if (!links && !rechts) return;
+      e.stopPropagation(); // der Chip unter dem Pfeil bekommt den Tipp nicht
+      chipBox.scrollBy({
+        left: (rechts ? 0.7 : -0.7) * chipBox.clientWidth,
+        behavior: "smooth",
+      });
+    },
+    true, // „true“: diese Prüfung kommt vor den Chips an die Reihe
+  );
+
+  // Fenstergröße geändert oder Handy gedreht: Pfeile und Position nachführen.
+  window.addEventListener("resize", () => {
+    aktualisiereChipRand();
+    zentriereAktivenChip();
   });
 
   // -----------------------------------------------------------------------
@@ -257,9 +344,13 @@ export function initEditor(map) {
 
   function zeichneObjekte() {
     ebenenSicherstellen();
+    // In Stapelfolge zeichnen (siehe „rang“ in TYPEN): Was später in der
+    // Liste steht, liegt auf der Karte oben. Bei gleichem Rang bleibt die
+    // Reihenfolge des Anlegens erhalten.
+    const gestapelt = [...objekte].sort((a, b) => rangVon(a) - rangVon(b));
     map.getSource(SRC_OBJ).setData({
       type: "FeatureCollection",
-      features: objekte.map(alsFeature),
+      features: gestapelt.map(alsFeature),
     });
     // Auswahl-Hervorhebung mitführen.
     const sel = objekte.find((o) => o.id === selektiertId);
@@ -288,32 +379,38 @@ export function initEditor(map) {
   // -----------------------------------------------------------------------
   // Speichern / Laden
   // -----------------------------------------------------------------------
+  // Die Objekte gehören zum geöffneten Garten und werden mit ihm gespeichert.
   function speichere() {
-    try {
-      localStorage.setItem(planKey, JSON.stringify(objekte));
-    } catch (e) {
-      console.warn("Konnte Plan nicht speichern:", e);
-    }
+    if (!garten) return;
+    garten.objekte = objekte;
+    // Klappt das Speichern nicht (Speicher des Browsers voll oder gesperrt),
+    // muss man das sehen – sonst wäre die Arbeit beim nächsten Öffnen
+    // unbemerkt verloren. Die Warnung bleibt, bis es wieder klappt – auch
+    // wenn der Editor zwischendurch geschlossen und wieder geöffnet wird.
+    speicherFehler = !speichereGarten(garten);
+    warnung.hidden = !speicherFehler;
   }
+  // (Geprüft und bereinigt wurden die Objekte schon beim Lesen des Gartens.)
   function lade() {
-    try {
-      objekte = JSON.parse(localStorage.getItem(planKey)) || [];
-    } catch {
-      objekte = [];
-    }
-    // Ältere Bäume (als Punkt gespeichert) in Kreise umwandeln.
-    objekte.forEach((o) => {
-      if (o.art === "punkt") {
-        o.art = "kreis";
-        o.center = o.coords;
-        o.radius = BAUM_RADIUS;
-        delete o.coords;
-      }
-    });
+    objekte = garten ? garten.objekte : [];
   }
 
   const neueId = () =>
     Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+
+  // Fällt dieser Klick oder Tipp noch in die Start-Sperre (START_SPERRE_MS)?
+  // Es zählt der Zeitpunkt, zu dem getippt wurde – nicht der, zu dem der
+  // Browser den Tipp abarbeitet: Solange die Karte den eben geöffneten Garten
+  // zeichnet, kommt ein Tipp leicht eine halbe Sekunde verspätet hier an.
+  // (Sehr alte Browser zählen den Zeitstempel anders; dann gilt „jetzt“.)
+  function inStartSperre(ereignis) {
+    const jetzt = performance.now();
+    const getippt =
+      ereignis && ereignis.timeStamp > 0
+        ? Math.min(ereignis.timeStamp, jetzt)
+        : jetzt;
+    return getippt < sperreBis;
+  }
 
   // Nach dem Ziehen: speichern UND Bemaßung neu setzen.
   function gespeichertMass() {
@@ -497,6 +594,8 @@ export function initEditor(map) {
       c.classList.toggle("is-active", c.dataset.typ === aktiverTyp),
     );
 
+    zentriereAktivenChip();
+
     if (!aktiverTyp) {
       modus = "neutral";
     } else if (TYPEN[aktiverTyp].art === "kreis") {
@@ -580,6 +679,14 @@ export function initEditor(map) {
   // -----------------------------------------------------------------------
   map.on("click", (e) => {
     if (!aktiv) return;
+    // Gerade erst geöffnet? Dann ist das der zweite Klick eines Doppelklicks.
+    if (inStartSperre(e.originalEvent)) return;
+
+    // Ein Tipp auf einen Griff (ohne zu ziehen) gilt dem Griff, nicht der
+    // Karte – sonst würde er die Auswahl aufheben oder ein anderes Objekt wählen.
+    const ziel = e.originalEvent && e.originalEvent.target;
+    if (ziel && ziel.closest && ziel.closest(".ed-griff")) return;
+
     const p = [e.lngLat.lng, e.lngLat.lat];
 
     if (modus === "frei") {
@@ -613,9 +720,27 @@ export function initEditor(map) {
     } else {
       // neutral oder bearbeiten: vorhandenes Objekt antippen/auswählen.
       const treffer = map.queryRenderedFeatures(e.point, { layers: [LAYER_FILL] });
-      selektiere(treffer[0] ? treffer[0].properties.id : null);
+      selektiere(kleinsterTreffer(treffer));
     }
   });
+
+  // Liegen unter dem Tipp mehrere Objekte übereinander, gilt das kleinste:
+  // Ein Baum oder Beet auf dem Rasen bleibt so immer auswählbar – den großen
+  // Rasen erreicht man an jeder freien Stelle. Rückgabe: id oder null.
+  function kleinsterTreffer(treffer) {
+    let besteId = null;
+    let besteFlaeche = Infinity;
+    treffer.forEach((t) => {
+      const o = objekte.find((x) => x.id === t.properties.id);
+      if (!o) return;
+      const flaeche = objektFlaeche(o);
+      if (flaeche < besteFlaeche) {
+        besteFlaeche = flaeche;
+        besteId = o.id;
+      }
+    });
+    return besteId;
+  }
 
   // -----------------------------------------------------------------------
   // Knöpfe
@@ -690,8 +815,13 @@ export function initEditor(map) {
   btnAuto.addEventListener("click", async () => {
     hint.textContent = "Erfasse amtliche Gebäude …";
     btnAuto.disabled = true;
+    const gartenBeimStart = garten; // für welchen Garten wird hier gefragt?
     try {
       const haeuser = await erfasseGebaeude(parcelsData);
+      // Wurde der Editor inzwischen geschlossen oder ein anderer Garten
+      // geöffnet? Dann gehört die verspätete Antwort nicht mehr hierher –
+      // sonst lägen die Gebäude plötzlich auf einer aufgeräumten Karte.
+      if (!aktiv || garten !== gartenBeimStart) return;
       haeuser.forEach((ring) => {
         const r = [...ring];
         const a = r[0];
@@ -713,6 +843,8 @@ export function initEditor(map) {
         "; Restfläche als Rasen ergänzt. Jetzt anpassen oder Terrasse/Bäume ergänzen.";
     } catch (e) {
       console.error(e);
+      // Auch die Fehlermeldung gehört nur zu dem Garten, für den gefragt wurde.
+      if (!aktiv || garten !== gartenBeimStart) return;
       hint.textContent = "Automatische Erfassung nicht möglich (Dienst nicht erreichbar).";
     } finally {
       btnAuto.disabled = false;
@@ -721,11 +853,31 @@ export function initEditor(map) {
 
   btnClose.addEventListener("click", () => beenden());
 
+  // Kurz nach dem Öffnen zählen auch Klicks auf die Werkzeugleiste noch nicht
+  // (siehe START_SPERRE_MS). Wir fangen sie ab, bevor sie einen Knopf
+  // erreichen. Die Bedienung per Tastatur bleibt davon unberührt: Dort hat
+  // das Klick-Ereignis die Zählung 0.
+  toolbar.addEventListener(
+    "click",
+    (e) => {
+      if (e.detail > 0 && inStartSperre(e)) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    },
+    true,
+  );
+
   // -----------------------------------------------------------------------
   // Editor schließen (alles bleibt gespeichert und sichtbar).
   // -----------------------------------------------------------------------
   function beenden() {
     aktiv = false;
+    // Die Start-Sperre ist damit erledigt; der Doppelklick-Zoom gilt wieder.
+    sperreNr++;
+    clearTimeout(sperreTimer);
+    sperreBis = -Infinity;
+    map.doubleClickZoom.enable();
     modus = "neutral";
     aktiverTyp = null;
     punkte = [];
@@ -738,16 +890,22 @@ export function initEditor(map) {
     toolbar.hidden = true;
     if (suchleiste) suchleiste.hidden = false;
     if (gpPanel) gpPanel.hidden = false;
+    if (optionen.beimSchliessen) optionen.beimSchliessen();
   }
 
   // -----------------------------------------------------------------------
   // Nach außen
   // -----------------------------------------------------------------------
   return {
-    starten(parcels) {
-      planKey =
-        "gruenriss:plan:" +
-        ((parcels || []).map((p) => p.id).sort().join("|") || "default");
+    // Öffnet den Editor für einen Garten. „parcels“ sind seine Flurstücke
+    // (mit Umriss), „geoeffneterGarten“ der Garten aus gaerten.js – seine
+    // Objekte werden angezeigt, jede Änderung wird in ihm gespeichert.
+    starten(parcels, geoeffneterGarten) {
+      // Ein anderer Garten als bisher? Dann gilt eine frühere Speicher-Warnung
+      // nicht mehr. (Derselbe Garten – nach „Schließen“ erneut geöffnet –
+      // behält sie: Er ist ja immer noch nicht gespeichert.)
+      if (geoeffneterGarten !== garten) speicherFehler = false;
+      garten = geoeffneterGarten;
       parcelsData = parcels || []; // für die automatische Gebäude-Erfassung
 
       // Grundstücksfläche (Vereinigung aller gewählten Flurstücke) merken –
@@ -777,10 +935,58 @@ export function initEditor(map) {
       if (suchleiste) suchleiste.hidden = true;
       if (gpPanel) gpPanel.hidden = true;
       toolbar.hidden = false;
+      warnung.hidden = !speicherFehler;
       aktualisiere();
+      aktualisiereChipRand(); // erst jetzt ist die Typ-Reihe sichtbar und messbar
+
+      // War ein Teil des gespeicherten Plans nicht lesbar, sagen wir es einmal.
+      if (garten && garten.verworfen > 0) {
+        hint.textContent =
+          (garten.verworfen === 1
+            ? "1 Objekt dieses Plans war"
+            : garten.verworfen + " Objekte dieses Plans waren") +
+          " nicht lesbar und wurde" +
+          (garten.verworfen === 1 ? "" : "n") +
+          " ausgelassen.";
+        garten.verworfen = 0;
+      }
+
+      // Kurze Sperre gegen den zweiten Klick eines Doppelklicks (siehe
+      // START_SPERRE_MS): Klicks zählen noch nicht, die Karte zoomt nicht.
+      sperreBis = performance.now() + START_SPERRE_MS;
+      map.doubleClickZoom.disable();
+      clearTimeout(sperreTimer);
+      // Den Zoom erst wieder einschalten, wenn die Karte den Garten gezeichnet
+      // hat (zwei Bilder später) und danach die Sperrzeit vergangen ist.
+      // Solange sie zeichnet, kommt ein Doppeltipp verspätet an – er soll die
+      // Karte dann trotzdem nicht mehr zoomen.
+      const nr = ++sperreNr;
+      const wiederEin = () => {
+        if (aktiv && nr === sperreNr) map.doubleClickZoom.enable();
+      };
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          if (nr === sperreNr) sperreTimer = setTimeout(wiederEin, START_SPERRE_MS);
+        }),
+      );
+    },
+
+    // Den Editor schließen – dasselbe wie der Knopf „Schließen“.
+    schliessen() {
+      beenden();
+    },
+
+    // Der Garten, der gerade im Editor liegt. Das gilt auch nach „Schließen“
+    // noch (seine Objekte bleiben ja auf der Karte) – erst leeren() setzt ihn
+    // auf null.
+    aktuellerGarten() {
+      return garten;
     },
 
     leeren() {
+      garten = null;
+      speicherFehler = false;
+      warnung.hidden = true;
       objekte = [];
       punkte = [];
       selektiertId = null;

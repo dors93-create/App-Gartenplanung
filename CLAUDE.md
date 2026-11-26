@@ -12,9 +12,12 @@ auch Nicht-Programmierer:innen dem Projekt folgen können.
 
 - Bildschirmfüllende, interaktive Karte (MapLibre GL JS).
 - Hintergrund: NRW-Luftbild (DOP) als WMS-Layer `nw_dop_rgb` vom Dienst
-  `https://www.wms.nrw.de/geobasis/wms_nw_dop`.
+  `https://www.wms.nrw.de/geobasis/wms_nw_dop`, angefordert als JPEG-Kacheln
+  (je nach Bildinhalt etwa 6- bis 15-mal kleiner als PNG).
 - Suchfeld mit Adresssuche (Geocoding) über die kostenlose Nominatim-API,
-  inkl. Vorschlägen während des Tippens. Die Karte fliegt sanft zur Adresse.
+  inkl. Vorschlägen während des Tippens. Die Suche ist auf NRW begrenzt (nur
+  dort gibt es Luftbild und Kataster); unter den Treffern steht die
+  Quellenangabe für OpenStreetMap. Die Karte fliegt sanft zur Adresse.
 - Oberfläche komplett auf Deutsch.
 
 **Schritt 2 ist umgesetzt – Grundstück auswählen:**
@@ -41,10 +44,38 @@ auch Nicht-Programmierer:innen dem Projekt folgen können.
 - „Restfläche als Rasen": füllt den noch freien Teil des Grundstücks
   (Grundstück minus alle anderen Flächen) automatisch mit Rasen
   (Flächen-Verschneidung via `polygon-clipping`).
+- Stapelfolge: Objekte liegen nach Typ übereinander (Rasen unten, Bäume oben –
+  `rang` in `TYPEN`). Liegen unter einem Tipp mehrere Objekte, wird das
+  kleinste gewählt; so bleibt ein Baum oder Beet auf dem Rasen erreichbar.
 - Bemaßung: je Objekt die Fläche (m², bei Bäumen der Durchmesser); für das
   ausgewählte Objekt zusätzlich die Seitenlängen.
-- Alles farbig und lokal im Browser gespeichert (localStorage, je Grundstück),
-  übersteht das Neuladen.
+- Alles farbig und lokal im Browser gespeichert (localStorage), übersteht das
+  Neuladen – siehe „Meine Gärten“.
+
+**Meine Gärten – Pläne wiederfinden, sichern und laden:**
+
+- Jeder Plan gehört zu einem „Garten“: Name (amtliche Lagebezeichnung, z. B.
+  „Mozartstraße 3“), die gewählten Flurstücke samt Umriss und die Objekte.
+  Gespeichert wird er mit dem ersten eingezeichneten Objekt.
+- Beim Start steht unter der Suchleiste die Liste „Meine Gärten“. Ein Tipp
+  öffnet den Garten direkt im Editor – ohne Adresssuche und Antippen; die
+  Karte springt auf das Grundstück.
+- Wer nach der Grundstückswahl „Garten erfassen“ drückt, landet in seinem
+  vorhandenen Garten, wenn genau dieselben Flurstücke gewählt sind. Überschneidet
+  sich die Auswahl nur mit einem Garten (ein Flurstück mehr oder weniger),
+  fragt Grünriss nach: Garten auf die neue Auswahl umstellen, unverändert
+  öffnen oder einen neuen Garten anlegen. Die Flurstücke eines Gartens werden
+  nie stillschweigend geändert.
+- Jeder Garten trägt einen eigenen Namen; ist ein Name schon vergeben, wird
+  „(2)“, „(3)“ … angehängt.
+- „Als Datei sichern“ lädt den Garten als kleine Datei herunter (Sicherung,
+  Mitnehmen auf ein anderes Gerät); „Garten aus Datei laden“ holt ihn zurück.
+- Was aus dem Speicher oder einer Datei kommt, wird geprüft: Ein beschädigter
+  Eintrag blockiert nichts, unlesbare Objekte werden ausgelassen und gemeldet.
+  Schlägt das Speichern fehl, erscheint eine Warnung im Editor.
+- Pläne aus der ersten Version (Schlüssel `gruenriss:plan:…`) werden beim
+  Start einmalig übernommen; das Original bleibt im Archiv
+  (`gruenriss:archiv:…`). Logik und Speicherformat: `src/gaerten.js`.
 
 **Schritt 3b ist begonnen – Automatische Bestandsaufnahme:**
 
@@ -76,6 +107,11 @@ src/main.js           Karte, Luftbild-Layer, Adresssuche/-vervollständigung
 src/grundstueck.js    Schritt 2: Flurstück abrufen, ausblenden, bemaßen
 src/editor.js         Schritt 3a: Objekte zeichnen/setzen, bemaßen, speichern
 src/bestand.js        Schritt 3b: amtliche Gebäude automatisch erfassen
+src/gaerten.js        „Meine Gärten“: Speicherformat, Prüfung, Sichern/Laden
+                      als Datei, Übernahme alter Pläne (ohne Karte/Oberfläche)
+src/rueckfrage.js     Rückfrage-Fenster mit beschrifteten Knöpfen (wenn eine
+                      Entscheidung mehr als „Ja/Nein“ braucht)
+tests/                Automatische Tests (siehe Abschnitt „Tests“)
 src/style.css         Gestaltung (Design-Tokens, Suchleiste, Panel, Editor)
 public/inselspiel.html  Eigenständiges Insel-Aufbauspiel (Bonus): eine einzelne
                         Datei, läuft auch ohne Server; wird mit veröffentlicht.
@@ -116,6 +152,36 @@ Jeder Push auf den Branch wird per GitHub Actions automatisch gebaut und auf
 GitHub Pages veröffentlicht (`.github/workflows/deploy.yml`). Live-Adresse:
 `https://dors93-create.github.io/App-Gartenplanung/`.
 
+Arbeitsweise (so vereinbart am 24.11.2026): Änderungen entstehen auf einem
+eigenen Zweig und werden im Browser getestet. Sind die Tests bestanden, kommen
+sie ohne weitere Rückfrage in den Live-Branch
+`claude/grunriss-initial-setup-Fawpx` – und sind damit veröffentlicht.
+
+## Tests
+
+Vor jeder Veröffentlichung laufen die automatischen Tests:
+
+```bash
+npm test               # Speicher-Baustein (gaerten.js), ohne Browser, Sekunden
+npm run test:browser   # alle Browser-Tests, rund 7 Minuten
+npm run test:browser -- gaerten   # nur einen davon (ablauf, feinheiten, gaerten)
+```
+
+- Die Browser-Tests (`tests/*.test.cjs`) bedienen die App wie ein Mensch – am
+  Desktop und im Handy-Format – und prüfen jeden Schritt. `tests/browser.cjs`
+  startet dafür die App lokal und beendet sie danach wieder.
+- Sie brauchen Playwright mit Chromium (in den Claude-Sitzungen vorinstalliert,
+  bewusst nicht in `package.json`) und Netzzugriff auf `www.wfs.nrw.de`: Das
+  Kataster wird echt abgefragt (wenige Anfragen). Luftbild und Adresssuche
+  werden in den Tests nicht belastet.
+- Neue Funktionen bekommen eigene Prüfungen; ein Fehler, der einmal gefunden
+  wurde, bekommt eine Prüfung, damit er nicht zurückkommt.
+- Ein Seitenfehler oder ein unerwartetes Browser-Fenster lässt den Test
+  scheitern – auch wenn sonst alles stimmt.
+- Der Garten-Test (`tests/gaerten.test.cjs`) besteht aus Teilen mit je einer
+  frischen Seite; jede Kataster-Abfrage geht dabei nur einmal hinaus.
+- Bildschirmfotos der Tests landen in `tests/ausgabe/` (nicht im Git).
+
 ## Lokal starten
 
 ```bash
@@ -142,3 +208,5 @@ Vorschau davon: `npm run preview`.
 - Code und Kommentare auf Deutsch, ausführlich kommentiert.
 - Einfachheit vor Cleverness – verständlich für Nicht-Programmierer:innen.
 - Konfigurierbare Werte (URLs, Zoomstufen) stehen gesammelt oben in `main.js`.
+- Ein- und Ausblenden läuft über das HTML-Attribut `hidden`. Eine Regel oben in
+  `style.css` gibt ihm Vorrang vor eigenen `display`-Angaben – nicht entfernen.
