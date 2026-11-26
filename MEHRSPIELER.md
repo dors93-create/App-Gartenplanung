@@ -87,6 +87,15 @@ gesiedelt, fragt das Fenster nach:
   verliert es das Netz, steht die Welt für beide; der Gast sieht dann
   „Der Gastgeber ist gerade nicht erreichbar".
 
+**Wer gewinnt?** Wer zuerst 1500 Siedler versammelt – ihr oder einer
+der Computergegner. Beide sehen die Meldung im selben Moment und können
+danach weiterspielen. Gewinnt der Gastgeber, ruht die Welt kurz, bis er
+„Weiterspielen" tippt.
+
+**Neu im Spiel?** Wer das Spiel zum ersten Mal öffnet, bekommt eine
+kurze Anleitung aus sechs Karten, die sich jederzeit überspringen lässt.
+Später steht sie oben in der Leiste unter **❓**.
+
 **Aufhören:** Über **🌐** kann der Gast die Partie verlassen (und später
 mit demselben Code wieder einsteigen) und der Gastgeber sie beenden –
 dann spielt auf Platz 2 wieder die Computergegnerin.

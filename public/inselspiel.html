@@ -78,7 +78,7 @@
   .res.warnung b { color: var(--rot); }
   .trenner { width: 1px; height: 20px; background: #e5e7eb; margin: 0 2px; flex: none; }
 
-  /* Ziel-Fortschritt (500 Siedler) */
+  /* Ziel-Fortschritt im Wettlauf */
   #ziel {
     display: inline-flex; flex-direction: column; gap: 2px; padding: 2px 8px;
   }
@@ -392,6 +392,47 @@
     border: none; border-radius: 10px; padding: 10px 18px; margin: 0 4px;
     font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;
   }
+  /* ---------- Kurze Anleitung (überspringbar) ---------- */
+  #anleitung {
+    position: absolute; inset: 0; z-index: 32;
+    background: rgba(255, 255, 255, 0.78); backdrop-filter: blur(4px);
+    display: none; align-items: center; justify-content: center;
+  }
+  #anleitung .box {
+    background: #fff; border-radius: 16px; box-shadow: var(--schatten);
+    padding: 16px 22px 16px; width: calc(100vw - 32px); max-width: 400px;
+    /* Alle Karten gleich hoch – so bleiben die Knöpfe beim Blättern an
+       derselben Stelle. Auf sehr kleinen Bildschirmen wird notfalls gerollt. */
+    display: flex; flex-direction: column;
+    min-height: min(490px, calc(100vh - 32px - var(--rand-oben) - var(--rand-unten)));
+    max-height: calc(100vh - 32px - var(--rand-oben) - var(--rand-unten)); overflow-y: auto;
+  }
+  #anleitung .kopf {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; color: var(--text-leise); white-space: nowrap;
+  }
+  #anleitung .gross { font-size: 40px; text-align: center; margin: 2px 0; }
+  #anleitung h1 { font-size: 19px; text-align: center; margin-bottom: 8px; }
+  #anleitung ul { list-style: none; margin-bottom: 12px; flex: 1; }
+  #anleitung li {
+    position: relative; padding: 5px 0 5px 20px;
+    font-size: 14px; line-height: 1.45;
+  }
+  #anleitung li::before {
+    content: ''; position: absolute; left: 4px; top: 13px;
+    width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+  }
+  #anleitung .schritte { display: flex; gap: 6px; justify-content: center; margin-bottom: 12px; }
+  #anleitung .schritte span { width: 7px; height: 7px; border-radius: 50%; background: #e5e7eb; }
+  #anleitung .schritte span.an { background: var(--accent); }
+  #anleitung .fuss { display: flex; gap: 8px; align-items: center; }
+  #anleitung .fuss .luft { flex: 1; }
+  #anleitung button {
+    border: none; border-radius: 10px; padding: 10px 16px;
+    font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;
+  }
+  #anleitung button.leise { background: none; color: var(--text-leise); padding: 10px 2px; font-weight: 500; font-size: 13px; }
+
   /* Beim Gast einer Partie zu zweit: Tempo und Pause zeigen nur an, was
      der Gastgeber eingestellt hat; gespeichert wird bei ihm. */
   body.gast #k-pause, body.gast #k-tempo1, body.gast #k-tempo2, body.gast #k-tempo3 { opacity: 0.55; }
@@ -431,8 +472,8 @@
   <span class="trenner"></span>
   <span class="res" title="Gunst – verdient durch dauerhaft zufriedene Bürger, nötig für Denkmäler">🏅 <b id="r-gunst">0</b></span>
   <span class="res" title="Einwohner (Pioniere + Siedler)">👥 <b id="r-einwohner">0</b></span>
-  <span id="ziel" title="Ziel: 500 Siedler erreichen">
-    <small style="color:var(--text-leise);font-size:10.5px">🎯 <b id="r-siedler">0</b>/500 Siedler</small>
+  <span id="ziel" title="Ziel des Wettlaufs">
+    <small style="color:var(--text-leise);font-size:10.5px">🎯 <b id="r-siedler">0</b>/<span id="r-ziel">1500</span> Siedler</small>
     <span id="ziel-balken"><div></div></span>
   </span>
   <span class="trenner"></span>
@@ -445,6 +486,7 @@
   <button class="knopf" id="k-speichern" title="Spielstand speichern">💾</button>
   <button class="knopf" id="k-laden" title="Gespeicherten Spielstand laden">📂</button>
   <button class="knopf" id="k-netz" title="Zu zweit spielen">🌐</button>
+  <button class="knopf" id="k-hilfe" title="Kurze Anleitung">❓</button>
 </div>
 
 <!-- Linke Spalte: Punktestand, Lagemeldungen (Krieg, Piraten …)
@@ -498,6 +540,9 @@
 <div id="mp-fenster"><div class="box" id="mp-box"></div></div>
 <div id="netz-warnung"></div>
 
+<!-- Kurze Anleitung: beim ersten Start von selbst, später über ❓ -->
+<div id="anleitung"><div class="box" id="anleitung-box"></div></div>
+
 <script>
 'use strict';
 /* ==============================================================
@@ -516,6 +561,7 @@
      7. Zeichnen (Terrain-Cache + Gebäude + Overlays)
      8. Kamera & Eingabe (Maus, Touch, Tastatur)
      9. Benutzeroberfläche (Leisten, Panel, Meldungen)
+        9b. Kurze Anleitung für den Einstieg (überspringbar)
     10. Musik (Web Audio API)
     11. Hauptschleife
    ============================================================== */
@@ -535,7 +581,7 @@ const SIM = {
   aufstiegsDauer:     15,      // Sekunden erfüllte Bedürfnisse bis zum Aufstieg
   hungerBisWegzug:    14,      // Sekunden Hunger, bis jemand die Insel verlässt
   pleiteDauer:        60,      // Sekunden mit Gold < 0 bis zum Bankrott
-  zielSiedler:        500,     // Siegbedingung
+  zielSiedler:        1500,    // Siegbedingung: so viele Siedler (alle über der Pionier-Stufe)
   baumNachwuchs:      0.02,    // Wald wächst langsam nach ("abbaubar", aber erneuerbar)
   schiffTempo:        3.2,     // Segelgeschwindigkeit in Kacheln je Sekunde
   schiffBauRadius:    6,       // so nah muss das Schiff an der Kontor-Baustelle ankern
@@ -1270,11 +1316,13 @@ const state = {
   pause: false,
   tempo: 1,               // 1, 2 oder 3
   startFrage: false,      // die Frage „Fortsetzen oder neue Welt?" ist noch offen – solange ruht die Welt
+  anleitung: false,       // die kurze Anleitung ist aufgeschlagen – solange ruht die Welt
   nachNeustart: false,    // Seite wurde für eine Partie zu zweit neu geladen, die Partie läuft aber noch nicht
   mpHalt: false,          // Partie zu zweit wartet noch auf den Mitspieler – solange ruht die Welt
   vorbei: false,          // Bankrott
-  gewonnen: false,        // 500 Siedler geschafft
+  gewonnen: false,        // das Ziel des Wettlaufs selbst geschafft
   rennenVorbei: false,    // hat schon jemand das Ziel erreicht?
+  sieger: -1,             // … und wer (Spielernummer)? −1 = noch offen
   weiterspielen: false,   // nach dem Sieg weiterspielen
   pleiteZeit: 0,          // Sekunden mit Gold < 0
   goldRate: 0,            // geglättete Bilanz (Gold je Sekunde)
@@ -1785,7 +1833,7 @@ function standSammeln() {
     piratenZeit,
     schiff: { x: schiff.x, y: schiff.y, pfad: schiff.pfad },
     kontorGebaut: state.kontorGebaut,
-    gewonnen: state.gewonnen, rennenVorbei: state.rennenVorbei,
+    gewonnen: state.gewonnen, rennenVorbei: state.rennenVorbei, sieger: state.sieger,
   };
 }
 
@@ -1917,6 +1965,22 @@ function spielLaden(still) {
   state.kontorGebaut = !!d.kontorGebaut;
   state.gewonnen = !!d.gewonnen;
   state.rennenVorbei = !!d.rennenVorbei;
+  state.sieger = d.sieger === undefined ? -1 : d.sieger;
+  // Wurde das Ziel seit dem Speichern angehoben (früher waren es 500
+  // Siedler), gilt der Wettlauf in diesem Stand womöglich als entschieden,
+  // obwohl noch niemand so weit ist. Dann läuft er weiter – bis zum
+  // heutigen Ziel.
+  if (state.rennenVorbei) {
+    const siedlerVon = i => gebaeude.reduce((n, g) =>
+      n + (g.spieler === i && g.typ === 'wohnhaus' && g.stufe >= 1 ? (g.ew || 0) : 0), 0);
+    if (!spieler.some((sp, i) => siedlerVon(i) >= SIM.zielSiedler)) {
+      state.rennenVorbei = false; state.gewonnen = false; state.sieger = -1;
+    }
+  }
+  // Wer nach dem eigenen Sieg gespeichert hat, spielt nach dem Laden
+  // einfach weiter. (Das Sieg-Fenster kommt nicht noch einmal – ohne
+  // diesen Schritt stünde die Welt nach dem Laden für immer still.)
+  state.weiterspielen = state.gewonnen;
   state.vorbei = false;
   state.auswahl = null; state.truppAuswahl = null; state.vorschau = null;
   state.terrainAlt = true;
@@ -2170,6 +2234,9 @@ async function partieBeitreten(code) {
     state.terrainAlt = true;
     // Die eigene Uhr ruht: Tempo und Pause kommen ab jetzt vom Gastgeber
     state.pause = false; state.mpHalt = false;
+    // Auch der Wettlauf beginnt für den Gast neu (sein eigenes Spiel zählt hier nicht)
+    state.rennenVorbei = false; state.gewonnen = false; state.weiterspielen = false;
+    state.vorbei = false; state.sieger = -1;
     if (state.startFrage) { state.startFrage = false; $('overlay').style.display = 'none'; }
     document.body.classList.add('gast');
     tempoAnzeigen();
@@ -2277,6 +2344,7 @@ function taktPaket() {
       t: Math.round(state.spielzeit),
       v: state.tempo,                       // Tempo und …
       p: spielLaeuft() ? 0 : 1,             // … Pause bestimmt der Gastgeber
+      sg: state.rennenVorbei ? state.sieger : -1,   // Wettlauf entschieden? Dann: wer hat gewonnen
       sp: spieler.map(sp => ({
         r: Object.keys(PREISE).concat('gold').map(w => Math.round(sp.res[w] * 10) / 10),
         s: sp.maxStufe, g: sp.gunst, k: Math.round(sp.kontingent),
@@ -2315,6 +2383,8 @@ function bautenPaket() {
 function standAnwenden(d) {
   if (!d || !istGast()) return;
   state.spielzeit = d.t || 0;
+  // Hat jemand den Wettlauf gewonnen? (Der Gast rechnet ja nicht selbst.)
+  if (d.sg >= 0) rennenEntschieden(d.sg);
   // Tempo und Pause des Gastgebers übernehmen und anzeigen
   const tempo = d.v || 1, pause = !!d.p;
   if (tempo !== state.tempo || pause !== MP.hostPause) {
@@ -2575,7 +2645,7 @@ function mpLaufendText() {
     <button class="knopf-grau" onclick="partieVerlassen()">Partie verlassen</button>`;
 }
 
-/* ---------- 4. HILFSFUNKTIONEN ------------------------------- *//* ---------- 4. HILFSFUNKTIONEN ------------------------------- */
+/* ---------- 4. HILFSFUNKTIONEN ------------------------------- */
 
 // Mittelpunkt eines Gebäudes in Kachel-Koordinaten
 function zentrum(geb) {
@@ -5538,19 +5608,10 @@ function simSchritt(dt) {
   } else state.pleiteZeit = 0;
 
   // --- Wettrennen: Wer erreicht zuerst das Siedler-Ziel? ---
+  // Es zählt für alle: dich, den Mitspieler und die Computergegner.
   if (!state.rennenVorbei) {
-    if (spieler[ICH].siedlerEw >= SIM.zielSiedler) {
-      state.rennenVorbei = true; state.gewonnen = true;
-      gewonnenAnzeigen();
-    } else {
-      for (const sp of spieler) {
-        if (sp.ki && sp.siedlerEw >= SIM.zielSiedler) {
-          state.rennenVorbei = true;
-          verlorenAnzeigen(sp);
-          break;
-        }
-      }
-    }
+    const sieger = spieler.find(sp => sp.siedlerEw >= SIM.zielSiedler);
+    if (sieger) rennenEntschieden(sieger.id);
   }
 
   // Werte für die Anzeige merken (deine Sicht)
@@ -8347,6 +8408,7 @@ window.addEventListener('keydown', e => {
     case '2': tempoSetzen(2); break;
     case '3': tempoSetzen(3); break;
     case 'Escape':
+      if (state.anleitung) { anleitungSchliessen(); break; }
       werkzeugWaehlen('zeiger');
       state.auswahl = null; truppAbwaehlen();
       break;
@@ -9243,22 +9305,44 @@ function spielVorbei() {
        Erreichte Siedler: <b>${state.siedlerEw || 0}</b> von ${SIM.zielSiedler}.</p>
     <button class="knopf-gruen" onclick="location.reload()">Neue Insel besiedeln</button>`;
 }
+// Das Wettrennen ist entschieden: dem Sieger gratulieren, allen anderen
+// Bescheid geben. Beim Gastgeber ruft das die Simulation auf, beim Gast
+// die Standmeldung (dort steht, wer gewonnen hat).
+function rennenEntschieden(sid) {
+  if (state.rennenVorbei || !spieler[sid]) return;
+  state.rennenVorbei = true;
+  state.sieger = sid;
+  if (sid === ICH) { state.gewonnen = true; gewonnenAnzeigen(); }
+  else verlorenAnzeigen(spieler[sid]);
+}
+
+// Knöpfe unter „Ziel erreicht" und „… gewinnt": weiterspielen oder neu
+// beginnen. Im Spiel zu zweit tritt an die Stelle des Neubeginns das
+// Beenden (Gastgeber) bzw. Verlassen (Gast) der Partie – ein bloßes
+// Neuladen ließe den anderen ohne Erklärung zurück.
+function rennenKnoepfe(neuText) {
+  const weiter = `<button class="knopf-grau" onclick="weiterspielen()">Weiterspielen</button>`;
+  if (istGastgeber())
+    return weiter + `<button class="knopf-gruen" onclick="weiterspielen(); partieBeenden()">Partie beenden</button>`;
+  if (istGast())
+    return weiter + `<button class="knopf-gruen" onclick="partieVerlassen()">Partie verlassen</button>`;
+  return weiter + `<button class="knopf-gruen" onclick="location.reload()">${neuText}</button>`;
+}
 function gewonnenAnzeigen() {
   $('overlay').style.display = 'flex';
   $('overlay-box').innerHTML = `
     <div class="gross">🎉</div>
     <h1>Ziel erreicht!</h1>
-    <p>${SIM.zielSiedler} Siedler leben auf deiner Insel – ohne Bankrott.<br>
+    <p>${SIM.zielSiedler} Siedler leben auf deinen Inseln – du hast den Wettlauf gewonnen.<br>
        Eine blühende Siedlung! Du kannst weiterspielen oder neu beginnen.</p>
-    <button class="knopf-grau" onclick="weiterspielen()">Weiterspielen</button>
-    <button class="knopf-gruen" onclick="location.reload()">Neue Insel</button>`;
+    ${rennenKnoepfe('Neue Insel')}`;
 }
 function weiterspielen() {
   state.weiterspielen = true;
   $('overlay').style.display = 'none';
 }
 
-// Eine KI hat das Wettrennen gewonnen
+// Jemand anderes hat das Wettrennen gewonnen
 function verlorenAnzeigen(sp) {
   $('overlay').style.display = 'flex';
   $('overlay-box').innerHTML = `
@@ -9266,10 +9350,85 @@ function verlorenAnzeigen(sp) {
     <h1>${sp.name} gewinnt das Wettrennen!</h1>
     <p><span style="color:${sp.farbe}">● ${sp.name}</span> hat zuerst ${SIM.zielSiedler} Siedler erreicht.<br>
        Deine Siedlung: <b>${spieler[ICH].siedlerEw}</b> Siedler.<br>
-       Du kannst trotzdem weiterbauen – oder eine neue Welt versuchen.</p>
-    <button class="knopf-grau" onclick="weiterspielen()">Weiterspielen</button>
-    <button class="knopf-gruen" onclick="location.reload()">Neue Welt</button>`;
+       Du kannst trotzdem weiterbauen${MP.an ? '.' : ' – oder eine neue Welt versuchen.'}</p>
+    ${rennenKnoepfe('Neue Welt')}`;
 }
+
+/* ---------- 9b. KURZE ANLEITUNG ------------------------------- */
+// Sechs kurze Karten für den Einstieg. Sie erscheinen beim allerersten
+// Start von selbst, lassen sich jederzeit überspringen und später über
+// den Knopf ❓ in der Leiste wieder aufschlagen. Solange sie offen sind,
+// ruht die Welt – niemand verliert beim Lesen seinen Vorsprung.
+const ANLEITUNG_MERKER = 'inselspiel-anleitung';   // „schon gesehen" im Browser-Speicher
+const ANLEITUNG = [
+  { bild: '🏝️', titel: 'Willkommen, Inselgründer!', punkte: [
+    `Dein Ziel: als Erste:r <b>${SIM.zielSiedler} Siedler</b> versammeln – schneller als deine Konkurrenten.`,
+    'Diese Einführung ist kurz, und du kannst sie jederzeit überspringen. Über <b>❓</b> oben in der Leiste findest du sie wieder.',
+  ] },
+  { bild: '⛵', titel: 'Such dir eine Insel', punkte: [
+    'Tippe aufs <b>Wasser</b>: Dein Schiff segelt dorthin.',
+    'Liegt es vor einer Küste, baust du dort dein <b>Kontor</b> – es kostet nichts.',
+    'Karte verschieben: wischen. Größer und kleiner: zwei Finger oder ＋ und −.',
+    'Du hast den ersten Zug. Die Insel, die du ansteuerst, lassen dir die Computergegner.',
+  ] },
+  { bild: '🏠', titel: 'Bau deine Siedlung', punkte: [
+    'Unten ein Gebäude wählen, den Bauplatz antippen und mit <b>✓</b> bestätigen.',
+    '<b>Wohnhäuser</b> brauchen ein Kontor oder einen Marktplatz in der Nähe. Ihre Bewohner zahlen Steuern.',
+    '<b>Holzfäller</b> liefern Holz, <b>Fischer</b> und <b>Jäger</b> Nahrung. Ohne Nahrung ziehen die Leute fort.',
+  ] },
+  { bild: '📈', titel: 'Lass sie aufsteigen', punkte: [
+    'Steht eine <b>Kapelle</b> in der Nähe, werden aus Pionieren <b>Siedler</b>. Erst sie zählen für das Ziel.',
+    'Siedler wünschen sich <b>Stoffe</b> (Schaffarm → Weberei) und <b>Alkohol</b> (Zuckerrohr → Brennerei).',
+    'Wer gut versorgt ist, steigt weiter auf: mehr Leute je Haus, mehr Steuern, neue Gebäude.',
+    'Tippe ein Haus an – es zeigt, was ihm zum Aufstieg fehlt.',
+  ] },
+  { bild: '💰', titel: 'Behalte die Kasse im Blick', punkte: [
+    'Oben steht dein <b>Gold</b> und daneben, wie viel je Sekunde dazukommt oder abfließt. Jeder Betrieb kostet Unterhalt.',
+    'Bleibt die Kasse eine Minute lang leer, bist du <b>bankrott</b>.',
+    'Tippe dein <b>Kontor</b> an: Dort kaufst du Fehlendes zu und verkaufst Überschüsse.',
+  ] },
+  { bild: '⚔️', titel: 'Du bist nicht allein', punkte: [
+    'Oben links steht der Stand des Wettlaufs. Ein Tipp darauf öffnet die <b>Diplomatie</b>.',
+    'Wer deutlich führt, weckt Neid: erst Sanktionen, später vielleicht Krieg. Geschenke besänftigen, <b>Wachtürme</b> und Kriegsschiffe schützen.',
+    'In der Leiste oben: Pause und Tempo. Gespeichert wird von selbst. Unter <b>🌐</b> spielt ihr zu zweit.',
+  ] },
+];
+let anleitungSeite = 0;
+
+function anleitungGesehen() {
+  try { return localStorage.getItem(ANLEITUNG_MERKER) === '1'; }
+  catch (e) { return true; }                // ohne Speicher lieber nicht bei jedem Start aufdrängen
+}
+function anleitungZeigen(seite = 0) {
+  anleitungSeite = Math.max(0, Math.min(ANLEITUNG.length - 1, seite));
+  state.anleitung = true;
+  const karte = ANLEITUNG[anleitungSeite];
+  const erste = anleitungSeite === 0, letzte = anleitungSeite === ANLEITUNG.length - 1;
+  $('anleitung-box').innerHTML = `
+    <div class="kopf">
+      <span>Anleitung · ${anleitungSeite + 1} von ${ANLEITUNG.length}</span>
+      <button class="leise" onclick="anleitungSchliessen()">${letzte ? 'Schließen' : 'Überspringen'} ✕</button>
+    </div>
+    <div class="gross">${karte.bild}</div>
+    <h1>${karte.titel}</h1>
+    <ul>${karte.punkte.map(p => `<li>${p}</li>`).join('')}</ul>
+    <div class="schritte">${ANLEITUNG.map((k, i) => `<span class="${i === anleitungSeite ? 'an' : ''}"></span>`).join('')}</div>
+    <div class="fuss">
+      ${erste ? '' : `<button class="knopf-grau" onclick="anleitungZeigen(${anleitungSeite - 1})">Zurück</button>`}
+      <span class="luft"></span>
+      ${letzte ? `<button class="knopf-gruen" onclick="anleitungSchliessen()">Los geht's</button>`
+               : `<button class="knopf-gruen" onclick="anleitungZeigen(${anleitungSeite + 1})">Weiter</button>`}
+    </div>`;
+  $('anleitung').style.display = 'flex';
+  $('anleitung-box').scrollTop = 0;
+}
+// Schließen – ob gelesen oder übersprungen: Von selbst erscheint sie danach nicht mehr
+function anleitungSchliessen() {
+  state.anleitung = false;
+  $('anleitung').style.display = 'none';
+  try { localStorage.setItem(ANLEITUNG_MERKER, '1'); } catch (e) {}
+}
+$('k-hilfe').addEventListener('click', () => anleitungZeigen(0));
 
 /* ---------- 10. MUSIK (Web Audio API) ------------------------- */
 // Ein sehr ruhiger, generativer Klangteppich: alle paar Sekunden ein
@@ -9359,8 +9518,8 @@ let uiTakt = 0;
 // zweit, bis der Mitspieler beigetreten ist. (Der Gastgeber meldet das
 // auch dem Gast, siehe taktPaket.)
 function spielLaeuft() {
-  return !state.pause && !state.startFrage && !state.mpHalt && !state.vorbei &&
-         (!state.gewonnen || state.weiterspielen);
+  return !state.pause && !state.startFrage && !state.anleitung && !state.mpHalt &&
+         !state.vorbei && (!state.gewonnen || state.weiterspielen);
 }
 
 function schleife(jetzt) {
@@ -9406,6 +9565,8 @@ for (const ware of Object.keys(PREISE)) {
 }
 // Alle starten im Frieden (leichte Grundspannung zwischen Konkurrenten)
 feindschaft = spieler.map((_, a) => spieler.map((_, b) => (a === b ? 0 : 25)));
+$('r-ziel').textContent = SIM.zielSiedler;
+$('ziel').title = 'Ziel des Wettlaufs: ' + SIM.zielSiedler + ' Siedler (alle über der Pionier-Stufe)';
 weltErzeugen();
 schiffStart();
 // Jede Partei bekommt ihr eigenes Schiff – alle liegen am selben Punkt
@@ -9431,7 +9592,8 @@ if (mpNeustart) {
   state.nachNeustart = true;
   mpFensterZeigen();
   partieEroeffnen();
-} else startFrageZeigen();
+} else if (standVorhanden()) startFrageZeigen();
+else if (!anleitungGesehen()) anleitungZeigen();     // allererster Start
 
 // Liegt ein Spielstand vor? Dann fragen, ob fortgesetzt werden soll.
 // Bis zur Antwort ruht die Welt – sonst wären die Computergegner in der
